@@ -15,6 +15,7 @@ Uso:  python bot.py        (queda escuchando; Ctrl+C para salir)
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
@@ -66,10 +67,16 @@ def parse_caption(text: str | None) -> dict:
             template = TEMPLATE_ALIASES[kw.strip().lower()]
             text = rest.strip()
 
+    # @handles de Instagram → para etiquetar al artista en el post (no en el texto del meme).
+    menciones = re.findall(r"@[A-Za-z0-9_.]+", text)
+    if menciones:
+        text = re.sub(r"@[A-Za-z0-9_.]+", "", text)
+
     parts = [p.strip() for p in text.split(",")]
     def at(i: int) -> str | None:
         return parts[i] if i < len(parts) and parts[i] else None
-    return {"template": template, "banda": at(0), "integrante": at(1), "rol": at(2), "tema": at(3)}
+    return {"template": template, "banda": at(0), "integrante": at(1), "rol": at(2),
+            "tema": at(3), "menciones": menciones}
 
 
 def _generate(item: dict) -> tuple[str, str]:
@@ -85,15 +92,23 @@ def _generate(item: dict) -> tuple[str, str]:
 
 
 def _approve(item: dict) -> str:
-    """Sync: sube el meme, crea la fila en el Sheet y le asigna horario. Devuelve el slot ISO."""
+    """Sube el meme, crea la fila y le asigna horario. Devuelve el slot ISO.
+
+    La caption FINAL (la que se publica en IG) lleva el texto del meme + los @handles
+    para etiquetar al artista. El texto del meme (la imagen) queda limpio, sin @.
+    """
     meme_url = host.upload(item["image_path"])
+    menciones = item.get("menciones") or []
+    caption_final = item["caption"]
+    if menciones:
+        caption_final = f"{item['caption']}\n\n{' '.join(menciones)}"
     row_id = sheets.append_row(
         banda=item["banda"] or "",
         integrante=item["integrante"] or "",
         rol=item["rol"] or "",
         tema_semilla=item["tema"] or "",
         caption_generado=item["caption"],
-        caption_final=item["caption"],
+        caption_final=caption_final,
         imagen_compuesta_url=meme_url,
         status=sheets.STATUS_PENDING,
         notas="ingresado por Telegram",
@@ -120,7 +135,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await tg_file.download_to_drive(str(photo_path))
 
     quien = " · ".join(v for v in (data["banda"], data["integrante"], data["rol"]) if v) or "(sin datos)"
-    await msg.reply_text(f"📥 Recibí la foto [{quien}] · plantilla: {data['template']}. Generando…")
+    tags = f" · etiquetar: {' '.join(data['menciones'])}" if data.get("menciones") else ""
+    await msg.reply_text(f"📥 Recibí la foto [{quien}] · plantilla: {data['template']}{tags}. Generando…")
 
     item = {**data, "photo_path": str(photo_path), "rechazados": []}
     cap, png = await asyncio.to_thread(_generate, item)

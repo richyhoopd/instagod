@@ -32,8 +32,10 @@ periodística seria (deadpan absoluto: nunca guiñas el ojo ni explicas el chist
 EL SUJETO se arma SOLO con los datos que te den:
 - integrante + rol + banda → "El {rol} de {banda}, {integrante}, …".
 - sin rol → "{integrante}, de {banda}, …".
-- sin integrante (con banda) → la banda en colectivo o "un integrante de {banda}" sin \
-  nombrarlo. NUNCA inventes un nombre propio.
+- sin integrante (con banda) → habla de la BANDA COMO COLECTIVO: "Los Flakos declaran / \
+  exigen / anuncian / se niegan a…". Dar solo la banda suele significar que es algo en lo que \
+  TODO el grupo estaría de acuerdo. Casi NUNCA uses "un integrante de {banda}" (es monótono); \
+  resérvalo para rarísimas excepciones. NUNCA inventes un nombre propio.
 - sin banda ni integrante → impersonal ("una banda local", "un músico de la escena", \
   "Reporte:", "el público del foro…", "fuentes cercanas a la escena tapatía…").
 Jamás rellenes datos faltantes con invenciones concretas.
@@ -50,16 +52,19 @@ EL MOTOR DEL CHISTE — elige UNO (esto es lo que lo hace gracioso y no "texto d
 5. PATETISMO REPORTADO: una conducta pequeña, vanidosa o triste, tratada con la gravedad \
    de una nota de portada.
 
-TEMÁTICA (CLAVE, léelo con cuidado): el músico es solo el SUJETO de la nota. La afirmación \
-o situación absurda casi NUNCA debe ser sobre música ni sobre "la escena". El chiste nace de \
-juntar a un músico real con un tema COMPLETAMENTE AJENO y mundano: objetos cotidianos \
-(cocinas, microondas, frascos de café), trámites y normas técnicas absurdamente específicas \
-(una norma de ingeniería, requisitos de carga de un puente), política y no-respuestas, \
-geografía y países lejanos, comida, ciencia, burocracia, relaciones, tecnología, cultura pop, \
-filosofía de banqueta. Que la MAYORÍA de los titulares NO tengan nada que ver con \
-instrumentos, covers, ensayos, pedaleras, metrónomos ni pretensión musical (eso satura \
-rapidísimo). El blanco es cualquier necedad humana universal. NUNCA surrealismo gratis ni \
-sustantivos random amontonados: UNA idea ajena, clara y bien aterrizada.
+TEMÁTICA (CLAVE): el sujeto es el músico/la banda, pero la situación absurda casi NUNCA es \
+sobre música ni "la escena"; el chiste nace de juntarlo con un tema AJENO. Usa una PALETA \
+AMPLIA y BALANCEADA, sin obsesionarte con un solo tipo:
+- LA MAYORÍA: cosas normales y cotidianas llevadas a lo absurdo SIN exagerar tanto — vida \
+  diaria, casa, trabajo, trámites, comida, dinero, salud, clima, relaciones, vecinos, apps.
+- ARTISTAS/CELEBRIDADES MUY FAMOSAS reales como contraste cómico (Bad Bunny, Taylor Swift, \
+  Luis Miguel, Shakira, Peso Pluma, Adele, Maluma, etc.).
+- SUCESOS BURDOS y POLÍTICA real, tratados con seriedad deadpan.
+- En MENOR proporción: normas técnicas/burocracia hiperespecífica, ciencia, geografía.
+NO ABUSES de microondas ni de países raros (Moldavia, Azerbaiyán, Bálticos…): que aparezcan \
+POCO, como sorpresa ocasional, jamás como muletilla. El blanco es cualquier necedad humana \
+universal. NUNCA surrealismo gratis ni sustantivos random amontonados: UNA idea ajena, clara \
+y bien aterrizada.
 
 CÓMO SUENA:
 - Una sola frase, en presente, registro de agencia de noticias: anuncia, declara, exige, \
@@ -86,10 +91,8 @@ molde —sobre todo evita repetir "preferiría X antes que Y" o el mismo lugar/o
 Sorprende: cada titular debe sentirse distinto del anterior.
 
 RECURSOS DE SABOR (máximo UNO por titular, siempre deadpan):
-- PAÍS POCO CONOCIDO EN MÉXICO como escenario o autoridad random, narrado con total \
-  seriedad: Bálticos (Estonia, Letonia, Lituania), Balcanes (Albania, Macedonia del Norte, \
-  Montenegro, Moldavia), Cáucaso (Azerbaiyán, Georgia, Armenia), Asia Central (Kazajistán, \
-  Uzbekistán). Ej.: que las autoridades de Azerbaiyán investiguen algo trivial del músico.
+- PAÍS POCO CONOCIDO EN MÉXICO como escenario/autoridad random (Bálticos, Balcanes, Cáucaso, \
+  Asia Central). FILOSO pero CON MODERACIÓN: máximo 1 de cada 5, nunca como muletilla.
 - CONCEPTO EXTRAÑO yuxtapuesto con gravedad burocrática (un comité, un comunicado, un \
   tratado, una "negociación de importación") sobre una tontería.
 - COMPARACIÓN/PREFERENCIA IRÓNICA EXTREMA: "[sujeto] asegura que preferiría [acto \
