@@ -167,6 +167,19 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     PENDING.pop(token, None)
 
 
+async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reporta cualquier error del handler al chat, en vez de fallar en silencio."""
+    import traceback
+    err = "".join(traceback.format_exception_only(type(ctx.error), ctx.error)).strip()
+    print("ERROR:", err)
+    traceback.print_exception(type(ctx.error), ctx.error, ctx.error.__traceback__)
+    try:
+        if isinstance(update, Update) and update.effective_chat:
+            await ctx.bot.send_message(update.effective_chat.id, f"⚠️ Error generando: {err}")
+    except Exception:
+        pass
+
+
 def main() -> None:
     if not config.TELEGRAM_CHAT_ID:
         raise RuntimeError("Falta TELEGRAM_CHAT_ID en el .env")
@@ -174,6 +187,7 @@ def main() -> None:
     solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))  # ignora a cualquier otro
     app.add_handler(MessageHandler(filters.PHOTO & solo_tu, on_photo))
     app.add_handler(CallbackQueryHandler(on_callback))
+    app.add_error_handler(on_error)
     print("Bot escuchando. Mándale una foto con 'banda, integrante, rol' en la descripción.")
     print("Ctrl+C para salir.")
     app.run_polling(drop_pending_updates=True)
