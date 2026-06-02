@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family:'Anton'; src:url('{{ fonts_dir }}/Anton-Regular.ttf') format('truetype'); font-weight:400; }
+  @font-face { font-family:'Poppins'; src:url('{{ fonts_dir }}/Poppins-Bold.ttf') format('truetype'); font-weight:700; }
+
+  :root { --green:#1b5e3f; --accent:#33d77a; --w:1080px; --h:1350px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:var(--w); height:var(--h); }
+
+  .card {
+    width:var(--w); height:var(--h); position:relative; overflow:hidden; background:#111;
+    background-image:url('{{ foto_url }}'); background-size:cover; background-position:center;
+  }
+  /* Oscurecido general + degradado fuerte abajo para legibilidad del texto. */
+  .overlay {
+    position:absolute; inset:0;
+    background:
+      linear-gradient(to bottom, rgba(0,0,0,.15) 0%, rgba(0,0,0,.05) 38%, rgba(0,0,0,.78) 78%, rgba(0,0,0,.92) 100%),
+      rgba(0,0,0,.12);
+  }
+  .content { position:absolute; left:0; right:0; bottom:0; padding:0 56px 70px; }
+
+  .tag {
+    display:inline-block; background:var(--green); color:#fff; font-family:'Poppins',sans-serif; font-weight:700;
+    font-size:34px; letter-spacing:2px; padding:8px 22px; border-radius:6px; margin-bottom:22px;
+  }
+  .headline {
+    font-family:'Anton',sans-serif; text-transform:uppercase; color:#fff;
+    font-size:92px; line-height:.98; letter-spacing:.5px;
+    text-shadow:0 2px 18px rgba(0,0,0,.55);
+  }
+  .headline .hl { color:var(--accent); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="overlay"></div>
+    <div class="content">
+      <div class="tag">{{ tag_text }}</div>
+      <div class="headline" id="caption" data-maxh="760">{{ caption_html|safe }}</div>
+    </div>
+  </div>
+  <script>
+    function fitCaption() {
+      const el = document.getElementById('caption');
+      const maxH = parseFloat(el.dataset.maxh);
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      const minSize = 40;
+      while ((el.scrollHeight > maxH || el.scrollWidth > el.clientWidth) && size > minSize) {
+        size -= 2; el.style.fontSize = size + 'px';
+      }
+      window.__captionFitted = true;
+    }
+    document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(fitCaption)));
+  </script>
+</body>
+</html>

@@ -28,6 +28,8 @@ DEEPSEEK_BASE_URL = _get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = _get("DEEPSEEK_MODEL", "deepseek-chat")
 ANTHROPIC_API_KEY = _get("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = _get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# Temperatura del LLM: más alta = captions más locos/impredecibles (DeepSeek va 0-2).
+CAPTION_TEMPERATURE = float(_get("CAPTION_TEMPERATURE", "1.05") or "1.05")
 
 # ---------- Google Sheets ----------
 GOOGLE_SA_JSON = _get("GOOGLE_SA_JSON", "./secrets/google-sa.json")

@@ -145,6 +145,20 @@ def get_due_rows(now: datetime | None = None) -> list[dict[str, Any]]:
     return due
 
 
+def append_row(**fields: Any) -> int:
+    """Crea una fila nueva con id auto-incremental. Devuelve el id asignado."""
+    ws = _worksheet()
+    ids = [int(r["id"]) for r in _records() if str(r.get("id", "")).strip().isdigit()]
+    new_id = (max(ids) + 1) if ids else 1
+    fields.setdefault("id", new_id)
+    for key in fields:
+        if key not in COLUMNS:
+            raise KeyError(f"Columna desconocida: {key}")
+    row = [fields.get(col, "") for col in COLUMNS]
+    ws.append_row(row, value_input_option="USER_ENTERED")
+    return new_id
+
+
 def update_row(row_id: int | str, **fields: Any) -> None:
     """Escribe `fields` en la fila cuyo `id` coincide. Idempotente por id."""
     ws = _worksheet()

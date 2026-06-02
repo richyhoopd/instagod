@@ -5,10 +5,13 @@ Carga `templates/meme.html`, inyecta variables con Jinja2 y renderiza a
 """
 from __future__ import annotations
 
+import html as html_mod
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pytz
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from playwright.sync_api import sync_playwright
 
@@ -19,13 +22,54 @@ FONTS_DIR = TEMPLATES_DIR / "assets" / "fonts"
 OUT_DIR = config.BASE_DIR / "out"
 
 WIDTH, HEIGHT = 1080, 1350
-DEFAULT_BADGE = "Our Annual Year 2025"
 DEFAULT_HANDLE = "@gdlscene"
+
+# Plantillas disponibles → archivo HTML. La key es la que se elige desde el bot.
+TEMPLATES = {
+    "clasica": "meme.html",      # foto arriba, titular serif negro sobre blanco
+    "verde": "meme_verde.html",  # invertida: fondo verde, texto blanco
+    "onion": "meme_onion.html",  # foto completa oscurecida, titular condensado abajo
+}
+
+# Palabras función que NO se colorean en la plantilla onion (el resto va en verde).
+_STOPWORDS = {
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "a",
+    "y", "o", "u", "e", "que", "en", "con", "por", "para", "su", "sus", "se", "lo",
+    "le", "les", "es", "son", "fue", "ha", "han", "como", "más", "pero", "tras",
+}
 
 _env = Environment(
     loader=FileSystemLoader(str(TEMPLATES_DIR)),
     autoescape=select_autoescape(["html"]),
 )
+
+
+def _current_year() -> int:
+    return datetime.now(pytz.timezone(config.TIMEZONE)).year
+
+
+def _default_badge() -> str:
+    return f"Our Annual Year {_current_year()}"
+
+
+def _to_src(value: str | None) -> str:
+    """URL remota → tal cual; ruta local → file:// URI (para Playwright)."""
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://", "data:", "file://")):
+        return value
+    return Path(value).resolve().as_uri()
+
+
+def _onion_html(caption: str) -> str:
+    """Envuelve cada palabra de contenido en <span class='hl'> (verde); las de función en blanco."""
+    out = []
+    for word in caption.split():
+        core = word.strip(".,;:¡!¿?\"'()—–-").lower()
+        cls = "" if core in _STOPWORDS else "hl"
+        safe = html_mod.escape(word)
+        out.append(f'<span class="{cls}">{safe}</span>' if cls else f"<span>{safe}</span>")
+    return " ".join(out)
 
 
 def _render_html(
@@ -34,14 +78,17 @@ def _render_html(
     foto_inset_url: str | None,
     badge_text: str,
     handle: str,
+    template: str,
 ) -> str:
-    template = _env.get_template("meme.html")
-    return template.render(
+    tpl = _env.get_template(TEMPLATES[template])
+    return tpl.render(
         fonts_dir=FONTS_DIR.as_uri(),
-        foto_url=foto_url,
-        foto_inset_url=foto_inset_url or "",
+        foto_url=_to_src(foto_url),
+        foto_inset_url=_to_src(foto_inset_url),
         caption=caption,
+        caption_html=_onion_html(caption),
         badge_text=badge_text,
+        tag_text=handle.lstrip("@").upper(),
         handle=handle,
     )
 
@@ -51,13 +98,21 @@ def compose(
     foto_url: str,
     foto_inset_url: str | None = None,
     *,
-    badge_text: str = DEFAULT_BADGE,
+    template: str = "clasica",
+    badge_text: str | None = None,
     handle: str = DEFAULT_HANDLE,
     out_path: str | Path | None = None,
     row_id: Any = None,
 ) -> Path:
-    """Renderiza el meme y devuelve la ruta del PNG generado."""
-    html = _render_html(caption, foto_url, foto_inset_url, badge_text, handle)
+    """Renderiza el meme y devuelve la ruta del PNG generado.
+
+    template: "clasica" | "verde" | "onion".
+    """
+    if template not in TEMPLATES:
+        raise ValueError(f"Plantilla desconocida: {template}. Opciones: {list(TEMPLATES)}")
+    html = _render_html(
+        caption, foto_url, foto_inset_url, badge_text or _default_badge(), handle, template
+    )
 
     if out_path is None:
         OUT_DIR.mkdir(exist_ok=True)
@@ -67,18 +122,28 @@ def compose(
         out_path = tmp
     out_path = Path(out_path)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=1)
-        page.set_content(html, wait_until="networkidle")
-        # Espera a que el script de auto-ajuste del titular termine.
-        try:
-            page.wait_for_function("window.__captionFitted === true", timeout=5000)
-        except Exception:
-            pass  # si falla el fit, igual renderiza con el tamaño base
-        card = page.locator(".card")
-        card.screenshot(path=str(out_path))
-        browser.close()
+    # La HTML se escribe a un archivo real y se carga con goto(file://): así el
+    # documento tiene origen file:// y Chromium SÍ carga recursos file:// (foto
+    # local + fuentes). Con set_content el origen es nulo y los bloquea.
+    OUT_DIR.mkdir(exist_ok=True)
+    fd, html_tmp = tempfile.mkstemp(prefix=".render_", suffix=".html", dir=str(OUT_DIR))
+    Path(html_tmp).write_text(html, encoding="utf-8")
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=1)
+            page.goto(Path(html_tmp).as_uri(), wait_until="networkidle")
+            # Espera a que el script de auto-ajuste del titular termine.
+            try:
+                page.wait_for_function("window.__captionFitted === true", timeout=5000)
+            except Exception:
+                pass  # si falla el fit, igual renderiza con el tamaño base
+            card = page.locator(".card")
+            card.screenshot(path=str(out_path))
+            browser.close()
+    finally:
+        Path(html_tmp).unlink(missing_ok=True)
 
     return out_path
 
