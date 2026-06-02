@@ -1,0 +1,8 @@
+# Dependencias mínimas del worker de publicación (Proceso B).
+# No incluye Playwright ni Telegram: la imagen ya está compuesta y hosteada.
+python-dotenv
+gspread
+google-auth
+google-auth-oauthlib
+requests
+pytz

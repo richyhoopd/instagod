@@ -1,0 +1,12 @@
+python-dotenv
+gspread
+google-auth
+google-auth-oauthlib   # OAuth de usuario (org bloquea llaves de service account)
+openai            # cliente para DeepSeek (OpenAI-compatible)
+anthropic         # solo si LLM_PROVIDER=claude
+playwright
+jinja2
+cloudinary
+python-telegram-bot
+requests
+pytz

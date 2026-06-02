@@ -1,0 +1,38 @@
+name: publish
+
+# Proceso B — worker de publicación. Corre cada hora; el filtro real es
+# scheduled_datetime <= now() dentro de publish.py.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {}   # permite dispararlo a mano desde la pestaña Actions
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      GOOGLE_AUTHORIZED_USER: ./secrets/authorized-user.json
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_GRAPH_BASE: ${{ secrets.IG_GRAPH_BASE }}
+      IG_API_VERSION: ${{ secrets.IG_API_VERSION }}
+      TIMEZONE: ${{ secrets.TIMEZONE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependencias (mínimas, sin Playwright)
+        run: pip install -r requirements-publish.txt
+
+      - name: Materializar token OAuth desde el secret
+        run: |
+          mkdir -p secrets
+          printf '%s' '${{ secrets.GOOGLE_AUTHORIZED_USER }}' > secrets/authorized-user.json
+
+      - name: Publicar lo que esté vencido
+        run: python publish.py

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Tinos';
+    src: url('{{ fonts_dir }}/Tinos-Regular.ttf') format('truetype');
+    font-weight: 400; font-style: normal;
+  }
+  @font-face {
+    font-family: 'Tinos';
+    src: url('{{ fonts_dir }}/Tinos-Bold.ttf') format('truetype');
+    font-weight: 700; font-style: normal;
+  }
+  @font-face {
+    font-family: 'Tinos';
+    src: url('{{ fonts_dir }}/Tinos-Italic.ttf') format('truetype');
+    font-weight: 400; font-style: italic;
+  }
+  @font-face {
+    font-family: 'Poppins';
+    src: url('{{ fonts_dir }}/Poppins-SemiBold.ttf') format('truetype');
+    font-weight: 600; font-style: normal;
+  }
+
+  :root {
+    --green: #1b5e3f;
+    --w: 1080px;
+    --h: 1350px;
+    --photo-h: 880px;   /* alto de la zona de la foto (top ~2/3) */
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { width: var(--w); height: var(--h); }
+
+  .card {
+    width: var(--w);
+    height: var(--h);
+    background: #ffffff;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------- Zona de la foto ---------- */
+  .photo {
+    position: relative;
+    width: 100%;
+    height: var(--photo-h);
+    background-image: url('{{ foto_url }}');
+    background-size: cover;
+    background-position: center top;
+    background-color: #222;
+  }
+
+  /* Inset circular abajo-izquierda con anillo verde */
+  .inset {
+    position: absolute;
+    left: 64px;
+    bottom: 36px;
+    width: 300px;
+    height: 300px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 7px solid var(--green);
+    background-image: url('{{ foto_inset_url }}');
+    background-size: cover;
+    background-position: center;
+    background-color: #eee;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  }
+
+  /* Línea divisoria verde a la altura del borde foto/blanco */
+  .divider {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: var(--photo-h);
+    height: 4px;
+    background: var(--green);
+    transform: translateY(-2px);
+  }
+
+  /* Badge verde montado sobre la línea divisoria */
+  .badge {
+    position: absolute;
+    top: var(--photo-h);
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--green);
+    color: #ffffff;
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    font-size: 38px;
+    letter-spacing: .2px;
+    padding: 14px 34px;
+    border-radius: 12px;
+    white-space: nowrap;
+    box-shadow: 0 3px 10px rgba(0,0,0,.18);
+  }
+
+  /* ---------- Zona blanca: titular ---------- */
+  .body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 70px 70px 54px;
+  }
+
+  .caption-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .caption {
+    font-family: 'Tinos', 'Times New Roman', serif;
+    font-weight: 700;
+    color: #0a0a0a;
+    text-align: center;
+    line-height: 1.18;
+    font-size: 58px;     /* base; el script lo reduce hasta que ajuste */
+  }
+
+  /* ---------- Footer: @handle entre líneas verdes ---------- */
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 22px;
+  }
+  .footer .line {
+    flex: 1;
+    height: 4px;
+    background: var(--green);
+    max-width: 230px;
+  }
+  .footer .handle {
+    font-family: 'Tinos', 'Times New Roman', serif;
+    font-weight: 700;
+    color: var(--green);
+    font-size: 46px;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="photo">
+      {% if foto_inset_url %}<div class="inset"></div>{% endif %}
+    </div>
+    <div class="divider"></div>
+    <div class="badge">{{ badge_text }}</div>
+
+    <div class="body">
+      <div class="caption-wrap">
+        <div class="caption" id="caption">{{ caption }}</div>
+      </div>
+      <div class="footer">
+        <div class="line"></div>
+        <div class="handle">{{ handle }}</div>
+        <div class="line"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Auto-ajuste: reduce el tamaño del titular hasta que entre en su contenedor.
+    function fitCaption() {
+      const el = document.getElementById('caption');
+      const wrap = el.parentElement;
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      const minSize = 30;
+      while ((el.scrollHeight > wrap.clientHeight || el.scrollWidth > wrap.clientWidth) && size > minSize) {
+        size -= 1;
+        el.style.fontSize = size + 'px';
+      }
+      window.__captionFitted = true;
+    }
+    document.fonts.ready.then(fitCaption);
+  </script>
+</body>
+</html>

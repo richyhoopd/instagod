@@ -1,0 +1,38 @@
+# === SECRETS — nunca subir ===
+.env
+.env.*
+!.env.example
+secrets/
+*.json.key
+google-sa.json
+
+# Docs de planeación con valores reales (tokens, IDs, llaves)
+ENV_completo_gdlscene.txt
+setup_credenciales.md
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# === Imágenes temporales compuestas ===
+*.png
+!templates/assets/**/*.png
+out/
+tmp/
+
+# === Playwright ===
+playwright-report/
+.cache/
+
+# === OS / editor ===
+.DS_Store
+.vscode/
+.idea/

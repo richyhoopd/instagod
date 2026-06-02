@@ -1,0 +1,40 @@
+name: refresh-token
+
+# Proceso C — refresca el long-lived token de Instagram (vence a 60 días).
+# Mensual: con margen de sobra antes del vencimiento.
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_GRAPH_BASE: ${{ secrets.IG_GRAPH_BASE }}
+      IG_API_VERSION: ${{ secrets.IG_API_VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install requests python-dotenv
+
+      - name: Refrescar token y capturarlo
+        id: refresh
+        run: |
+          NEW_TOKEN=$(python -c "from src.ig_token import refresh_long_lived_token as r; print(r()['access_token'])")
+          echo "::add-mask::$NEW_TOKEN"
+          echo "token=$NEW_TOKEN" >> "$GITHUB_OUTPUT"
+
+      # Requiere un PAT con permiso de secrets (secrets.GH_PAT). Si no lo tienes,
+      # borra este paso y actualiza el secret IG_ACCESS_TOKEN a mano con el log.
+      - name: Actualizar el secret IG_ACCESS_TOKEN
+        if: ${{ secrets.GH_PAT != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: gh secret set IG_ACCESS_TOKEN --body "${{ steps.refresh.outputs.token }}"
