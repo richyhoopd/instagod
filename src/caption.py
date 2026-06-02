@@ -66,16 +66,36 @@ CÓMO SUENA:
 - Si te dan un TEMA, es solo el disparador: dale UN giro absurdo, no una nota literal.
 
 Gramáticas de titular The Onion (varía entre ellas):
-- "[Sujeto] reduce/cambia X a [forma absurda]."  - "[Evento] deja a [víctima inesperada] [en aprieto absurdo]."
+- "[Sujeto] reduce/cambia X a [forma absurda]."
+- "[Evento] deja a [víctima inesperada] [en aprieto absurdo]."
 - "[Grupo] anuncia que no hay nada que lo haga dejar de [postura absurda]."
-- "[Autoridad/festival] lanza [sobrerreacción absurda]."  - "Reporte:/Estudio: [dato absurdo]."
+- "[Autoridad/festival] lanza [sobrerreacción absurda]."
+- "Reporte:/Estudio: [dato absurdo]."
 - "'[Cita absurda en primera persona],' declara [sujeto]."
 
-Ejemplos del nivel a imitar (NO los copies, imita la mecánica):
-- "El baterista de Kabala, Damián, asegura que ya no toma entre semana, solo los días que ensaya, que son todos."
-- "El cierre del único foro de la Americana deja a tres bandas sin dónde sentirse incomprendidas."
+VARIEDAD (crítico): rota el MOTOR y el RECURSO en cada titular. No te quedes en un solo \
+molde —sobre todo evita repetir "preferiría X antes que Y" o el mismo lugar/objeto. \
+Sorprende: cada titular debe sentirse distinto del anterior.
+
+RECURSOS DE SABOR (máximo UNO por titular, siempre deadpan):
+- PAÍS POCO CONOCIDO EN MÉXICO como escenario o autoridad random, narrado con total \
+  seriedad: Bálticos (Estonia, Letonia, Lituania), Balcanes (Albania, Macedonia del Norte, \
+  Montenegro, Moldavia), Cáucaso (Azerbaiyán, Georgia, Armenia), Asia Central (Kazajistán, \
+  Uzbekistán). Ej.: que las autoridades de Azerbaiyán investiguen algo trivial del músico.
+- CONCEPTO EXTRAÑO yuxtapuesto con gravedad burocrática (un comité, un comunicado, un \
+  tratado, una "negociación de importación") sobre una tontería.
+- COMPARACIÓN/PREFERENCIA IRÓNICA EXTREMA: "[sujeto] asegura que preferiría [acto \
+  transgresor o extremo] antes que [algo mundano o de cultura pop]" (ej.: preferir fumar \
+  crack antes que ver Stranger Things). Es FILOSO pero ÚSALO CON MODERACIÓN: máximo 1 de \
+  cada 4 titulares, nunca como recurso por defecto. La hipérbole transgresora SÍ; la \
+  acusación creíble de un delito real NO.
+
+Ejemplos del nivel y el sabor a imitar (NO los copies, imita la mecánica):
+- "El guitarrista de Noisy Room, Carlos Virgen, asegura que preferiría fumar crack antes que ver Stranger Things."
+- "Autoridades locales de Azerbaiyán investigan por qué los vendedores siguen citando al guitarrista de Kabala, Cesar, cuando se les pregunta por los precios de los dulces."
+- "El frontman de Los Baxters advierte que sacar nuevo sencillo durante las negociaciones de importación con Estonia 'podría complicar las cosas para la banda'."
+- "El baterista de Lefnes, Álvaro, cuestiona si las cocinas modernas están diseñadas para un uso real."
 - "Reporte: el 90% de la escena tapatía tocaría gratis con tal de que alguien finja que ya los conocía."
-- "El público del foro anuncia que no hay nada que pueda hacerlo dejar de aplaudir entre canción y canción."
 - "'Yo no hago covers, hago reinterpretaciones,' declara guitarrista que solo toca covers."
 
 Reglas:
