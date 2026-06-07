@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import config
-from src import db
+from src import db, spotify_match
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -957,3 +957,100 @@ def publicado_aplicar_prioridad(request: Request, band_id: int,
     if fila is None:
         raise HTTPException(404)
     return templates.TemplateResponse(request, "_publicado_banda_row.html", {"s": fila})
+
+
+# ============================== Spotify match ================================
+# Completar spotify_id de bandas activas 'pendiente': búsqueda en vivo + elección
+# manual, y un botón para el resolvedor por links de bio.
+# Spec: docs/superpowers/specs/2026-06-07-afinacion-datos-design.md (Frente B).
+
+@app.get("/spotify", response_class=HTMLResponse)
+def spotify_view(request: Request, aviso: str = "") -> HTMLResponse:
+    """Bandas activas sin id, cada una con su top-5 de candidatos (búsqueda en vivo).
+
+    Si Spotify no responde, la página carga igual con el error visible y sin
+    candidatos (el usuario aún puede pegar un id a mano o marcar "no está").
+    """
+    cx = db.connect()
+    try:
+        pendientes = db.rows(cx, """
+            SELECT * FROM bands
+             WHERE activa = 1 AND spotify_status = 'pendiente'
+             ORDER BY prioridad DESC, nombre COLLATE NOCASE
+        """)
+    finally:
+        cx.close()
+
+    error_global = None
+    sp = None
+    try:
+        sp = spotify_match.get_client()
+    except Exception as exc:  # noqa: BLE001 — sin credenciales/Spotify caído: degradar
+        error_global = f"Spotify no disponible: {exc}"
+
+    for b in pendientes:
+        b["candidatos"] = []
+        b["search_error"] = None
+        if sp is None:
+            continue
+        try:
+            b["candidatos"] = spotify_match.candidatos(sp, b["nombre"])
+        except Exception as exc:  # noqa: BLE001 — un fallo puntual no tira la página
+            b["search_error"] = str(exc)
+
+    return templates.TemplateResponse(request, "spotify.html",
+                                      {"bandas": pendientes, "error_global": error_global,
+                                       "aviso": aviso})
+
+
+@app.post("/spotify/{band_id}/elegir", response_class=HTMLResponse)
+def spotify_elegir(request: Request, band_id: int,
+                   spotify_id: str = Form(...)) -> HTMLResponse:
+    """Guarda el id elegido, marca 'ok' y registra releases. Devuelve vacío (HTMX
+    quita la fila)."""
+    spotify_id = spotify_id.strip()
+    if not spotify_id:
+        raise HTTPException(400, "spotify_id vacío")
+    cx = db.connect()
+    try:
+        if db.get(cx, "bands", band_id) is None:
+            raise HTTPException(404)
+        db.update(cx, "bands", band_id, spotify_id=spotify_id, spotify_status="ok")
+        try:
+            spotify_match._registrar_releases(spotify_match.get_client(), cx,
+                                              band_id, spotify_id)
+        except Exception as exc:  # noqa: BLE001 — el id ya quedó guardado; releases es bonus
+            print(f"♫ releases de {band_id}: ❌ {exc}")
+    finally:
+        cx.close()
+    return HTMLResponse("")
+
+
+@app.post("/spotify/{band_id}/no-esta", response_class=HTMLResponse)
+def spotify_no_esta(band_id: int) -> HTMLResponse:
+    """Marca que la banda no está en Spotify (no se vuelve a buscar). HTMX quita la fila."""
+    cx = db.connect()
+    try:
+        if db.get(cx, "bands", band_id) is None:
+            raise HTTPException(404)
+        db.update(cx, "bands", band_id, spotify_status="no_esta")
+    finally:
+        cx.close()
+    return HTMLResponse("")
+
+
+@app.post("/spotify/resolver-links", response_class=HTMLResponse)
+def spotify_resolver_links() -> RedirectResponse:
+    """Corre el resolvedor por links de bio y vuelve a /spotify con el resumen."""
+    from urllib.parse import quote
+    cx = db.connect()
+    try:
+        try:
+            res = spotify_match.resolver_links(cx)
+            aviso = (f"Links: {res['resueltas']} resueltas de {res['revisadas']} "
+                     f"({res['sin_link']} sin Spotify, {res['fallidas']} caídas)")
+        except Exception as exc:  # noqa: BLE001 — rate limit u otro: mostrarlo, no tirar la GUI
+            aviso = f"Resolvedor falló: {exc}"
+    finally:
+        cx.close()
+    return RedirectResponse(f"/spotify?aviso={quote(aviso)}", status_code=303)

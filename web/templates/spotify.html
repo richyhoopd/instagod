@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Spotify <span class="muted">({{ bandas|length }} pendientes)</span></h2>
+
+<p class="muted" style="max-width:760px;">
+  Bandas activas sin <code>spotify_id</code>. Los candidatos son el top-5 de la
+  búsqueda en Spotify (mercado MX); abre el link para oír y confirmar. Si la banda
+  no está en Spotify, márcala con "no está" para no volver a buscarla.
+</p>
+
+<div style="display:flex; gap:10px; align-items:center; margin:14px 0;">
+  <form method="post" action="/spotify/resolver-links">
+    <button type="submit" class="secundario"
+            title="Baja Linktree/DistroKid/lnk.to y saca el link de Spotify embebido">🔗 Resolver por links de bio</button>
+  </form>
+  {% if aviso %}<span class="muted">{{ aviso }}</span>{% endif %}
+</div>
+
+{% if error_global %}
+  <p class="chip" style="background:#fdecec; color:#b32626;">⚠ {{ error_global }}</p>
+{% endif %}
+
+<table>
+  <thead>
+    <tr><th>Banda</th><th>Link de bio</th><th>Candidatos en Spotify</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for b in bandas %}
+      {% include "_spotify_row.html" %}
+    {% else %}
+      <tr><td colspan="4" class="muted">No hay bandas pendientes. 🎉</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
