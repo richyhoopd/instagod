@@ -7,6 +7,13 @@
       {% if corriendo %}⚙️ Pipeline corriendo…{% else %}⚙️ Correr pipeline (scraping masivo){% endif %}
     </button>
   </form>
+  <form hx-post="/novedades" hx-target="#novedades-msg" hx-swap="innerHTML" style="display:inline;">
+    <button type="submit"
+            title="Detecta releases nuevos de las bandas con Spotify y avisa por Telegram">
+      🔄 Novedades
+    </button>
+  </form>
+  <span id="novedades-msg" style="margin-left:8px; font-size:13px;"></span>
 
   {% if corriendo or not vacio %}
   <div style="margin-top:10px; background:#0f1410; color:#cfe8d4; border-radius:8px; padding:12px 14px; font-size:13px;">

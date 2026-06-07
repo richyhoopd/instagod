@@ -26,7 +26,7 @@ import argparse
 import sys
 import time
 
-from src import classify, db, enrich_spotify, ingest_ig, parse_events
+from src import classify, db, enrich_spotify, ingest_ig, parse_events, spotify_match
 
 
 def _bandas_activas(handles: list[str] | None) -> list[str]:
@@ -64,8 +64,16 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
         classify.clasificar(objetivo)
     if "spotify" not in skip:
         print("\n── 3/4 Enriquecimiento Spotify ──")
+        # Primero resolvemos spotify_id por links de agregadores (sin LLM) y luego
+        # enriquecemos SOLO las que siguen 'pendiente'. Las que ya tienen id no se
+        # tocan aquí: su data viva (popularity/releases) la trae el cron de novedades.
         try:
-            enrich_spotify.enrich(objetivo)
+            cx = db.connect()
+            try:
+                spotify_match.resolver_links(cx)
+            finally:
+                cx.close()
+            enrich_spotify.enrich(objetivo, solo_pendientes=True)
         except RuntimeError as exc:  # faltan llaves → no abortamos el pipeline
             print(f"   (saltado: {exc})")
     if "events" not in skip:
