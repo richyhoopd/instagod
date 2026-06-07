@@ -24,6 +24,7 @@ TABLES: dict[str, set[str]] = {
     "bands": {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
         "popularity", "followers_spotify", "generos",
+        "genero_principal", "generos_fuente", "spotify_status",
         "followers_ig", "link_externo", "bio", "scraped_at",
         "n_integrantes", "prioridad", "notas",
     },
@@ -78,6 +79,12 @@ _MIGRATIONS = {
         "tipo": "TEXT NOT NULL DEFAULT 'banda'",
         "category_ig": "TEXT",
         "scraped_at": "TEXT",
+        # Afinación de datos: género de taxonomía fija (config.GENEROS), origen
+        # del dato ('llm'|'manual'; el batch nunca pisa manual) y estado del
+        # match de Spotify ('pendiente'|'ok'|'no_esta').
+        "genero_principal": "TEXT",
+        "generos_fuente": "TEXT",
+        "spotify_status": "TEXT NOT NULL DEFAULT 'pendiente'",
     },
     "events": {
         "titulo": "TEXT",
@@ -105,6 +112,10 @@ def init_db(cx: sqlite3.Connection) -> None:
         for col, ddl in cols.items():
             if col not in existentes:
                 cx.execute(f"ALTER TABLE {tabla} ADD COLUMN {col} {ddl}")
+    # Backfill idempotente: banda que ya tiene spotify_id cuenta como match 'ok'.
+    cx.execute("UPDATE bands SET spotify_status = 'ok' "
+               "WHERE spotify_id IS NOT NULL AND spotify_id != '' "
+               "  AND spotify_status = 'pendiente'")
     cx.commit()
 
 

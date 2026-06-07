@@ -126,6 +126,15 @@ POSTING_SLOTS = [s.strip() for s in
 # Tope de posts por banda al mes según su prioridad (1 = más atención).
 MONTHLY_CAP = {1: 5, 2: 2, 3: 1, 4: 1, 5: 1}
 
+# ---------- Taxonomía de géneros (clasificación LLM + filtros de la GUI) ----------
+# Lista CERRADA para genero_principal: segmentable y sin fragmentación de tags.
+# Los matices van como subtags libres en bands.generos (JSON).
+GENEROS = [
+    "punk", "garage", "indie", "shoegaze/dreampop", "post-punk", "hardcore",
+    "metal", "hip-hop", "electrónica", "experimental/noise", "pop",
+    "folk/cantautor", "cumbia/tropical", "funk/soul", "rock",
+]
+
 
 def _resolve(path: str | None) -> Path:
     """Ruta absoluta relativa a la raíz del repo."""

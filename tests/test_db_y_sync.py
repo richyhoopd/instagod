@@ -88,3 +88,21 @@ def test_generos_list_tolerante() -> None:
     assert db.generos_list({"generos": '["punk","garage"]'}) == ["punk", "garage"]
     assert db.generos_list({"generos": None}) == []
     assert db.generos_list({"generos": "no es json"}) == []
+
+
+def test_migraciones_afinacion_datos(cx) -> None:
+    """Columnas de la etapa de afinación + backfill de spotify_status."""
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(bands)")}
+    assert {"genero_principal", "generos_fuente", "spotify_status"} <= cols
+    # backfill: banda con spotify_id queda 'ok'; sin id queda 'pendiente'
+    con_id = db.insert(cx, "bands", nombre="ConId", spotify_id="abc123")
+    sin_id = db.insert(cx, "bands", nombre="SinId")
+    db.init_db(cx)  # re-correr aplica el backfill idempotente
+    assert db.get(cx, "bands", con_id)["spotify_status"] == "ok"
+    assert db.get(cx, "bands", sin_id)["spotify_status"] == "pendiente"
+
+
+def test_config_generos() -> None:
+    import config
+    assert isinstance(config.GENEROS, list) and len(config.GENEROS) >= 12
+    assert "punk" in config.GENEROS and "rock" in config.GENEROS
