@@ -28,6 +28,9 @@ env/
 out/
 tmp/
 
+# === Datos locales (SQLite + fotos escrapeadas) — nunca subir ===
+data/
+
 # === Playwright ===
 playwright-report/
 .cache/
@@ -36,3 +39,5 @@ playwright-report/
 .DS_Store
 .vscode/
 .idea/
+# token cache de Spotify (archivo, no directorio)
+.cache

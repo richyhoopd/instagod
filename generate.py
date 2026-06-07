@@ -13,21 +13,25 @@ import asyncio
 import config
 from src import caption as caption_mod
 from src import compose as compose_mod
-from src import host, scheduler, sheets, telegram_bot
+from src import db, host, scheduler, sheets, telegram_bot
 
 
 def _build_item(row: dict) -> dict:
     """Genera caption + imagen para una fila pending y arma el item de aprobación."""
+    tipo = db.tipo_de_actor(row.get("banda"))
     cap = caption_mod.generate_caption(
         banda=row.get("banda", ""),
         integrante=row.get("integrante", ""),
         rol=row.get("rol", ""),
         tema_semilla=row.get("tema_semilla") or None,
+        tipo=tipo,
     )
+    template = compose_mod.random_template()
     png = compose_mod.compose(
         caption=cap,
         foto_url=row.get("foto_url", ""),
         foto_inset_url=row.get("foto_inset_url") or None,
+        template=template,
         row_id=row.get("id"),
     )
     return {
@@ -41,26 +45,37 @@ def _build_item(row: dict) -> dict:
             "tema_semilla": row.get("tema_semilla") or None,
             "foto_url": row.get("foto_url", ""),
             "foto_inset_url": row.get("foto_inset_url") or None,
+            "tipo": tipo,
+            "template": template,
             "rechazados": [],  # captions rechazados acumulados para el prompt
         },
     }
 
 
 def _regenerate(item: dict) -> tuple[str, str]:
-    """Genera un caption nuevo (evitando los previos) y recompone la imagen."""
+    """Recompone la imagen.
+
+    Si `_solo_recomponer` (botón de plantilla): conserva el caption y recompone con
+    `meta["template"]`. Si `texto_exacto`/`feedback`: comandos de Telegram. Sin
+    nada: regenera el caption evitando los previos.
+    """
     meta = item["meta"]
-    meta["rechazados"].append(item["caption"])
-    cap = caption_mod.generate_caption(
-        banda=meta["banda"],
-        integrante=meta["integrante"],
-        rol=meta["rol"],
-        tema_semilla=meta["tema_semilla"],
-        rechazados=meta["rechazados"],
-    )
+    if meta.get("_solo_recomponer"):
+        cap = item["caption"]
+    elif meta.get("texto_exacto"):
+        cap = meta["texto_exacto"]
+    else:
+        meta["rechazados"].append(item["caption"])
+        cap = caption_mod.generate_caption(
+            banda=meta["banda"], integrante=meta["integrante"], rol=meta["rol"],
+            tema_semilla=meta["tema_semilla"], rechazados=meta["rechazados"],
+            tipo=meta.get("tipo", "banda"), feedback=meta.get("feedback"),
+        )
     png = compose_mod.compose(
         caption=cap,
         foto_url=meta["foto_url"],
         foto_inset_url=meta["foto_inset_url"],
+        template=meta.get("template", "clasica"),
         row_id=item["row_id"],
     )
     return cap, str(png)

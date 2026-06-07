@@ -31,7 +31,12 @@ def _ensure_config() -> None:
 
 
 def upload(image_path: str | Path, public_id: str | None = None) -> str:
-    """Sube el PNG y devuelve la URL pública (secure_url)."""
+    """Sube la imagen y devuelve la URL pública (secure_url), SIEMPRE como JPEG.
+
+    La Content Publishing API de IG solo acepta JPEG: un carrusel con PNGs
+    falla con "Media URI doesn't meet our requirements" (code 9004). Cloudinary
+    transcodifica al subir con format="jpg".
+    """
     _ensure_config()
     result = cloudinary.uploader.upload(
         str(image_path),
@@ -39,5 +44,6 @@ def upload(image_path: str | Path, public_id: str | None = None) -> str:
         public_id=public_id,
         overwrite=True,
         resource_type="image",
+        format="jpg",
     )
     return result["secure_url"]

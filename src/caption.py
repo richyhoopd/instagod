@@ -83,12 +83,17 @@ Gramáticas de titular The Onion (varía entre ellas):
 - "[Evento] deja a [víctima inesperada] [en aprieto absurdo]."
 - "[Grupo] anuncia que no hay nada que lo haga dejar de [postura absurda]."
 - "[Autoridad/festival] lanza [sobrerreacción absurda]."
-- "Reporte:/Estudio: [dato absurdo]."
-- "'[Cita absurda en primera persona],' declara [sujeto]."
+- "Reporte:/Estudio: [dato absurdo con cifra, ej. 'cae 74%']."
+- "'[Cita absurda en primera persona],' [declara/exclama/admite] [sujeto]."
+- "Todo lo que sabemos hasta ahora de [tema trivial]."
+- ULTRA CORTO de 3-6 palabras: "[Sujeto] sigue vivo." / "[Sujeto] tiene dudas, exclamó."
 
-VARIEDAD (crítico): rota el MOTOR y el RECURSO en cada titular. No te quedes en un solo \
-molde —sobre todo evita repetir "preferiría X antes que Y" o el mismo lugar/objeto. \
-Sorprende: cada titular debe sentirse distinto del anterior.
+VARIEDAD (crítico): rota el MOTOR, el RECURSO y la APERTURA en cada titular. \
+EVITA MULETILLAS AL INICIO: NO arranques siempre igual ("El [rol] de [banda]…", \
+"Reporte:", "[Nombre] anuncia/asegura…"). Alterna entre: titular directo sin sujeto al \
+frente, cita entrecomillada, reporte con cifra, frase ultra-corta, "Todo lo que sabemos…". \
+No repitas la MISMA estructura que el titular anterior. No abuses de "asegura que preferiría \
+X antes que Y" ni del mismo lugar/objeto. Cada titular debe SENTIRSE distinto del anterior.
 
 RECURSOS DE SABOR (máximo UNO por titular, siempre deadpan):
 - PAÍS POCO CONOCIDO EN MÉXICO como escenario/autoridad random (Bálticos, Balcanes, Cáucaso, \
@@ -119,6 +124,56 @@ Reglas:
 - Devuelve ÚNICAMENTE el titular, sin preámbulo ni explicación."""
 
 
+# Ramas por TIPO de actor. La voz base (SYSTEM_PROMPT) y el flujo de banda NO
+# cambian; para foro/evento/colectivo/solista se inyecta este bloque al inicio
+# del prompt de usuario, que redefine al SUJETO (es más específico → manda sobre
+# la sección genérica de "EL SUJETO" del system prompt). 'banda' no inyecta nada.
+TIPO_GUIA = {
+    "solista": (
+        "TIPO DE SUJETO: SOLISTA. {nombre} es UNA persona, su propio proyecto. Habla SIEMPRE "
+        "en singular, deadpan, a veces ULTRA CORTO. Ángulos: una afirmación mundana o un "
+        "estado trivial tratado como noticia; las dudas o el ego pequeño de una persona; "
+        "decisiones unipersonales que finge tomar en grupo. NUNCA lo trates como banda ni le "
+        "inventes integrantes.\n"
+        "Ejemplos del tono (imita la mecánica, NO copies): "
+        "\"{nombre} sigue viva.\" · \"{nombre} tiene dudas, exclamó.\" · "
+        "\"{nombre} anuncia que tomó la decisión por unanimidad consigo misma.\""
+    ),
+    "foro": (
+        "TIPO DE SUJETO: FORO/venue. {nombre} es un lugar (bar, sala, foro). NO es banda; no "
+        "le inventes integrantes ni canciones. Ángulos: el sonido y los monitores, el baño, "
+        "la barra, el cover, normas técnicas y trámites absurdos del local, el vecino que se "
+        "queja, la cerveza tibia. Trata su precariedad con orgullo o con gravedad de norma "
+        "oficial.\n"
+        "Ejemplos del tono: \"{nombre} aclara que el monitor no sirve desde 2019 por decisión "
+        "artística.\" · \"Inspección de {nombre} confirma que el baño cumple la norma mínima "
+        "de un foco.\""
+    ),
+    "evento": (
+        "TIPO DE SUJETO: EVENTO. {nombre} es un festival/ciclo/sesión/tocada (no una banda). "
+        "Ángulo principal: la mecánica o el gimmick del evento tratados con seriedad TÉCNICA "
+        "o BUROCRÁTICA absurda (normas, regulaciones, ciencia falsa); también el line-up, las "
+        "reglas y la organización.\n"
+        "Ejemplos del tono (este es el sabor exacto que busco): "
+        "\"Expertos en albercas de {nombre} afirman que el pH correcto de una piscina es 38 y "
+        "debe ceñirse a la Secretaría de Salud.\" · \"La organización de {nombre} confirma que "
+        "este año el cartel se decide por orden alfabético inverso para crear tensión.\""
+    ),
+    "colectivo": (
+        "TIPO DE SUJETO: COLECTIVO/sello/medio/promotor. {nombre} es una organización (no una "
+        "banda). Ángulos: el comunicado solemne, el comité que nadie eligió, la convocatoria, "
+        "la 'gestión cultural', el manifiesto, el reporte/estudio falso con cifra.\n"
+        "Ejemplos del tono: \"{nombre} emite un comunicado de 14 páginas sobre la urgencia de "
+        "reemplazar un cable auxiliar.\" · \"Reporte de {nombre}: el poder de la escena para "
+        "unir y sanar cae 74%.\""
+    ),
+}
+
+# Etiqueta del dato del sujeto en el prompt, según tipo.
+_ETIQUETA_SUJETO = {"banda": "Banda", "solista": "Solista",
+                    "foro": "Foro", "evento": "Evento", "colectivo": "Colectivo"}
+
+
 def _clean(value: str | None) -> str | None:
     """Normaliza vacíos/espacios a None (= dato ausente)."""
     v = (value or "").strip()
@@ -131,31 +186,36 @@ def _build_user_prompt(
     rol: str | None,
     tema_semilla: str | None,
     rechazados: list[str] | None,
+    tipo: str = "banda",
+    feedback: str | None = None,
 ) -> str:
     ejemplos = "\n".join(f"- {e}" for e in FEW_SHOT_POSITIVOS)
-    partes = [
-        "Ejemplos del estilo y la voz a imitar:",
-        ejemplos,
-        "",
-        "Datos disponibles para el nuevo titular (usa SOLO los presentes):",
-    ]
+    partes = ["Ejemplos del estilo y la voz a imitar:", ejemplos, ""]
+
+    # Rama por tipo: para no-banda, redefine al sujeto antes de los datos.
+    if tipo in TIPO_GUIA and banda:
+        partes += [TIPO_GUIA[tipo].format(nombre=banda), ""]
+
+    partes.append("Datos disponibles para el nuevo titular (usa SOLO los presentes):")
+    etiqueta = _ETIQUETA_SUJETO.get(tipo, "Banda")
     presentes = []
     if banda:
-        partes.append(f"- Banda: {banda}")
+        partes.append(f"- {etiqueta}: {banda}")
         presentes.append("banda")
-    if integrante:
-        partes.append(f"- Integrante: {integrante}")
-        presentes.append("integrante")
-    if rol:
-        partes.append(f"- Rol: {rol}")
-        presentes.append("rol")
-
-    faltantes = [c for c in ("banda", "integrante", "rol") if c not in presentes]
-    if faltantes:
-        partes.append(
-            f"- Datos AUSENTES: {', '.join(faltantes)}. No los inventes; hazlo más "
-            "impersonal/ambiguo y compensa con un absurdo más extraño."
-        )
+    # Integrante/rol solo aplican a banda y solista (un foro no tiene baterista).
+    if tipo in ("banda", "solista"):
+        if integrante:
+            partes.append(f"- Integrante: {integrante}")
+            presentes.append("integrante")
+        if rol:
+            partes.append(f"- Rol: {rol}")
+            presentes.append("rol")
+        faltantes = [c for c in ("banda", "integrante", "rol") if c not in presentes]
+        if faltantes:
+            partes.append(
+                f"- Datos AUSENTES: {', '.join(faltantes)}. No los inventes; hazlo más "
+                "impersonal/ambiguo y compensa con un absurdo más extraño."
+            )
 
     if tema_semilla:
         partes.append(f"- Pista de tema (úsala como semilla, no literal): {tema_semilla}")
@@ -168,6 +228,11 @@ def _build_user_prompt(
             "Titulares ya RECHAZADos para estos datos (NO los repitas ni te parezcas):",
             negativos,
         ]
+    if feedback:
+        partes += [
+            "",
+            f"RETROALIMENTACIÓN del editor (síguela al pie de la letra): {feedback}",
+        ]
     partes += ["", "Escribe un titular nuevo siguiendo el patrón."]
     return "\n".join(partes)
 
@@ -179,18 +244,22 @@ def generate_caption(
     tema_semilla: str | None = None,
     rechazados: list[str] | None = None,
     *,
+    tipo: str = "banda",
+    feedback: str | None = None,
     temperature: float | None = None,
 ) -> str:
     """Genera UN titular. La regeneración se hace volviendo a llamar esta función.
 
-    Campos vacíos o ausentes (banda/integrante/rol) se omiten del prompt: el
-    titular se vuelve más impersonal/ambiguo y más absurdo. Nunca se inventan datos.
+    `tipo` (banda|solista|foro|evento|colectivo) elige el ÁNGULO del chiste: para
+    no-banda, `banda` lleva el nombre del actor (foro/evento/colectivo) y el prompt
+    redefine al sujeto. Campos vacíos/ausentes se omiten; nunca se inventan datos.
     `rechazados`: titulares previos rechazados para estos datos, para evitar repetir.
     """
     if temperature is None:
         temperature = config.CAPTION_TEMPERATURE
     user_prompt = _build_user_prompt(
-        _clean(banda), _clean(integrante), _clean(rol), _clean(tema_semilla), rechazados
+        _clean(banda), _clean(integrante), _clean(rol), _clean(tema_semilla),
+        rechazados, tipo if tipo in _ETIQUETA_SUJETO else "banda", _clean(feedback),
     )
     if config.LLM_PROVIDER == "claude":
         text = _via_anthropic(user_prompt, temperature)

@@ -29,7 +29,27 @@ TEMPLATES = {
     "clasica": "meme.html",      # foto arriba, titular serif negro sobre blanco
     "verde": "meme_verde.html",  # invertida: fondo verde, texto blanco
     "onion": "meme_onion.html",  # foto completa oscurecida, titular condensado abajo
+    "anuncio": "anuncio.html",   # flyer completo + línea informativa (Fase 5; dato fiel)
 }
+
+# Plantillas de MEME y sus pesos: la clásica domina, verde/onion con moderación.
+MEME_TEMPLATES = ["clasica", "verde", "onion"]
+_TEMPLATE_WEIGHTS = [70, 15, 15]
+
+
+def random_template() -> str:
+    """Elige plantilla de meme con pesos (mayormente clásica, verde/onion ocasional)."""
+    import random
+    return random.choices(MEME_TEMPLATES, weights=_TEMPLATE_WEIGHTS, k=1)[0]
+
+
+def siguiente_template(actual: str) -> str:
+    """Cicla a la siguiente plantilla de meme (clasica→verde→onion→clasica)."""
+    try:
+        i = MEME_TEMPLATES.index(actual)
+    except ValueError:
+        return MEME_TEMPLATES[0]
+    return MEME_TEMPLATES[(i + 1) % len(MEME_TEMPLATES)]
 
 # Palabras función que NO se colorean en la plantilla onion (el resto va en verde).
 _STOPWORDS = {
@@ -114,10 +134,16 @@ def compose(
         caption, foto_url, foto_inset_url, badge_text or _default_badge(), handle, template
     )
 
+    return _screenshot_card(html, out_path=out_path, row_id=row_id)
+
+
+def _screenshot_card(html: str, *, out_path: str | Path | None = None,
+                     row_id: Any = None, prefix: str = "meme") -> Path:
+    """HTML (con un nodo .card) → PNG vía Chromium headless. Motor compartido."""
     if out_path is None:
         OUT_DIR.mkdir(exist_ok=True)
         suffix = f"_{row_id}" if row_id is not None else ""
-        fd, tmp = tempfile.mkstemp(prefix=f"meme{suffix}_", suffix=".png", dir=str(OUT_DIR))
+        fd, tmp = tempfile.mkstemp(prefix=f"{prefix}{suffix}_", suffix=".png", dir=str(OUT_DIR))
         Path(tmp).unlink(missing_ok=True)  # solo queremos el nombre único
         out_path = tmp
     out_path = Path(out_path)
@@ -146,6 +172,19 @@ def compose(
         Path(html_tmp).unlink(missing_ok=True)
 
     return out_path
+
+
+def render_card(template_file: str, ctx: dict[str, Any], *,
+                out_path: str | Path | None = None, row_id: Any = None,
+                prefix: str = "card") -> Path:
+    """Renderiza CUALQUIER plantilla de templates/ a PNG con el motor del meme.
+
+    Para formatos con estructura propia (p. ej. la agenda de eventos), donde
+    las variables fijas de `compose()` no alcanzan. `fonts_dir` va siempre.
+    """
+    tpl = _env.get_template(template_file)
+    html = tpl.render(fonts_dir=FONTS_DIR.as_uri(), **ctx)
+    return _screenshot_card(html, out_path=out_path, row_id=row_id, prefix=prefix)
 
 
 if __name__ == "__main__":

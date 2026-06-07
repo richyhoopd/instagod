@@ -66,3 +66,43 @@ def assign_slot(row_id: int | str, *, now: datetime | None = None) -> str:
     iso = slot.isoformat()
     sheets.update_row(row_id, scheduled_datetime=iso, status=sheets.STATUS_APPROVED)
     return iso
+
+
+def next_free_slot_before(
+    fecha_evento: str,
+    *,
+    now: datetime | None = None,
+    taken: set[str] | None = None,
+) -> datetime | None:
+    """Modo "urgente" (anuncios): primer slot libre ANTES del evento.
+
+    A diferencia de `next_free_slot`, considera los slots de HOY que aún no
+    pasan (un anuncio no puede esperar al hueco genérico de mañana). El límite
+    es el día del evento inclusive — anunciar "hoy toca X" sigue siendo útil —
+    pero con tope a las 20:00 de ese día si la fecha no trae hora.
+    Devuelve None si no hay slot posible (evento ya pasado).
+    """
+    tz = _tz()
+    now = now or datetime.now(tz)
+    if now.tzinfo is None:
+        now = tz.localize(now)
+
+    limite = datetime.fromisoformat(fecha_evento[:10] + "T20:00")
+    limite = tz.localize(limite)
+    if limite <= now:
+        return None
+
+    slots = _slot_times()[: max(1, config.POSTS_PER_DAY)]
+    taken = taken if taken is not None else _taken_slots()
+
+    day = now.date()  # urgente: hoy cuenta
+    while True:
+        for slot in slots:
+            candidate = tz.localize(datetime.combine(day, slot))
+            if candidate <= now or candidate > limite:
+                continue
+            if candidate.strftime("%Y-%m-%dT%H:%M") not in taken:
+                return candidate
+        day += timedelta(days=1)
+        if datetime.combine(day, time(0, 0)) > limite.replace(tzinfo=None):
+            return None

@@ -30,18 +30,23 @@ from telegram.ext import (
 import config
 from src import caption as caption_mod
 from src import compose as compose_mod
-from src import host, scheduler, sheets
+from src import db, host, scheduler, sheets
 
 # token (= message_id del usuario) → item en proceso de aprobación
 PENDING: dict[str, dict] = {}
 
 
 def _keyboard(token: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Aprobar", callback_data=f"approve:{token}"),
-        InlineKeyboardButton("❌ Rechazar", callback_data=f"reject:{token}"),
-        InlineKeyboardButton("🔄 Regenerar", callback_data=f"regen:{token}"),
-    ]])
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Aprobar", callback_data=f"approve:{token}"),
+            InlineKeyboardButton("❌ Rechazar", callback_data=f"reject:{token}"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Regenerar", callback_data=f"regen:{token}"),
+            InlineKeyboardButton("🎨 Plantilla", callback_data=f"tpl:{token}"),
+        ],
+    ])
 
 
 # Alias de plantilla → key real. Se pone como prefijo "keyword:" al inicio del mensaje.
@@ -59,13 +64,15 @@ def parse_caption(text: str | None) -> dict:
     posicionales separados por comas; vacíos/ausentes = None.
     """
     text = (text or "").strip()
-    template = "clasica"
+    template = None  # None = elegir con pesos (clásica casi siempre, verde/onion ocasional)
     head = text.split(",", 1)[0]  # parte antes de la primera coma
     if ":" in head:
         kw, rest = text.split(":", 1)
         if kw.strip().lower() in TEMPLATE_ALIASES:
             template = TEMPLATE_ALIASES[kw.strip().lower()]
             text = rest.strip()
+    if template is None:
+        template = compose_mod.random_template()
 
     # @handles de Instagram → para etiquetar al artista en el post (no en el texto del meme).
     menciones = re.findall(r"@[A-Za-z0-9_.]+", text)
@@ -84,6 +91,7 @@ def _generate(item: dict) -> tuple[str, str]:
     cap = caption_mod.generate_caption(
         banda=item["banda"], integrante=item["integrante"], rol=item["rol"],
         tema_semilla=item["tema"], rechazados=item.get("rechazados") or None,
+        tipo=db.tipo_de_actor(item["banda"]),
     )
     png = compose_mod.compose(
         caption=cap, foto_url=item["photo_path"], template=item.get("template", "clasica")
@@ -165,6 +173,21 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         with open(png, "rb") as fh:
             await query.edit_message_media(
                 media=InputMediaPhoto(media=fh, caption=cap),
+                reply_markup=_keyboard(token),
+            )
+        return
+
+    if action == "tpl":
+        # Cambia la plantilla SIN regenerar el caption (recompone la misma imagen).
+        item["template"] = compose_mod.siguiente_template(item.get("template", "clasica"))
+        await query.edit_message_caption(caption=f"🎨 Plantilla → {item['template']}…")
+        png = await asyncio.to_thread(
+            compose_mod.compose, caption=item["caption"],
+            foto_url=item["photo_path"], template=item["template"])
+        item["image_path"] = str(png)
+        with open(png, "rb") as fh:
+            await query.edit_message_media(
+                media=InputMediaPhoto(media=fh, caption=item["caption"]),
                 reply_markup=_keyboard(token),
             )
         return
