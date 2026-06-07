@@ -21,12 +21,16 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 # Columnas editables por tabla (whitelist: protege contra typos e inyección de
 # nombres de columna). id/created_at/updated_at se manejan solos.
 TABLES: dict[str, set[str]] = {
+    "accounts": {
+        "slug", "ig_handle", "nombre", "ciudad", "timezone",
+        "voz_extra", "color_marca", "activa",
+    },
     "bands": {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
         "popularity", "followers_spotify", "generos",
         "genero_principal", "generos_fuente", "spotify_status",
         "followers_ig", "link_externo", "bio", "scraped_at",
-        "n_integrantes", "prioridad", "notas",
+        "n_integrantes", "prioridad", "notas", "account_id",
     },
     "members": {
         "band_id", "nombre", "rol", "ig_handle", "foto_principal_id", "confiabilidad",
@@ -44,11 +48,13 @@ TABLES: dict[str, set[str]] = {
     "content_queue": {
         "tipo", "band_id", "member_id", "photo_id", "event_id",
         "tema_semilla", "status", "scheduled_datetime", "sheet_row_id", "meme_url",
+        "account_id",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
         "thumbnail_url", "caption", "timestamp",
         "likes", "comments", "views", "reach", "saved", "shares", "last_sync",
+        "account_id",
     },
     "ig_metrics_snapshots": {
         "ig_post_id", "fecha",
@@ -85,6 +91,11 @@ _MIGRATIONS = {
         "genero_principal": "TEXT",
         "generos_fuente": "TEXT",
         "spotify_status": "TEXT NOT NULL DEFAULT 'pendiente'",
+        # Multi-cuenta Fase A: todo lo existente cae a la cuenta 1 (gdlscene).
+        # SIN cláusula REFERENCES: SQLite prohíbe ADD COLUMN con FK y default
+        # no-NULL bajo foreign_keys=ON; la integridad la cuida la app (igual
+        # que el resto de columnas migradas). FK dura llegará con Postgres.
+        "account_id": "INTEGER NOT NULL DEFAULT 1",
     },
     "events": {
         "titulo": "TEXT",
@@ -96,6 +107,12 @@ _MIGRATIONS = {
     },
     "content_queue": {
         "meme_url": "TEXT",
+        # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
+        "account_id": "INTEGER NOT NULL DEFAULT 1",
+    },
+    "ig_posts": {
+        # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
+        "account_id": "INTEGER NOT NULL DEFAULT 1",
     },
     "photos": {
         "descartada": "INTEGER NOT NULL DEFAULT 0",
@@ -112,6 +129,15 @@ def init_db(cx: sqlite3.Connection) -> None:
         for col, ddl in cols.items():
             if col not in existentes:
                 cx.execute(f"ALTER TABLE {tabla} ADD COLUMN {col} {ddl}")
+    # Multi-cuenta Fase A: seed de la cuenta original e índices post-migración
+    # (los índices van aquí y no en schema.sql: en DBs viejas la columna
+    # account_id no existe todavía cuando corre executescript).
+    cx.execute("""INSERT OR IGNORE INTO accounts (id, slug, ig_handle, nombre, ciudad)
+                  VALUES (1, 'gdlscene', 'gdlscene', 'La Escena GDL', 'Guadalajara')""")
+    for idx in ("CREATE INDEX IF NOT EXISTS idx_bands_account ON bands(account_id)",
+                "CREATE INDEX IF NOT EXISTS idx_queue_account ON content_queue(account_id)",
+                "CREATE INDEX IF NOT EXISTS idx_igposts_account ON ig_posts(account_id)"):
+        cx.execute(idx)
     # Backfill idempotente: banda que ya tiene spotify_id cuenta como match 'ok'.
     cx.execute("UPDATE bands SET spotify_status = 'ok' "
                "WHERE spotify_id IS NOT NULL AND spotify_id != '' "
@@ -161,6 +187,20 @@ def rows(cx: sqlite3.Connection, sql: str, params: tuple | list = ()) -> list[di
 
 
 # ---------- Consultas de uso frecuente ----------
+
+def list_accounts(cx: sqlite3.Connection, solo_activas: bool = True) -> list[dict[str, Any]]:
+    """Cuentas de escena, en orden de id (gdlscene primero)."""
+    q = "SELECT * FROM accounts"
+    if solo_activas:
+        q += " WHERE activa = 1"
+    return rows(cx, q + " ORDER BY id")
+
+
+def get_account(cx: sqlite3.Connection, slug: str) -> dict[str, Any] | None:
+    """Cuenta por slug, o None si no existe."""
+    r = rows(cx, "SELECT * FROM accounts WHERE slug = ?", (slug,))
+    return r[0] if r else None
+
 
 def upsert_band(cx: sqlite3.Connection, nombre: str, ig_handle: str | None = None,
                 **fields: Any) -> int:

@@ -176,3 +176,25 @@ def resolve_ig_session_path() -> Path:
     p = _resolve(IG_SESSION_FILE)
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
+
+
+# Claves de credenciales que existen POR CUENTA de escena (multi-cuenta Fase A).
+_ACCOUNT_CRED_KEYS = ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
+                      "IG_SCRAPER_UA", "SHEET_ID")
+
+
+def account_creds(slug: str) -> dict[str, str | None]:
+    """Credenciales de una cuenta: env con sufijo __SLUG (en mayúsculas).
+
+    gdlscene (la cuenta original) cae a las vars SIN sufijo para no tocar el
+    .env ni los secrets actuales. Las demás cuentas usan SOLO su sufijo: que
+    una cuenta nueva jamás herede por accidente los tokens de gdlscene.
+    """
+    sufijo = f"__{slug.upper()}"
+    out: dict[str, str | None] = {}
+    for k in _ACCOUNT_CRED_KEYS:
+        val = os.getenv(k + sufijo)
+        if val is None and slug == "gdlscene":
+            val = os.getenv(k)
+        out[k] = val
+    return out

@@ -217,3 +217,28 @@ CREATE TRIGGER IF NOT EXISTS trg_events_updated
 CREATE TRIGGER IF NOT EXISTS trg_queue_updated
     AFTER UPDATE ON content_queue FOR EACH ROW
     BEGIN UPDATE content_queue SET updated_at = datetime('now') WHERE id = OLD.id; END;
+
+-- -----------------------------------------------------------------------------
+-- accounts — cuentas de escena (@gdlscene, @cdmxscene, @mtyscene). Multi-cuenta
+-- Fase A: bands/content_queue/ig_posts cargan account_id (DEFAULT 1 = gdlscene);
+-- photos/events/members heredan la cuenta vía band_id. Las CREDENCIALES nunca
+-- viven aquí: van en env con sufijo (IG_ACCESS_TOKEN__CDMXSCENE...), ver config.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS accounts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug         TEXT NOT NULL UNIQUE,
+    ig_handle    TEXT NOT NULL,
+    nombre       TEXT NOT NULL,
+    ciudad       TEXT NOT NULL,
+    timezone     TEXT NOT NULL DEFAULT 'America/Mexico_City',
+    voz_extra    TEXT,                                    -- textura local del caption
+    color_marca  TEXT NOT NULL DEFAULT '#1b5e3f',
+    activa       INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (activa IN (0,1))
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_accounts_updated
+    AFTER UPDATE ON accounts FOR EACH ROW
+    BEGIN UPDATE accounts SET updated_at = datetime('now') WHERE id = OLD.id; END;
