@@ -130,12 +130,74 @@ def _download(session: creq.Session, url: str, dest: Path) -> bool:
         return False
 
 
+def _resolve_user_id(session: creq.Session, cx, band: dict[str, Any]) -> str | None:
+    """Devuelve el id numérico de IG de la banda, cacheándolo en `bands.ig_user_id`.
+
+    Si ya está en caché evita la llamada a web_profile_info. Devuelve None solo
+    si el perfil es privado (sin acceso a posts).
+    """
+    if band.get("ig_user_id"):
+        return band["ig_user_id"]
+    user = fetch_profile(session, band["ig_handle"])
+    db.update(cx, "bands", band["id"],
+              ig_user_id=user["id"],
+              followers_ig=user.get("edge_followed_by", {}).get("count"),
+              bio=(user.get("biography") or "").strip() or None,
+              link_externo=user.get("external_url") or None)
+    band["ig_user_id"] = user["id"]
+    if user.get("is_private"):
+        return None
+    return user["id"]
+
+
+def _marcar_scrapeada(cx, band_id: int) -> None:
+    from datetime import datetime as _dt
+    db.update(cx, "bands", band_id, scraped_at=_dt.now().isoformat(timespec="seconds"))
+
+
+def _ingest_item(session: creq.Session, cx, band: dict[str, Any], band_dir: Path,
+                 item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Baja e inserta las fotos de un post nuevo. Devuelve una fila por foto insertada.
+
+    Asume que el post no existe aún en `photos` (el dedup lo hace quien llama).
+    Cada fila trae los datos que el orquestador necesita para los pasos siguientes.
+    """
+    shortcode = item.get("code")
+    if not shortcode:
+        return []
+    fecha = (datetime.fromtimestamp(item["taken_at"]).isoformat()
+             if item.get("taken_at") else None)
+    caption = ((item.get("caption") or {}).get("text") or "").strip() or None
+    insertadas: list[dict[str, Any]] = []
+    descargo = False
+    for i, url in _image_urls(item):
+        dest = band_dir / f"{shortcode}_{i}.jpg"
+        if not dest.exists():
+            if not _download(session, url, dest):
+                continue
+            descargo = True
+        rel = str(dest.relative_to(config.BASE_DIR))
+        db.insert(cx, "photos",
+                  band_id=band["id"],
+                  path=rel,
+                  source_post_id=shortcode,
+                  fecha=fecha,
+                  caption_original=caption)
+        insertadas.append({"band_id": band["id"], "ig_handle": band["ig_handle"],
+                           "shortcode": shortcode, "caption": caption,
+                           "path": rel, "fecha": fecha})
+    if descargo:
+        _sleep()  # pausa solo cuando realmente tocamos la red
+    return insertadas
+
+
 def ingest_band(session: creq.Session, cx, band: dict[str, Any], max_posts: int) -> int:
     """Ingesta una banda: actualiza el perfil y registra fotos nuevas. Devuelve cuántas."""
     handle = band["ig_handle"]
     user = fetch_profile(session, handle)
 
     db.update(cx, "bands", band["id"],
+              ig_user_id=user["id"],
               followers_ig=user.get("edge_followed_by", {}).get("count"),
               bio=(user.get("biography") or "").strip() or None,
               link_externo=user.get("external_url") or None)
@@ -160,28 +222,8 @@ def ingest_band(session: creq.Session, cx, band: dict[str, Any], max_posts: int)
                      (band["id"], shortcode))
         if ya:
             continue  # post ya ingestado en una sesión anterior
-        fecha = (datetime.fromtimestamp(item["taken_at"]).isoformat()
-                 if item.get("taken_at") else None)
-        caption = ((item.get("caption") or {}).get("text") or "").strip() or None
-        descargo = False
-        for i, url in _image_urls(item):
-            dest = band_dir / f"{shortcode}_{i}.jpg"
-            if not dest.exists():
-                if not _download(session, url, dest):
-                    continue
-                descargo = True
-            db.insert(cx, "photos",
-                      band_id=band["id"],
-                      path=str(dest.relative_to(config.BASE_DIR)),
-                      source_post_id=shortcode,
-                      fecha=fecha,
-                      caption_original=caption)
-            nuevas += 1
-        if descargo:
-            _sleep()  # pausa solo cuando realmente tocamos la red
-    # Marca de scrapeo: a partir de aquí la banda se considera ya scrapeada.
-    from datetime import datetime as _dt
-    db.update(cx, "bands", band["id"], scraped_at=_dt.now().isoformat(timespec="seconds"))
+        nuevas += len(_ingest_item(session, cx, band, band_dir, item))
+    _marcar_scrapeada(cx, band["id"])
     return nuevas
 
 
@@ -233,6 +275,90 @@ def ingest(handles: list[str] | None = None, max_posts: int | None = None,
         cx.close()
 
 
+def novedades(handles: list[str] | None = None, max_posts: int | None = None,
+              _cx=None) -> dict[str, Any]:
+    """Chequeo ligero de NOVEDADES sobre bandas YA scrapeadas (Frente A).
+
+    Por cada banda con `scraped_at IS NOT NULL` (las nuevas son territorio de
+    `ingest()`): resuelve el user_id (caché de `ig_user_id` o fetch de perfil),
+    baja la primera página de posts y CORTA en cuanto aparece un `source_post_id`
+    ya presente en `photos` de esa banda — solo se descargan los nuevos.
+
+    Banda que falle (sesión caída, 429, perfil 404) → se loguea y se continúa;
+    el resumen lista las fallidas. `posts_nuevos` es el insumo de los pasos
+    siguientes del orquestador (detección de releases, clasificación).
+
+    `_cx`: conexión inyectable para tests; en producción se abre una nueva.
+    """
+    max_posts = max_posts or config.IG_INGEST_MAX_POSTS
+    propia = _cx is None
+    cx = _cx or db.connect()
+    resumen: dict[str, Any] = {
+        "bandas_revisadas": 0, "con_novedades": 0, "fotos_nuevas": 0,
+        "fallidas": [], "posts_nuevos": [],
+    }
+    try:
+        if propia:
+            db.init_db(cx)
+        bandas = [b for b in db.list_bands(cx)
+                  if b.get("ig_handle") and b.get("scraped_at")]
+        if handles:
+            quiero = {h.lstrip("@").lower() for h in handles}
+            bandas = [b for b in bandas if b["ig_handle"].lower() in quiero]
+        if not bandas:
+            print("No hay bandas scrapeadas que revisar.")
+            return resumen
+
+        session = get_session()
+        print(f"Novedades de {len(bandas)} banda(s)…")
+        for i, band in enumerate(bandas):
+            handle = band["ig_handle"]
+            print(f"▶ @{handle} ({band['nombre']})")
+            resumen["bandas_revisadas"] += 1  # intentadas; las que truenan van a fallidas
+            try:
+                nuevos = _revisar_banda(session, cx, band, max_posts)
+            except Exception as exc:  # noqa: BLE001 — una banda caída no debe tumbar la corrida
+                print(f"   ❌ {exc} — se salta esta banda y se continúa.")
+                resumen["fallidas"].append(handle)
+            else:
+                if nuevos:
+                    resumen["con_novedades"] += 1
+                    resumen["fotos_nuevas"] += len(nuevos)
+                    resumen["posts_nuevos"].extend(nuevos)
+                print(f"   ✅ {len(nuevos)} foto(s) nueva(s)")
+            if i < len(bandas) - 1:
+                _sleep()  # mismo delay anti-bot entre bandas
+        return resumen
+    finally:
+        if propia:
+            cx.close()
+
+
+def _revisar_banda(session: creq.Session, cx, band: dict[str, Any],
+                   max_posts: int) -> list[dict[str, Any]]:
+    """Revisa una banda scrapeada; devuelve las filas de las fotos nuevas insertadas."""
+    user_id = _resolve_user_id(session, cx, band)
+    if user_id is None:
+        return []  # perfil privado: nada que bajar
+    items = fetch_posts(session, user_id, max_posts)
+
+    band_dir = config.resolve_photos_dir() / band["ig_handle"]
+    band_dir.mkdir(parents=True, exist_ok=True)
+
+    nuevos: list[dict[str, Any]] = []
+    for item in items:  # feed viene del más nuevo al más viejo
+        shortcode = item.get("code")
+        if not shortcode:
+            continue
+        ya = db.rows(cx, "SELECT 1 FROM photos WHERE band_id = ? AND source_post_id = ?",
+                     (band["id"], shortcode))
+        if ya:
+            break  # primer post conocido → todo lo de aquí en adelante ya existe
+        nuevos.extend(_ingest_item(session, cx, band, band_dir, item))
+    _marcar_scrapeada(cx, band["id"])
+    return nuevos
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingesta IG → DB local (Fase 2)")
     parser.add_argument("handles", nargs="*", help="handles específicos (vacío = todas)")
@@ -240,8 +366,16 @@ if __name__ == "__main__":
                         help=f"posts por banda (default {config.IG_INGEST_MAX_POSTS})")
     parser.add_argument("--rescan", action="store_true",
                         help="incluir bandas ya scrapeadas (default: solo nuevas)")
+    parser.add_argument("--novedades", action="store_true",
+                        help="modo novedades: revisa bandas ya scrapeadas y corta en post conocido")
     args = parser.parse_args()
     try:
-        ingest(args.handles or None, args.max_posts, rescan=args.rescan)
+        if args.novedades:
+            res = novedades(args.handles or None, args.max_posts)
+            print(f"\nResumen: {res['bandas_revisadas']} revisadas, "
+                  f"{res['con_novedades']} con novedades, {res['fotos_nuevas']} fotos nuevas"
+                  + (f", fallidas: {', '.join(res['fallidas'])}" if res["fallidas"] else ""))
+        else:
+            ingest(args.handles or None, args.max_posts, rescan=args.rescan)
     except KeyboardInterrupt:
         sys.exit("\nIngesta interrumpida.")

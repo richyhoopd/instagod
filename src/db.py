@@ -29,7 +29,7 @@ TABLES: dict[str, set[str]] = {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
         "popularity", "followers_spotify", "generos",
         "genero_principal", "generos_fuente", "spotify_status",
-        "followers_ig", "link_externo", "bio", "scraped_at",
+        "followers_ig", "link_externo", "bio", "scraped_at", "ig_user_id",
         "n_integrantes", "prioridad", "notas", "account_id",
     },
     "members": {
@@ -85,6 +85,9 @@ _MIGRATIONS = {
         "tipo": "TEXT NOT NULL DEFAULT 'banda'",
         "category_ig": "TEXT",
         "scraped_at": "TEXT",
+        # Caché del id numérico de IG: evita una llamada a web_profile_info por
+        # banda en el modo novedades (Frente A del fetch incremental).
+        "ig_user_id": "TEXT",
         # Afinación de datos: género de taxonomía fija (config.GENEROS), origen
         # del dato ('llm'|'manual'; el batch nunca pisa manual) y estado del
         # match de Spotify ('pendiente'|'ok'|'no_esta').
