@@ -22,8 +22,9 @@
   </td>
   <td>{% if b.spotify_id %}<span title="{{ b.spotify_id }}">✓</span>{% else %}<span class="muted">—</span>{% endif %}</td>
   <td>
+    {% if b.genero_principal %}<span class="chip" style="background:#e6f0ff; font-weight:600;">{{ b.genero_principal }}</span>{% endif %}
     {% for g in b.generos_str.split(", ") if b.generos_str %}<span class="chip">{{ g }}</span>{% endfor %}
-    {% if not b.generos_str %}<span class="muted">—</span>{% endif %}
+    {% if not b.genero_principal and not b.generos_str %}<span class="muted">—</span>{% endif %}
   </td>
   <td>{{ b.popularity if b.popularity is not none else "—" }}</td>
   <td>{{ b.followers_ig if b.followers_ig is not none else "—" }}</td>

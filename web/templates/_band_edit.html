@@ -14,7 +14,15 @@
       <label>IG handle <input name="ig_handle" value="{{ b.ig_handle or '' }}"></label>
       <label>Spotify ID <input name="spotify_id" value="{{ b.spotify_id or '' }}"></label>
       <label>Ciudad <input name="ciudad" value="{{ b.ciudad or '' }}"></label>
-      <label>Géneros <small class="muted">(coma)</small>
+      <label>Género principal
+        <select name="genero_principal">
+          <option value="" {% if not b.genero_principal %}selected{% endif %}>—</option>
+          {% for g in generos_taxonomia %}
+            <option value="{{ g }}" {% if b.genero_principal == g %}selected{% endif %}>{{ g }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Subtags <small class="muted">(coma)</small>
         <input name="generos" value="{{ b.generos_str }}"></label>
       <label>Prioridad
         <select name="prioridad">

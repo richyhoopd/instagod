@@ -33,6 +33,21 @@
   </a>
 </form>
 
+<!-- Filtro por género principal: navega a /bandas?genero=… al elegir -->
+<form method="get" action="/bandas" style="margin:8px 0; font-size:13px;">
+  <input type="hidden" name="order" value="{{ order }}">
+  <input type="hidden" name="todas" value="{{ todas }}">
+  <label>Género:
+    <select name="genero" onchange="this.form.submit()">
+      <option value="">todos</option>
+      {% for g in generos_taxonomia %}
+        <option value="{{ g }}" {% if genero == g %}selected{% endif %}>{{ g }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if genero %}<a href="/bandas?order={{ order }}&todas={{ todas }}">× quitar filtro</a>{% endif %}
+</form>
+
 <table>
   <thead>
     <tr>

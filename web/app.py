@@ -48,7 +48,7 @@ def index() -> RedirectResponse:
 
 @app.get("/bandas", response_class=HTMLResponse)
 def bandas(request: Request, order: str = "prioridad", todas: int = 0,
-           solo: str = "") -> HTMLResponse:
+           solo: str = "", genero: str = "") -> HTMLResponse:
     cx = db.connect()
     try:
         items = [_band_view(b) for b in db.list_bands(cx, solo_activas=not todas, order=order)]
@@ -60,9 +60,13 @@ def bandas(request: Request, order: str = "prioridad", todas: int = 0,
         cx.close()
     if solo == "sin_scrapear":
         items = [b for b in items if not b.get("scraped_at") and b.get("ig_handle")]
+    if genero in config.GENEROS:
+        items = [b for b in items if b.get("genero_principal") == genero]
     return templates.TemplateResponse(request, "bandas.html", {
         "bandas": items, "order": order, "todas": todas, "solo": solo,
         "candidatas": candidatas, "activas": activas, "sin_scrapear": sin_scrapear,
+        "genero": genero if genero in config.GENEROS else "",
+        "generos_taxonomia": config.GENEROS,
     })
 
 
@@ -85,7 +89,8 @@ def editar_banda_form(request: Request, band_id: int) -> HTMLResponse:
         band = _band_view(db.get(cx, "bands", band_id))
     finally:
         cx.close()
-    return templates.TemplateResponse(request, "_band_edit.html", {"b": band})
+    return templates.TemplateResponse(request, "_band_edit.html",
+                                      {"b": band, "generos_taxonomia": config.GENEROS})
 
 
 @app.get("/bandas/{band_id}/row", response_class=HTMLResponse)
@@ -104,6 +109,7 @@ def guardar_banda(request: Request, band_id: int,
                   nombre: str = Form(...), tipo: str = Form("banda"),
                   ig_handle: str = Form(""),
                   spotify_id: str = Form(""), ciudad: str = Form(""),
+                  genero_principal: str = Form(""),
                   generos: str = Form(""), prioridad: int = Form(3),
                   n_integrantes: str = Form(""), notas: str = Form(""),
                   activa: int = Form(0)) -> HTMLResponse:
@@ -112,20 +118,30 @@ def guardar_banda(request: Request, band_id: int,
     if generos.strip():
         generos_json = json.dumps([g.strip() for g in generos.split(",") if g.strip()],
                                   ensure_ascii=False)
+    # Fuera de la taxonomía → None (la GUI manda la lista cerrada, pero blindamos).
+    gp = genero_principal.strip()
+    gp = gp if gp in config.GENEROS else None
     tipos_ok = {"banda", "solista", "foro", "evento", "colectivo"}
     cx = db.connect()
     try:
-        db.update(cx, "bands", band_id,
-                  nombre=nombre.strip(),
-                  tipo=tipo if tipo in tipos_ok else "banda",
-                  ig_handle=ig_handle.strip().lstrip("@") or None,
-                  spotify_id=spotify_id.strip() or None,
-                  ciudad=ciudad.strip() or None,
-                  generos=generos_json,
-                  prioridad=max(1, min(5, prioridad)),
-                  n_integrantes=int(n_integrantes) if n_integrantes.strip().isdigit() else None,
-                  notas=notas.strip() or None,
-                  activa=1 if activa else 0)
+        cambios: dict[str, Any] = dict(
+            nombre=nombre.strip(),
+            tipo=tipo if tipo in tipos_ok else "banda",
+            ig_handle=ig_handle.strip().lstrip("@") or None,
+            spotify_id=spotify_id.strip() or None,
+            ciudad=ciudad.strip() or None,
+            generos=generos_json,
+            genero_principal=gp,
+            prioridad=max(1, min(5, prioridad)),
+            n_integrantes=int(n_integrantes) if n_integrantes.strip().isdigit() else None,
+            notas=notas.strip() or None,
+            activa=1 if activa else 0,
+        )
+        # Si el género cambió desde la GUI, queda curado a mano: el batch no lo pisa.
+        actual = db.get(cx, "bands", band_id)
+        if actual and (actual.get("genero_principal") or None) != gp:
+            cambios["generos_fuente"] = "manual"
+        db.update(cx, "bands", band_id, **cambios)
         band = _band_view(db.get(cx, "bands", band_id))
     finally:
         cx.close()
