@@ -752,6 +752,15 @@ def _lanzar_sesion(modulo: str, *args: str) -> HTMLResponse | None:
     return None
 
 
+@app.post("/novedades", response_class=HTMLResponse)
+def lanzar_novedades() -> HTMLResponse:
+    """Lanza la detección de novedades (releases nuevos) con aviso por Telegram."""
+    bloqueo = _lanzar_sesion("src.novedades")
+    return bloqueo or HTMLResponse(
+        '🔄 Buscando novedades — los releases nuevos detectados te llegan a '
+        '<strong>Telegram</strong> en cuanto estén.')
+
+
 @app.post("/eventos/anunciar", response_class=HTMLResponse)
 def eventos_anunciar() -> HTMLResponse:
     """Lanza la sesión de anuncios (aprobación por Telegram), como Generar memes."""

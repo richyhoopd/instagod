@@ -275,8 +275,14 @@ def backfill_release_titles() -> int:
         cx.close()
 
 
-def enrich(handles: list[str] | None = None, *, solo_faltantes: bool = False) -> None:
-    """Enriquece bandas activas (o `handles`); `solo_faltantes` = sin spotify_id."""
+def enrich(handles: list[str] | None = None, *, solo_faltantes: bool = False,
+           solo_pendientes: bool = False) -> None:
+    """Enriquece bandas activas (o `handles`).
+
+    `solo_faltantes` = sin spotify_id; `solo_pendientes` = spotify_status
+    'pendiente' (las que ya tienen id las refresca el cron de releases, no el
+    pipeline, para no gastar cuota re-consultando lo que ya está resuelto).
+    """
     cx = db.connect()
     try:
         db.init_db(cx)
@@ -287,6 +293,8 @@ def enrich(handles: list[str] | None = None, *, solo_faltantes: bool = False) ->
         # 'no_esta' = el usuario confirmó en /spotify que la banda no está en
         # Spotify; no la re-buscamos nunca (gastaría cuota y no daría match).
         bandas = [b for b in bandas if b.get("spotify_status") != "no_esta"]
+        if solo_pendientes:
+            bandas = [b for b in bandas if b.get("spotify_status") == "pendiente"]
         if solo_faltantes:
             bandas = [b for b in bandas if not b.get("spotify_id")]
         if not bandas:
