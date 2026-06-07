@@ -16,6 +16,7 @@ from __future__ import annotations
 import statistics
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -271,3 +272,52 @@ def sync_posts(cx) -> dict[str, Any]:
 
     return {"posts": len(items), "insights_fallidos": fallidos,
             "vinculados": vinculados, "warning": warning}
+
+
+# ---------- entrypoint CLI (sync diario para launchd) ----------
+
+# Log por defecto relativo al cwd: launchd corre con WorkingDirectory = repo,
+# así que cae en <repo>/data/ sin depender de config (testeable vía log_path).
+_LOG_DEFAULT = "data/sync_metrics.log"
+
+
+def _append_log(log_path: Path, linea: str) -> None:
+    """Agrega una línea al log, creando el directorio si hace falta."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(linea + "\n")
+
+
+def main(db_path: str | Path | None = None,
+         log_path: str | Path | None = None) -> int:
+    """Corre el sync completo, imprime el resumen y lo deja en el log.
+
+    Devuelve exit code: 0 si el sync terminó, 1 si `sync_posts` reventó (para
+    que launchd lo registre como fallo). Los parámetros existen para los tests;
+    en producción se usan los defaults (DB de config, log en cwd/data/).
+    """
+    log = Path(log_path) if log_path else Path(_LOG_DEFAULT)
+    ahora = datetime.now().isoformat(timespec="seconds")
+
+    cx = db.connect(db_path)
+    try:
+        db.init_db(cx)
+        res = sync_posts(cx)
+    except Exception as exc:  # noqa: BLE001 — cualquier fallo = sync caído
+        _append_log(log, f"{ahora} · ERROR · {exc}")
+        print(f"sync falló: {exc}")
+        return 1
+    finally:
+        cx.close()
+
+    warning = res.get("warning") or "-"
+    linea = (f"{ahora} · posts={res['posts']} "
+             f"· sin_insights={res['insights_fallidos']} "
+             f"· vinculados={res['vinculados']} · warning={warning}")
+    _append_log(log, linea)
+    print(linea)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
