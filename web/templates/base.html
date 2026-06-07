@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>@gdlscene — curación</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- HTMX desde CDN: app local, sin build step -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root { --verde: #1db954; --gris: #888; }
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 0; background: #fafafa; color: #1a1a1a; }
+    header { background: #111; color: #fff; padding: 10px 20px; display: flex; align-items: center; gap: 24px; }
+    header h1 { font-size: 16px; margin: 0; }
+    header h1 span { color: var(--verde); }
+    nav a { color: #bbb; text-decoration: none; font-size: 14px; margin-right: 14px; }
+    nav a.activo { color: #fff; font-weight: 600; }
+    nav span.pendiente { color: #555; font-size: 14px; margin-right: 14px; cursor: not-allowed; }
+    main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+    table { border-collapse: collapse; width: 100%; background: #fff; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f4f4f4; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    th a { color: inherit; text-decoration: none; }
+    tr:hover td { background: #fcfcf6; }
+    input, select { font: inherit; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; width: 100%; box-sizing: border-box; }
+    button { font: inherit; padding: 5px 12px; border: 0; border-radius: 5px; background: var(--verde); color: #fff; cursor: pointer; }
+    button.secundario { background: #e5e5e5; color: #333; }
+    .muted { color: var(--gris); }
+    .chip { display: inline-block; background: #eef7ef; color: #2c7a39; border-radius: 10px; padding: 1px 8px; font-size: 12px; margin-right: 4px; }
+    .prio { font-weight: 700; }
+    form.alta { display: flex; gap: 8px; margin: 14px 0; }
+    form.alta input { width: 220px; }
+    .inactiva td { opacity: .45; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>@gdlscene <span>/ curación</span></h1>
+    <nav>
+      <a href="/bandas" class="activo">Bandas</a>
+      <a href="/plan">Plan</a>
+      <a href="/programados">Programados</a>
+      <a href="/publicado">Publicado</a>
+      <a href="/calendario">Calendarios</a>
+      <a href="/eventos">Eventos</a>
+    </nav>
+  </header>
+  <main>
+    {% block contenido %}{% endblock %}
+  </main>
+</body>
+</html>

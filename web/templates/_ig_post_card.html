@@ -1,0 +1,32 @@
+<div class="post-card" id="post-{{ p.id }}">
+  <a href="{{ p.permalink }}" target="_blank" title="Ver en Instagram">
+    {% if p.thumbnail_url %}
+      <img src="{{ p.thumbnail_url }}" loading="lazy" alt="">
+    {% else %}
+      <div class="sin-foto">sin imagen</div>
+    {% endif %}
+  </a>
+  <div class="post-body">
+    <div class="post-banda">
+      {% if p.banda_nombre %}
+        <strong>{{ p.banda_nombre }}</strong>
+      {% else %}
+        <form hx-post="/publicado/{{ p.id }}/banda" hx-target="#post-{{ p.id }}" hx-swap="outerHTML">
+          <select name="band_id" onchange="this.form.requestSubmit()" title="Asignar banda">
+            <option value="">— asignar banda —</option>
+            {% for b in bandas %}<option value="{{ b.id }}">{{ b.nombre }}</option>{% endfor %}
+          </select>
+        </form>
+      {% endif %}
+      <span class="muted" style="font-size:12px;">{{ p.timestamp[:10] if p.timestamp else "" }}</span>
+    </div>
+    <div class="post-metricas">
+      <span title="Likes">♥ {{ p.likes if p.likes is not none else "—" }}</span>
+      <span title="Comentarios">💬 {{ p.comments if p.comments is not none else "—" }}</span>
+      <span title="Views">▶ {{ p.views if p.views is not none else "—" }}</span>
+      <span title="Alcance">👁 {{ p.reach if p.reach is not none else "—" }}</span>
+      <span title="Guardados">🔖 {{ p.saved if p.saved is not none else "—" }}</span>
+    </div>
+    {% if p.caption %}<div class="post-caption muted">{{ p.caption[:90] }}{% if p.caption|length > 90 %}…{% endif %}</div>{% endif %}
+  </div>
+</div>

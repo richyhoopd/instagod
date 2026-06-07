@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block contenido %}
+<style>
+  .grid-posts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 14px; }
+  .post-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+  .post-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+  .post-card .sin-foto { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: #eee; color: #999; font-size: 13px; }
+  .post-body { padding: 8px 10px 10px; }
+  .post-banda { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .post-metricas { display: flex; gap: 10px; font-size: 13px; margin-top: 6px; flex-wrap: wrap; }
+  .post-caption { font-size: 12px; margin-top: 6px; line-height: 1.3; }
+  .barra { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+  .banner { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+  .banner.err { background: #fdecec; color: #b32626; }
+  .banner.ok { background: #e6f7ec; color: #1d7a3c; }
+</style>
+
+<h2>Publicado <span class="muted">({{ posts|length }}) — lo que ya está en Instagram, con sus métricas</span></h2>
+
+{% if error %}<div class="banner err">⚠ {{ error }}</div>{% endif %}
+{% if aviso %}<div class="banner ok">{{ aviso }}</div>{% endif %}
+
+<div class="barra">
+  <form method="post" action="/publicado/sync" style="display:inline;">
+    <button>Actualizar métricas</button>
+  </form>
+  <span class="muted" style="font-size:13px;">
+    {% if ultimo %}última actualización: {{ ultimo[:16]|replace("T", " ") }}{% else %}sin sincronizar todavía{% endif %}
+    {% if stale %} · <em>actualizando en background…</em>{% endif %}
+  </span>
+</div>
+
+{% if stale %}
+<script>
+  // Data vieja (> 6 h) o inexistente: sync automático y recarga. Si falla, solo
+  // se muestra el banner del redirect (sin loop: el error no dispara reload).
+  fetch("/publicado/sync", { method: "POST", redirect: "follow" })
+    .then(r => { if (r.ok) location.reload(); });
+</script>
+{% endif %}
+
+<h3 style="margin-top:18px;">Resumen por banda <span class="muted" style="font-weight:normal; font-size:13px;">(últimos 90 días — ER = likes + 2×comentarios + 3×guardados, sobre alcance)</span></h3>
+{% if stats %}
+<table>
+  <thead><tr>
+    <th>Banda</th><th>Posts</th><th>Likes prom.</th><th>Coment. prom.</th>
+    <th>Alcance prom.</th><th>ER</th><th>Prioridad</th><th>Sugerencia</th>
+  </tr></thead>
+  <tbody>
+    {% for s in stats %}{% include "_publicado_banda_row.html" %}{% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Sin posts ligados a bandas todavía. Sincroniza y/o asigna bandas a los posts de abajo.</p>
+{% endif %}
+
+<h3 style="margin-top:22px;">Posts</h3>
+<div class="barra">
+  <form method="get" action="/publicado">
+    <select name="banda" onchange="this.form.submit()">
+      <option value="0">todas las bandas</option>
+      {% for b in bandas %}
+        <option value="{{ b.id }}" {% if banda == b.id %}selected{% endif %}>{{ b.nombre }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="orden" value="{{ orden }}">
+  </form>
+  <span class="muted" style="font-size:13px;">ordenar:</span>
+  {% for o, label in [("fecha","fecha"), ("likes","likes"), ("er","engagement")] %}
+    <a href="/publicado?banda={{ banda }}&orden={{ o }}"
+       {% if orden == o %}style="font-weight:700;"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if posts %}
+<div class="grid-posts">
+  {% for p in posts %}{% include "_ig_post_card.html" %}{% endfor %}
+</div>
+{% else %}
+<p class="muted">Nada todavía. Presiona "Actualizar métricas" para leer el feed de la cuenta.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,25 @@
+<tr id="banda-stat-{{ s.band_id }}">
+  <td><strong>{{ s.nombre }}</strong></td>
+  <td>{{ s.n_posts }}</td>
+  <td>{{ "%.0f"|format(s.avg_likes) }}</td>
+  <td>{{ "%.1f"|format(s.avg_comments) }}</td>
+  <td>{{ "%.0f"|format(s.avg_reach) if s.avg_reach else "—" }}</td>
+  <td>{% if s.er is not none %}{{ "%.1f"|format(s.er * 100) }}%{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td class="prio">P{{ s.prioridad }}</td>
+  <td>
+    {% if s.sugerida %}
+      {% if s.sugerida < s.prioridad %}
+        <span class="chip" style="background:#e6f7ec; color:#1d7a3c;">↑ subir a P{{ s.sugerida }}</span>
+      {% else %}
+        <span class="chip" style="background:#fdecec; color:#b32626;">↓ bajar a P{{ s.sugerida }}</span>
+      {% endif %}
+      <form style="display:inline;" hx-post="/publicado/banda/{{ s.band_id }}/prioridad"
+            hx-target="#banda-stat-{{ s.band_id }}" hx-swap="outerHTML">
+        <input type="hidden" name="prioridad" value="{{ s.sugerida }}">
+        <button style="padding:2px 10px; font-size:12px;">Aplicar</button>
+      </form>
+    {% else %}
+      <span class="muted">—</span>
+    {% endif %}
+  </td>
+</tr>
