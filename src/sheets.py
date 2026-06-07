@@ -36,6 +36,9 @@ COLUMNS = [
     "scheduled_datetime",
     "ig_post_id",
     "notas",
+    # Crosspost (al final: la hoja real ya existía con las columnas de arriba).
+    "tw_post_id",
+    "fb_post_id",
 ]
 
 # Estados válidos del campo `status`.

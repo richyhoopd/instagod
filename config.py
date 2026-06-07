@@ -56,11 +56,75 @@ META_APP_ID = _get("META_APP_ID")
 IG_GRAPH_BASE = _get("IG_GRAPH_BASE", "https://graph.instagram.com")
 IG_API_VERSION = _get("IG_API_VERSION", "v23.0")
 
+# ---------- X / Twitter (OAuth 1.0: tokens sin expiración) ----------
+X_API_KEY = _get("X_API_KEY")
+X_API_SECRET = _get("X_API_SECRET")
+X_ACCESS_TOKEN = _get("X_ACCESS_TOKEN")
+X_ACCESS_SECRET = _get("X_ACCESS_SECRET")
+# Kill switch por red: "0" la apaga sin tocar las demás.
+CROSSPOST_X = (_get("CROSSPOST_X", "1") or "1") != "0"
+
+# ---------- Facebook (Página; token permanente derivado de user token largo) ----------
+FB_PAGE_ID = _get("FB_PAGE_ID")
+FB_PAGE_ACCESS_TOKEN = _get("FB_PAGE_ACCESS_TOKEN")
+FB_GRAPH_BASE = _get("FB_GRAPH_BASE", "https://graph.facebook.com")
+FB_API_VERSION = _get("FB_API_VERSION", "v25.0")
+CROSSPOST_FB = (_get("CROSSPOST_FB", "1") or "1") != "0"
+
+# ---------- Scraping de Instagram (cuenta secundaria, Fase 2) ----------
+IG_SCRAPER_USER = _get("IG_SCRAPER_USER")
+IG_SCRAPER_PASSWORD = _get("IG_SCRAPER_PASSWORD")
+# IG amarra el sessionid al user-agent que lo creó ("useragent mismatch" si no
+# coincide): debe ser EXACTAMENTE el navigator.userAgent del navegador de origen.
+IG_SCRAPER_UA = _get("IG_SCRAPER_UA")
+# Cookie sessionid importada del navegador (URL-encoded, tal cual DevTools).
+# Login por script dispara checkpoints; la cookie del navegador es la vía estable.
+IG_SCRAPER_SESSIONID = _get("IG_SCRAPER_SESSIONID")
+IG_INGEST_MAX_POSTS = int(_get("IG_INGEST_MAX_POSTS", "12") or "12")
+IG_INGEST_DELAY_MIN = float(_get("IG_INGEST_DELAY_MIN", "4") or "4")
+IG_INGEST_DELAY_MAX = float(_get("IG_INGEST_DELAY_MAX", "10") or "10")
+# Sesión de instaloader cacheada: evita relogins (cada login es señal de riesgo).
+IG_SESSION_FILE = _get("IG_SESSION_FILE", "./secrets/ig_scraper_session")
+
+# ---------- Spotify (Fase 4) ----------
+# OJO: la cuenta dueña de la app en developer.spotify.com debe tener Premium.
+SPOTIFY_CLIENT_ID = _get("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = _get("SPOTIFY_CLIENT_SECRET")
+# Releases con menos de N días se registran como evento tipo 'release'.
+SPOTIFY_RELEASE_DAYS = int(_get("SPOTIFY_RELEASE_DAYS", "30") or "30")
+# Pausa entre bandas al llamar Spotify (anti rate-limit; ~2 llamadas/banda).
+SPOTIFY_THROTTLE_S = float(_get("SPOTIFY_THROTTLE_S", "0.6") or "0.6")
+# Lock para que dos procesos (pipeline, cron, GUI) no llamen Spotify a la vez.
+SPOTIFY_LOCK_PATH = _get("SPOTIFY_LOCK_PATH", "./data/.spotify.lock")
+
+# ---------- Clasificación de fotos (Fase 3) ----------
+# Umbral de nitidez (varianza del Laplaciano a ancho 1200px): debajo = borrosa.
+# Bajo (40) para no descartar fotos buenas de escenario (humo, poca luz).
+CLASSIFY_NITIDEZ_MIN = float(_get("CLASSIFY_NITIDEZ_MIN", "40") or "40")
+# Base de caracteres OCR para la heurística de flyer (ver classify.score_flyer).
+CLASSIFY_OCR_MIN_CHARS = int(_get("CLASSIFY_OCR_MIN_CHARS", "80") or "80")
+# Regiones MSER (tipo texto) a partir de las cuales una imagen es póster/flyer
+# DIBUJADO (tipografía artística que el OCR no lee). Fotos reales rondan <1400.
+CLASSIFY_MSER_FLYER = int(_get("CLASSIFY_MSER_FLYER", "1700") or "1500")
+# Tamaño mínimo de una cara "clara": fracción del lado menor de la imagen.
+CLASSIFY_CARA_MIN_FRAC = float(_get("CLASSIFY_CARA_MIN_FRAC", "0.08") or "0.08")
+
+# ---------- Base de datos local (SQLite) ----------
+# Fuente de verdad de bandas/fotos/eventos; el Sheet queda como UI de aprobación.
+DB_PATH = _get("DB_PATH", "./data/gdlscene.db")
+# Carpeta donde la ingesta guarda fotos descargadas (fuera de git).
+PHOTOS_DIR = _get("PHOTOS_DIR", "./data/photos")
+
 # ---------- Calendarización ----------
 TIMEZONE = _get("TIMEZONE", "America/Mexico_City")
-POSTS_PER_DAY = int(_get("POSTS_PER_DAY", "1") or "1")
+POSTS_PER_DAY = int(_get("POSTS_PER_DAY", "4") or "4")
 # POSTING_SLOTS llega como "19:00" o "10:00,19:00" → lista de strings "HH:MM".
-POSTING_SLOTS = [s.strip() for s in (_get("POSTING_SLOTS", "19:00") or "").split(",") if s.strip()]
+POSTING_SLOTS = [s.strip() for s in
+                 (_get("POSTING_SLOTS", "11:00,15:00,19:00,22:00") or "").split(",") if s.strip()]
+
+# ---------- Planificación mensual de contenido (badges) ----------
+# Tope de posts por banda al mes según su prioridad (1 = más atención).
+MONTHLY_CAP = {1: 5, 2: 2, 3: 1, 4: 1, 5: 1}
 
 
 def _resolve(path: str | None) -> Path:
@@ -82,3 +146,24 @@ def resolve_oauth_client_path() -> Path:
 def resolve_authorized_user_path() -> Path:
     """Ruta al token de usuario autorizado (se genera tras el primer login)."""
     return _resolve(GOOGLE_AUTHORIZED_USER)
+
+
+def resolve_db_path() -> Path:
+    """Ruta absoluta al archivo SQLite (crea la carpeta si no existe)."""
+    p = _resolve(DB_PATH)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def resolve_photos_dir() -> Path:
+    """Ruta absoluta a la carpeta de fotos descargadas (la crea si no existe)."""
+    p = _resolve(PHOTOS_DIR)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def resolve_ig_session_path() -> Path:
+    """Ruta al archivo de sesión de instaloader (en secrets/, fuera de git)."""
+    p = _resolve(IG_SESSION_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p

@@ -6,3 +6,4 @@ google-auth
 google-auth-oauthlib
 requests
 pytz
+tweepy           # crosspost a X/Twitter (OAuth 1.0)

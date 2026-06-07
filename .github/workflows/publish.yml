@@ -18,6 +18,16 @@ jobs:
       IG_GRAPH_BASE: ${{ secrets.IG_GRAPH_BASE }}
       IG_API_VERSION: ${{ secrets.IG_API_VERSION }}
       TIMEZONE: ${{ secrets.TIMEZONE }}
+      # Crosspost X/FB. CROSSPOST_* viene de *variables* (no secrets) para poder
+      # apagar una red desde Settings → Variables sin tocar código.
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+      FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+      FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+      CROSSPOST_X: ${{ vars.CROSSPOST_X || '1' }}
+      CROSSPOST_FB: ${{ vars.CROSSPOST_FB || '1' }}
     steps:
       - uses: actions/checkout@v4
 
