@@ -647,7 +647,8 @@ def calendario(request: Request) -> HTMLResponse:
             "sin_fecha": db.rows(cx, """
                 SELECT e.id, e.flyer_path, b.nombre AS banda_nombre FROM events e
                   JOIN bands b ON b.id = e.band_id
-                 WHERE e.tipo = 'flyer' AND e.fecha_evento IS NULL AND e.status != 'pasado'
+                 WHERE e.tipo = 'flyer' AND e.fecha_evento IS NULL
+                   AND e.status != 'pasado' AND e.irrelevante = 0
                  ORDER BY e.id DESC
             """),
         }
@@ -683,6 +684,25 @@ def eventos_al_final(ids: str = Form(...)) -> RedirectResponse:
     finally:
         cx.close()
     return RedirectResponse("/calendario", status_code=303)
+
+
+@app.post("/eventos/{event_id}/irrelevante", response_class=HTMLResponse)
+def evento_irrelevante(request: Request, event_id: int) -> HTMLResponse:
+    """Toggle de la lista negra: flyers de fechas pasadas o que no son flyers."""
+    cx = db.connect()
+    try:
+        actual = db.get(cx, "events", event_id)
+        if actual is None:
+            raise HTTPException(404)
+        db.update(cx, "events", event_id,
+                  irrelevante=0 if actual.get("irrelevante") else 1)
+        evento = db.rows(cx, """
+            SELECT e.*, b.nombre AS banda_nombre FROM events e
+              JOIN bands b ON b.id = e.band_id WHERE e.id = ?
+        """, (event_id,))[0]
+    finally:
+        cx.close()
+    return templates.TemplateResponse(request, "_event_row.html", {"e": evento})
 
 
 @app.post("/eventos/parsear", response_class=HTMLResponse)
@@ -748,20 +768,35 @@ _EVENTOS_ORDER = {
 }
 
 
+# Filtro "incompletos": lo que el parseo automático no pudo llenar y hay que
+# corregir a mano — sin fecha, o sin lugar (los releases no llevan lugar).
+_EVENTOS_INCOMPLETOS = """
+    (e.fecha_evento IS NULL OR e.fecha_evento = '')
+    OR (e.tipo != 'release' AND (e.lugar IS NULL OR e.lugar = ''))
+"""
+
+
 @app.get("/eventos", response_class=HTMLResponse)
-def eventos(request: Request, order: str = "nuevo") -> HTMLResponse:
+def eventos(request: Request, order: str = "nuevo", solo: str = "") -> HTMLResponse:
     orden = _EVENTOS_ORDER.get(order, _EVENTOS_ORDER["nuevo"])
+    if solo == "irrelevantes":
+        where = "WHERE e.irrelevante = 1"
+    elif solo == "incompletos":
+        where = f"WHERE e.irrelevante = 0 AND ({_EVENTOS_INCOMPLETOS})"
+    else:
+        where = "WHERE e.irrelevante = 0"
     cx = db.connect()
     try:
         filas = db.rows(cx, f"""
             SELECT e.*, b.nombre AS banda_nombre FROM events e
               JOIN bands b ON b.id = e.band_id
+              {where}
              ORDER BY {orden}
         """)
     finally:
         cx.close()
     return templates.TemplateResponse(request, "eventos.html",
-                                      {"eventos": filas, "order": order})
+                                      {"eventos": filas, "order": order, "solo": solo})
 
 
 @app.post("/eventos/{event_id}", response_class=HTMLResponse)

@@ -38,6 +38,7 @@ TABLES: dict[str, set[str]] = {
     "events": {
         "band_id", "tipo", "fecha_evento", "titulo", "cover_url", "lugar", "ciudad",
         "flyer_path", "source_post_id", "parseado_por_llm", "status", "al_final",
+        "irrelevante",
     },
     "content_queue": {
         "tipo", "band_id", "member_id", "photo_id", "event_id",
@@ -82,6 +83,9 @@ _MIGRATIONS = {
         "titulo": "TEXT",
         "cover_url": "TEXT",
         "al_final": "INTEGER NOT NULL DEFAULT 0",
+        # lista negra manual: fechas pasadas o fotos que no son flyers; la
+        # clasificación recrearía el evento si se borrara, por eso es una marca.
+        "irrelevante": "INTEGER NOT NULL DEFAULT 0",
     },
     "content_queue": {
         "meme_url": "TEXT",
