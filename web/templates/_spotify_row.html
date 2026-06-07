@@ -1,0 +1,38 @@
+<tr id="spotify-{{ b.id }}">
+  <td>
+    <strong>{{ b.nombre }}</strong>
+    {% if b.ig_handle %}<br><a href="https://instagram.com/{{ b.ig_handle }}" target="_blank" class="muted" style="font-size:12px;">@{{ b.ig_handle }}</a>{% endif %}
+  </td>
+  <td>
+    {% if b.link_externo %}
+      <a href="{{ b.link_externo }}" target="_blank" style="font-size:12px;">{{ b.link_externo }}</a>
+    {% else %}<span class="muted">—</span>{% endif %}
+  </td>
+  <td>
+    {% if b.search_error %}
+      <span class="muted">⚠ Spotify no respondió ({{ b.search_error }})</span>
+    {% elif not b.candidatos %}
+      <span class="muted">sin candidatos</span>
+    {% else %}
+      {% for c in b.candidatos %}
+        <div style="display:flex; align-items:center; gap:8px; margin:2px 0;">
+          <a href="{{ c.url }}" target="_blank" title="oír en Spotify">{{ c.nombre }}</a>
+          <button hx-post="/spotify/{{ b.id }}/elegir" hx-target="#spotify-{{ b.id }}"
+                  hx-swap="outerHTML" hx-vals='{"spotify_id": "{{ c.id }}"}'
+                  style="padding:2px 8px; font-size:12px;">es este</button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  </td>
+  <td style="white-space:nowrap;">
+    <form hx-post="/spotify/{{ b.id }}/elegir" hx-target="#spotify-{{ b.id }}"
+          hx-swap="outerHTML" style="display:flex; gap:4px; margin-bottom:4px;">
+      <input name="spotify_id" placeholder="id a mano" style="width:120px;">
+      <button style="padding:2px 8px; font-size:12px;">guardar</button>
+    </form>
+    <button hx-post="/spotify/{{ b.id }}/no-esta" hx-target="#spotify-{{ b.id }}"
+            hx-swap="outerHTML" class="secundario"
+            title="No está en Spotify: no se vuelve a buscar"
+            style="padding:2px 8px; font-size:12px;">no está</button>
+  </td>
+</tr>

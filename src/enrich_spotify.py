@@ -284,6 +284,9 @@ def enrich(handles: list[str] | None = None, *, solo_faltantes: bool = False) ->
         if handles:
             quiero = {h.lstrip("@").lower() for h in handles}
             bandas = [b for b in bandas if (b.get("ig_handle") or "").lower() in quiero]
+        # 'no_esta' = el usuario confirmó en /spotify que la banda no está en
+        # Spotify; no la re-buscamos nunca (gastaría cuota y no daría match).
+        bandas = [b for b in bandas if b.get("spotify_status") != "no_esta"]
         if solo_faltantes:
             bandas = [b for b in bandas if not b.get("spotify_id")]
         if not bandas:
