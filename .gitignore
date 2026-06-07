@@ -41,3 +41,8 @@ playwright-report/
 .idea/
 # token cache de Spotify (archivo, no directorio)
 .cache
+
+# Archivos personales sueltos en la carpeta (no son del proyecto)
+Becas y apoyos - Tec de Monterrey.docx
+repos_github_ordenados.xlsx
+new_imp/
