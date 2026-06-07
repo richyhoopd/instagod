@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Regular.ttf') format('truetype'); font-weight:400; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Bold.ttf') format('truetype'); font-weight:700; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Italic.ttf') format('truetype'); font-weight:400; font-style:italic; }
+  @font-face { font-family:'Poppins'; src:url('{{ fonts_dir }}/Poppins-SemiBold.ttf') format('truetype'); font-weight:600; }
+  :root { --green:#1b5e3f; --paper:#faf8f3; --ink:#0a0a0a; --w:1080px; --h:1350px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:var(--w); height:var(--h); }
+  .card { width:var(--w); height:var(--h); background:var(--paper); display:flex; flex-direction:column; }
+
+  .head { padding:30px 80px 18px; text-align:center; border-bottom:6px solid var(--green); }
+  .kicker { font-family:'Poppins',sans-serif; font-weight:600; font-size:20px; letter-spacing:6px;
+            color:var(--green); text-transform:uppercase; margin-bottom:5px; }
+  .titulo { font-family:'Tinos',serif; font-weight:700; font-size:66px; line-height:1; color:var(--ink); }
+
+  .grid { flex:1; display:grid; grid-template-columns:repeat(2, 1fr); gap:18px 32px;
+          padding:22px 64px; align-content:center; min-height:0; overflow:hidden; }
+  /* 1 o 2 releases: una sola columna centrada, sin celdas fantasma */
+  .grid.n1 { grid-template-columns:minmax(0, 420px); justify-content:center; }
+  .grid.n2 { grid-template-columns:repeat(2, 1fr); align-content:center; }
+
+  .celda { display:flex; flex-direction:column; align-items:center; text-align:center; min-width:0; }
+  /* Cuadro CUADRADO: la portada nunca se recorta a 4:3 */
+  .cuadro { position:relative; width:min(88%, 420px); aspect-ratio:1/1; border-radius:12px; overflow:hidden;
+            box-shadow:0 10px 26px rgba(0,0,0,.22); background:var(--green); margin:0 auto; }
+  .cuadro img { width:100%; height:100%; object-fit:cover; display:block; }
+  .cuadro .ph { width:100%; height:100%; display:flex; align-items:center; justify-content:center;
+                font-family:'Tinos',serif; font-weight:700; font-size:120px; color:var(--paper); }
+  /* Textos no se extienden más allá del cover */
+  .banda { font-family:'Tinos',serif; font-weight:700; font-size:28px; color:var(--ink);
+           line-height:1.08; margin-top:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+           max-width:min(88%, 420px); }
+  .obra { font-family:'Tinos',serif; font-style:italic; font-size:21px; color:#555; margin-top:2px;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          max-width:min(88%, 420px); }
+  .meta { display:flex; align-items:center; justify-content:center; gap:10px; margin-top:8px; }
+  .badge { font-family:'Poppins',sans-serif; font-weight:600; font-size:14px; letter-spacing:2px;
+           text-transform:uppercase; color:var(--paper); background:var(--green);
+           padding:5px 12px; border-radius:999px; }
+  .fecha { font-family:'Poppins',sans-serif; font-weight:600; font-size:16px; letter-spacing:1px;
+           color:var(--green); text-transform:uppercase; }
+
+  .footer { display:flex; align-items:center; justify-content:center; gap:22px; padding:0 80px 28px; }
+  .footer .line { flex:1; height:4px; background:var(--green); max-width:230px; }
+  .footer .handle { font-family:'Tinos',serif; font-weight:700; color:var(--green); font-size:42px; white-space:nowrap; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <div class="kicker">{{ kicker }}{% if paginas > 1 %} · {{ pagina }}/{{ paginas }}{% endif %}</div>
+      <div class="titulo">Música Nueva</div>
+    </div>
+    <div class="grid {% if releases|length == 1 %}n1{% elif releases|length == 2 %}n2{% endif %}">
+      {% for r in releases %}
+      <div class="celda">
+        <div class="cuadro">
+          {% if r.cover_src %}<img src="{{ r.cover_src }}">{% else %}<div class="ph">{{ r.inicial }}</div>{% endif %}
+        </div>
+        <div class="banda">{{ r.banda }}</div>
+        <div class="obra">{{ r.obra }}</div>
+        <div class="meta"><span class="badge">{{ r.badge }}</span><span class="fecha">{{ r.fecha }}</span></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="footer"><div class="line"></div><div class="handle">@gdlscene</div><div class="line"></div></div>
+  </div>
+</body>
+</html>

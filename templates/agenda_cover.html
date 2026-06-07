@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Bold.ttf') format('truetype'); font-weight:700; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Italic.ttf') format('truetype'); font-weight:400; font-style:italic; }
+  @font-face { font-family:'Poppins'; src:url('{{ fonts_dir }}/Poppins-SemiBold.ttf') format('truetype'); font-weight:600; }
+  :root { --green:#1b5e3f; --paper:#faf8f3; --w:1080px; --h:1350px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:var(--w); height:var(--h); }
+  .card { width:var(--w); height:var(--h); background:var(--green); color:var(--paper);
+          display:flex; flex-direction:column; align-items:center; justify-content:center;
+          text-align:center; padding:80px; position:relative; }
+  .kicker { font-family:'Poppins',sans-serif; font-weight:600; font-size:34px; letter-spacing:8px;
+            text-transform:uppercase; opacity:.85; margin-bottom:30px; }
+  .titulo { font-family:'Tinos',serif; font-weight:700; font-size:150px; line-height:.95; }
+  .rango { font-family:'Tinos',serif; font-style:italic; font-size:54px; margin-top:40px; opacity:.95; }
+  .pie { position:absolute; bottom:70px; left:0; right:0; font-family:'Tinos',serif;
+         font-weight:700; font-size:50px; letter-spacing:1px; }
+  .pie .line { display:inline-block; width:120px; height:4px; background:var(--paper);
+               vertical-align:middle; margin:0 20px; opacity:.8; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="kicker">{{ kicker }}</div>
+    <div class="titulo">La Agenda<br>de la Escena</div>
+    <div class="rango">{{ rango }}</div>
+    <div class="pie"><span class="line"></span>@gdlscene<span class="line"></span></div>
+  </div>
+</body>
+</html>

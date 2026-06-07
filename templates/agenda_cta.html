@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Bold.ttf') format('truetype'); font-weight:700; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Italic.ttf') format('truetype'); font-weight:400; font-style:italic; }
+  @font-face { font-family:'Poppins'; src:url('{{ fonts_dir }}/Poppins-SemiBold.ttf') format('truetype'); font-weight:600; }
+  :root { --green:#1b5e3f; --paper:#faf8f3; --w:1080px; --h:1350px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:var(--w); height:var(--h); }
+  .card { width:var(--w); height:var(--h); background:var(--paper); color:var(--green);
+          display:flex; flex-direction:column; align-items:center; justify-content:center;
+          text-align:center; padding:80px; position:relative; }
+  .arroba { font-family:'Poppins',sans-serif; font-weight:600; font-size:30px; letter-spacing:5px;
+            text-transform:uppercase; opacity:.8; margin-bottom:24px; }
+  .grande { font-family:'Tinos',serif; font-weight:700; font-size:118px; line-height:1; }
+  .sub { font-family:'Tinos',serif; font-style:italic; font-size:46px; margin-top:36px; max-width:780px; }
+  .acciones { display:flex; gap:40px; margin-top:56px; font-family:'Poppins',sans-serif;
+              font-weight:600; font-size:38px; }
+  .acciones span { background:var(--green); color:var(--paper); padding:16px 36px; border-radius:16px; }
+  .pie { position:absolute; bottom:70px; left:0; right:0; font-family:'Tinos',serif;
+         font-weight:700; font-size:50px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="arroba">{{ kicker }}</div>
+    <div class="grande">¿Vas a ir?</div>
+    <div class="sub">Comparte esta agenda en tu historia y etiquétanos.<br>Comenta a quién vas a ver.</div>
+    <div class="acciones"><span>↗ Comparte</span><span>💬 Comenta</span></div>
+    <div class="pie">@gdlscene</div>
+  </div>
+</body>
+</html>

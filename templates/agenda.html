@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Regular.ttf') format('truetype'); font-weight:400; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Bold.ttf') format('truetype'); font-weight:700; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Italic.ttf') format('truetype'); font-weight:400; font-style:italic; }
+  @font-face { font-family:'Poppins'; src:url('{{ fonts_dir }}/Poppins-SemiBold.ttf') format('truetype'); font-weight:600; }
+
+  :root { --green:#1b5e3f; --paper:#faf8f3; --ink:#0a0a0a; --w:1080px; --h:1350px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:var(--w); height:var(--h); }
+
+  .card { width:var(--w); height:var(--h); background:var(--paper); display:flex; flex-direction:column; overflow:hidden; }
+
+  /* Cabecera tipo periódico: kicker + título serif + rango de fechas */
+  .head { padding:64px 80px 30px; text-align:center; border-bottom:6px solid var(--green); }
+  .kicker { font-family:'Poppins',sans-serif; font-weight:600; font-size:26px; letter-spacing:6px; color:var(--green); text-transform:uppercase; margin-bottom:10px; }
+  .titulo { font-family:'Tinos',serif; font-weight:700; font-size:104px; line-height:1; color:var(--ink); }
+  .rango { font-family:'Tinos',serif; font-style:italic; font-size:36px; color:#444; margin-top:14px; }
+
+  /* Lista de eventos */
+  .lista { flex:1; display:flex; flex-direction:column; justify-content:center; padding:24px 80px; min-height:0; gap:6px; }
+  .evento { display:flex; align-items:center; gap:24px; padding:14px 0; border-bottom:2px solid #e2ddd2; }
+  .evento:last-child { border-bottom:none; }
+  .cover { width:96px; height:96px; flex:none; border-radius:6px; object-fit:cover; box-shadow:0 2px 6px rgba(0,0,0,.18); background:#ddd; }
+  .fecha { width:130px; flex:none; text-align:center; }
+  .fecha .dia { font-family:'Tinos',serif; font-weight:700; font-size:54px; color:var(--green); line-height:1; }
+  .fecha .mes { font-family:'Poppins',sans-serif; font-weight:600; font-size:20px; letter-spacing:3px; color:var(--green); text-transform:uppercase; }
+  .info { flex:1; min-width:0; }
+  .banda { font-family:'Tinos',serif; font-weight:700; font-size:44px; color:var(--ink); line-height:1.12; }
+  .lugar { font-family:'Tinos',serif; font-size:30px; color:#555; margin-top:2px; }
+
+  .extra { text-align:center; font-family:'Tinos',serif; font-style:italic; font-size:28px; color:#777; padding-bottom:6px; }
+
+  .footer { display:flex; align-items:center; justify-content:center; gap:22px; padding:0 80px 56px; }
+  .footer .line { flex:1; height:4px; background:var(--green); max-width:230px; }
+  .footer .handle { font-family:'Tinos',serif; font-weight:700; color:var(--green); font-size:46px; white-space:nowrap; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <div class="kicker">{{ kicker }}{% if paginas > 1 %} · {{ pagina }}/{{ paginas }}{% endif %}</div>
+      <div class="titulo">{{ titulo_card }}</div>
+      <div class="rango">{{ rango }}</div>
+    </div>
+    <div class="lista" id="caption">
+      {% for ev in eventos %}
+      <div class="evento">
+        <div class="fecha"><div class="dia">{{ ev.dia }}</div><div class="mes">{{ ev.mes }}</div></div>
+        {% if ev.cover %}<img class="cover" src="{{ ev.cover }}">{% endif %}
+        <div class="info">
+          <div class="banda">{{ ev.banda }}</div>
+          {% if ev.lugar %}<div class="lugar">{{ ev.lugar }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if extra %}<div class="extra">{{ extra }}</div>{% endif %}
+    <div class="footer"><div class="line"></div><div class="handle">{{ handle }}</div><div class="line"></div></div>
+  </div>
+  <script>
+    // Auto-ajuste: si la lista no cabe, encoge tipografías hasta que entre.
+    function fitCaption() {
+      const lista = document.getElementById('caption');
+      let escala = 1.0;
+      while (lista.scrollHeight > lista.clientHeight && escala > 0.5) {
+        escala -= 0.05;
+        for (const sel of [['.banda', 44], ['.lugar', 30], ['.dia', 54], ['.mes', 20]]) {
+          document.querySelectorAll(sel[0]).forEach(el => el.style.fontSize = (sel[1] * escala) + 'px');
+        }
+        document.querySelectorAll('.evento').forEach(el => {
+          el.style.paddingTop = (16 * escala) + 'px';
+          el.style.paddingBottom = (16 * escala) + 'px';
+        });
+      }
+      window.__captionFitted = true;
+    }
+    document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(fitCaption)));
+  </script>
+</body>
+</html>

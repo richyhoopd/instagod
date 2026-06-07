@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Bold.ttf') format('truetype'); font-weight:700; }
+  @font-face { font-family:'Tinos'; src:url('{{ fonts_dir }}/Tinos-Italic.ttf') format('truetype'); font-weight:400; font-style:italic; }
+  @font-face { font-family:'Poppins'; src:url('{{ fonts_dir }}/Poppins-SemiBold.ttf') format('truetype'); font-weight:600; }
+  :root { --green:#1b5e3f; --paper:#faf8f3; --w:1080px; --h:1350px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:var(--w); height:var(--h); }
+  .card { width:var(--w); height:var(--h); background:var(--green); color:var(--paper);
+          display:flex; flex-direction:column; align-items:center; justify-content:center;
+          text-align:center; padding:70px 80px; position:relative; overflow:hidden; }
+  .kicker { font-family:'Poppins',sans-serif; font-weight:600; font-size:30px; letter-spacing:8px;
+            text-transform:uppercase; opacity:.85; }
+  .titulo { font-family:'Tinos',serif; font-weight:700; font-size:132px; line-height:.95; margin-top:22px; }
+  .rango { font-family:'Tinos',serif; font-style:italic; font-size:46px; margin-top:24px; opacity:.95; }
+
+  /* Pila de portadas: rotaciones alternadas + traslape, como discos sobre la mesa */
+  .pila { display:flex; justify-content:center; align-items:center; margin-top:54px; height:300px; }
+  .pila img, .pila .ph { width:240px; height:240px; object-fit:cover; border-radius:10px; flex:none;
+              box-shadow:0 14px 34px rgba(0,0,0,.45); border:6px solid var(--paper); margin:0 -26px; }
+  .pila .ph { background:#14492f; display:flex; align-items:center; justify-content:center;
+              font-family:'Tinos',serif; font-weight:700; font-size:96px; color:var(--paper); }
+  .pila > *:nth-child(odd)  { transform:rotate(-5deg); }
+  .pila > *:nth-child(even) { transform:rotate(4deg) translateY(14px); }
+  .pila > *:nth-child(3)    { transform:rotate(-2deg) translateY(-10px); }
+
+  /* Lineup: los nombres llaman a los fans de cada banda desde el feed */
+  .lineup { margin-top:56px; font-family:'Poppins',sans-serif; font-weight:600; font-size:26px;
+            letter-spacing:2px; text-transform:uppercase; line-height:1.7; opacity:.92; max-width:880px; }
+  .lineup .dot { opacity:.55; padding:0 10px; }
+  /* Un nombre de banda nunca se parte entre líneas (ej. "a l a m e d a") */
+  .lineup .nombre { white-space:nowrap; }
+  .pie { position:absolute; bottom:60px; left:0; right:0; font-family:'Tinos',serif;
+         font-weight:700; font-size:46px; letter-spacing:1px; }
+  .pie .line { display:inline-block; width:110px; height:4px; background:var(--paper);
+               vertical-align:middle; margin:0 20px; opacity:.8; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="kicker">{{ kicker }}</div>
+    <div class="titulo">Música<br>Nueva</div>
+    <div class="rango">{{ rango }}</div>
+    <div class="pila">
+      {% for m in minis %}
+        {% if m.src %}<img src="{{ m.src }}">{% else %}<div class="ph">{{ m.inicial }}</div>{% endif %}
+      {% endfor %}
+    </div>
+    <div class="lineup">
+      {% for n in lineup %}<span class="nombre">{{ n }}</span>{% if not loop.last %} <span class="dot">·</span>
+      {% endif %}{% endfor %}
+    </div>
+    <div class="pie"><span class="line"></span>@gdlscene<span class="line"></span></div>
+  </div>
+</body>
+</html>
