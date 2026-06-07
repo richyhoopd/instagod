@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block contenido %}
+{% set tipo_emoji = {"banda":"🎸","solista":"🎤","foro":"🏠","evento":"🎪","colectivo":"📣"} %}
+<h2>Plan de contenido
+  <span class="muted">({{ posts|length }} por curar · {{ bandas }} bandas{% if agendados %} · {{ agendados }} ya agendados{% endif %})</span></h2>
+
+<div style="display:flex; gap:10px; align-items:center; margin:12px 0; padding:12px; background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); flex-wrap:wrap;">
+  <label>Mes:
+    <select onchange="location.href='/plan?mes='+this.value" style="width:auto;">
+      {% for o in meses %}
+        <option value="{{ o.valor }}" {% if o.valor == mes %}selected{% endif %}>{{ o.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <form method="post" action="/plan/generar">
+    <input type="hidden" name="mes" value="{{ mes }}">
+    <input type="hidden" name="replan" value="1">
+    <button type="submit" title="Crea/rehace el plan de {{ mes }} con las prioridades actuales">⚙️ Generar plan de este mes</button>
+  </form>
+  <button hx-post="/plan/enviar" hx-vals='{"mes": "{{ mes }}"}' hx-target="#plan-msg" hx-swap="innerHTML"
+          hx-confirm="¿Mandar los {{ posts|length }} posts a Telegram para aprobar?">📤 Mandar todo a Telegram</button>
+  <span class="muted" style="font-size:13px;">Topes: P1=5/mes · P2=2/mes · P3-P5=1/mes. Sube prioridad en Bandas para más posts.</span>
+  <span id="plan-msg" class="muted"></span>
+</div>
+
+{% if not posts %}
+  <p class="muted">No hay plan para {{ mes }}. Dale "Regenerar plan" (necesitas fotos usables — corre el pipeline y clasifica).</p>
+{% endif %}
+
+<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px;">
+  {% for p in posts %}{% include "_plan_card.html" %}{% endfor %}
+</div>
+{% endblock %}

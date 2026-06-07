@@ -1,0 +1,40 @@
+<div id="foto-{{ f.id }}" style="background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); overflow:hidden;">
+  <img src="/foto/{{ f.id }}" loading="lazy"
+       style="width:100%; height:200px; object-fit:cover; {% if not f.usable_meme %}filter:grayscale(.8) opacity(.6);{% endif %}">
+  <div style="padding:8px 10px; font-size:12px;">
+    <div class="muted" style="margin-bottom:6px;">
+      {% if f.faces_count is not none %}{{ f.faces_count }} cara(s) ·{% endif %}
+      {% if f.nitidez is not none %}nitidez {{ "%.0f"|format(f.nitidez) }} ·{% endif %}
+      {{ f.fecha[:10] if f.fecha else "sin fecha" }}
+      {% if f.usada %}· <strong>usada</strong>{% endif %}
+    </div>
+    <form hx-post="/fotos/{{ f.id }}" hx-target="#foto-{{ f.id }}" hx-swap="outerHTML"
+          style="display:flex; flex-direction:column; gap:6px;">
+      <label><input type="checkbox" name="usable_meme" value="1" style="width:auto;"
+             {% if f.usable_meme %}checked{% endif %}> usable para meme</label>
+      <label><input type="checkbox" name="usada" value="1" style="width:auto;"
+             {% if f.usada %}checked{% endif %}> ya usada</label>
+      <select name="member_id">
+        <option value="">— sin integrante —</option>
+        {% for m in members %}
+          <option value="{{ m.id }}" {% if f.member_id == m.id %}selected{% endif %}>{{ m.nombre }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="secundario">Guardar</button>
+    </form>
+    <form hx-post="/fotos/{{ f.id }}/a-cola" hx-target="#cola-{{ f.id }}" hx-swap="innerHTML"
+          style="display:flex; gap:6px; margin-top:6px;">
+      <input name="tema_semilla" placeholder="tema semilla (opcional)">
+      <button type="submit" title="Crear fila de meme en la cola">→ cola</button>
+    </form>
+    <div id="cola-{{ f.id }}"></div>
+    <button class="secundario" hx-post="/fotos/{{ f.id }}/flyer"
+            hx-target="#foto-{{ f.id }}" hx-swap="outerHTML"
+            title="Es un flyer: lo manda a Eventos para sacar su fecha y lo saca de memes"
+            style="margin-top:6px; width:100%; font-size:12px;">🏴 es flyer → Eventos</button>
+    {% if f.caption_original %}
+      <details style="margin-top:6px;"><summary class="muted">caption original</summary>
+        <p style="margin:4px 0 0;">{{ f.caption_original[:300] }}</p></details>
+    {% endif %}
+  </div>
+</div>

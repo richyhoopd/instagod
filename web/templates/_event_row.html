@@ -1,0 +1,37 @@
+<tr id="evento-{{ e.id }}" {% if e.irrelevante %}class="inactiva"{% endif %}>
+  <td>
+    {% if e.flyer_path %}
+      <a href="/flyer/{{ e.id }}" target="_blank"><img src="/flyer/{{ e.id }}" style="height:64px; border-radius:4px;"></a>
+    {% elif e.cover_url %}
+      <a href="{{ e.cover_url }}" target="_blank"><img src="{{ e.cover_url }}" style="height:64px; border-radius:6px;" title="portada del release"></a>
+    {% else %}<span class="muted">—</span>{% endif %}
+  </td>
+  <td>{{ e.banda_nombre }}</td>
+  <td>
+    <select name="tipo" form="form-e-{{ e.id }}">
+      {% for t in ["fecha","flyer","release"] %}
+        <option value="{{ t }}" {% if e.tipo == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td><input name="fecha_evento" value="{{ e.fecha_evento or '' }}" placeholder="2026-06-21" form="form-e-{{ e.id }}" style="width:110px;"></td>
+  <td><input name="lugar" value="{{ e.lugar or '' }}" form="form-e-{{ e.id }}"></td>
+  <td><input name="ciudad" value="{{ e.ciudad or '' }}" form="form-e-{{ e.id }}" style="width:90px;"></td>
+  <td>
+    <select name="status" form="form-e-{{ e.id }}">
+      {% for s in ["nuevo","anunciado","pasado"] %}
+        <option value="{{ s }}" {% if e.status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td style="white-space:nowrap;">
+    <form id="form-e-{{ e.id }}" hx-post="/eventos/{{ e.id }}"
+          hx-target="#evento-{{ e.id }}" hx-swap="outerHTML" style="display:inline;"></form>
+    <button form="form-e-{{ e.id }}">Guardar</button>
+    <button hx-post="/eventos/{{ e.id }}/irrelevante"
+            hx-target="#evento-{{ e.id }}" hx-swap="outerHTML" class="secundario"
+            title="{% if e.irrelevante %}Restaurar a las listas{% else %}Fecha pasada o no es un flyer: sácalo de calendarios, anuncios y parseo{% endif %}">
+      {% if e.irrelevante %}↩ restaurar{% else %}🚫 irrelevante{% endif %}
+    </button>
+  </td>
+</tr>

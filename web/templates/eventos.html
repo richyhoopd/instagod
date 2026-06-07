@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Eventos <span class="muted">({{ eventos|length }})</span>
+  {% if solo == "incompletos" %}
+    <span class="chip" style="background:#fff4d6; color:#8a6100;">solo incompletos (sin fecha o lugar)</span>
+    <a href="/eventos" style="font-size:13px;">ver todos</a>
+  {% elif solo == "irrelevantes" %}
+    <span class="chip" style="background:#fdecec; color:#b32626;">🚫 irrelevantes (fuera de calendarios y anuncios)</span>
+    <a href="/eventos" style="font-size:13px;">ver todos</a>
+  {% else %}
+    <a href="/eventos?solo=incompletos" style="font-size:13px;">solo incompletos →</a>
+    <a href="/eventos?solo=irrelevantes" style="font-size:13px;" class="muted">irrelevantes</a>
+  {% endif %}
+</h2>
+
+<div style="display:flex; gap:10px; align-items:center; margin:14px 0;">
+  <form method="post" action="/eventos/parsear">
+    <button type="submit" class="secundario"
+            title="DeepSeek lee el OCR del flyer + caption y llena fecha/lugar/ciudad">🧠 Parsear flyers pendientes</button>
+  </form>
+  <button hx-post="/eventos/anunciar" hx-target="#anuncio-msg" hx-swap="innerHTML"
+          title="Compone tarjetas de anuncio y las manda a aprobar por Telegram">📣 Generar anuncios</button>
+  <button hx-post="/eventos/agenda/shows/semanal" hx-target="#anuncio-msg" hx-swap="innerHTML"
+          title="Shows de hoy a +7 días">🗓 Agenda shows (semana)</button>
+  <button hx-post="/eventos/agenda/shows/mensual" hx-target="#anuncio-msg" hx-swap="innerHTML"
+          title="Shows de hoy a +30 días">🗓 Agenda shows (mes)</button>
+  <button hx-post="/eventos/agenda/releases/semanal" hx-target="#anuncio-msg" hx-swap="innerHTML"
+          title="Releases que salieron en los últimos 7 días">🎵 Música nueva (semana)</button>
+  <button hx-post="/eventos/agenda/releases/mensual" hx-target="#anuncio-msg" hx-swap="innerHTML"
+          title="Releases que salieron en los últimos 30 días">🎵 Música nueva (mes)</button>
+  <span id="anuncio-msg" class="muted"></span>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Flyer</th><th>Banda</th>
+        <th><a href="/eventos?order=tipo&solo={{ solo }}">Tipo ↕</a></th>
+        <th>
+          <a href="/eventos?order=fecha_asc&solo={{ solo }}" title="Fecha ascendente">Fecha ▲</a> /
+          <a href="/eventos?order=fecha_desc&solo={{ solo }}" title="Fecha descendente">▼</a>
+        </th>
+        <th>Lugar</th><th>Ciudad</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for e in eventos %}
+      {% include "_event_row.html" %}
+    {% else %}
+      <tr><td colspan="8" class="muted">Sin eventos. Los flyers aparecen aquí al
+        clasificar fotos (botón "Clasificar" en el detalle de cada banda).</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

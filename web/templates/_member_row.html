@@ -1,0 +1,14 @@
+<tr id="member-{{ m.id }}">
+  <!-- Edición directa: inputs siempre visibles, asociados al form por atributo `form` -->
+  <td><input name="nombre" value="{{ m.nombre }}" form="form-m-{{ m.id }}" required></td>
+  <td><input name="rol" value="{{ m.rol or '' }}" form="form-m-{{ m.id }}"></td>
+  <td><input name="ig_handle" value="{{ m.ig_handle or '' }}" form="form-m-{{ m.id }}"></td>
+  <td style="white-space:nowrap;">
+    <form id="form-m-{{ m.id }}" hx-post="/members/{{ m.id }}"
+          hx-target="#member-{{ m.id }}" hx-swap="outerHTML" style="display:inline;"></form>
+    <button form="form-m-{{ m.id }}">Guardar</button>
+    <button class="secundario" hx-post="/members/{{ m.id }}/borrar"
+            hx-target="#member-{{ m.id }}" hx-swap="outerHTML"
+            hx-confirm="¿Borrar a {{ m.nombre }}?">✕</button>
+  </td>
+</tr>

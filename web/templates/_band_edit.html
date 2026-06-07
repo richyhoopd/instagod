@@ -1,0 +1,41 @@
+<tr id="band-{{ b.id }}">
+  <td colspan="10">
+    <!-- Edición inline: el form reemplaza la fila y al guardar vuelve a modo lectura -->
+    <form hx-post="/bandas/{{ b.id }}" hx-target="#band-{{ b.id }}" hx-swap="outerHTML"
+          style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; align-items:end;">
+      <label>Nombre <input name="nombre" value="{{ b.nombre }}" required></label>
+      <label>Tipo
+        <select name="tipo">
+          {% for t in ["banda","solista","foro","evento","colectivo"] %}
+            <option value="{{ t }}" {% if b.tipo == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>IG handle <input name="ig_handle" value="{{ b.ig_handle or '' }}"></label>
+      <label>Spotify ID <input name="spotify_id" value="{{ b.spotify_id or '' }}"></label>
+      <label>Ciudad <input name="ciudad" value="{{ b.ciudad or '' }}"></label>
+      <label>Géneros <small class="muted">(coma)</small>
+        <input name="generos" value="{{ b.generos_str }}"></label>
+      <label>Prioridad
+        <select name="prioridad">
+          {% for p in [1,2,3,4,5] %}
+            <option value="{{ p }}" {% if b.prioridad == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label># Integrantes <input name="n_integrantes" value="{{ b.n_integrantes or '' }}"></label>
+      <label>Activa
+        <select name="activa">
+          <option value="1" {% if b.activa %}selected{% endif %}>Sí</option>
+          <option value="0" {% if not b.activa %}selected{% endif %}>No (archivar)</option>
+        </select>
+      </label>
+      <label style="grid-column: span 3;">Notas <input name="notas" value="{{ b.notas or '' }}"></label>
+      <div style="display:flex; gap:8px;">
+        <button type="submit">Guardar</button>
+        <button type="button" class="secundario" hx-get="/bandas/{{ b.id }}/row"
+                hx-target="#band-{{ b.id }}" hx-swap="outerHTML">Cancelar</button>
+      </div>
+    </form>
+  </td>
+</tr>

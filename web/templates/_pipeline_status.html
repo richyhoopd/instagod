@@ -1,0 +1,35 @@
+<div id="pipe-status"
+     {% if corriendo %}hx-get="/pipeline/status" hx-trigger="every 3s"
+     hx-target="#pipe-status" hx-swap="outerHTML"{% endif %}>
+  <form hx-post="/pipeline" hx-target="#pipe-status" hx-swap="outerHTML" style="display:inline;">
+    <button type="submit" {% if corriendo %}disabled style="opacity:.5; cursor:not-allowed;"{% endif %}
+            title="Ingesta + clasificación + Spotify + eventos de TODAS las activas">
+      {% if corriendo %}⚙️ Pipeline corriendo…{% else %}⚙️ Correr pipeline (scraping masivo){% endif %}
+    </button>
+  </form>
+
+  {% if corriendo or not vacio %}
+  <div style="margin-top:10px; background:#0f1410; color:#cfe8d4; border-radius:8px; padding:12px 14px; font-size:13px;">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+      {% if corriendo %}
+        <strong style="color:#1db954;">⚙️ Corriendo…</strong>
+        <span style="color:#7a9a82;">se actualiza solo cada 3s · no toca Telegram · puede tardar ~1h</span>
+      {% else %}
+        <strong style="color:#1db954;">✅ Pipeline terminado.</strong>
+        <a href="/bandas" style="color:#cfe8d4;">↻ Recargar bandas</a>
+      {% endif %}
+    </div>
+    <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:8px;">
+      <span>📥 <strong>{{ stats.con_fotos }}</strong>/{{ stats.activas }} bandas con fotos</span>
+      <span>🖼 <strong>{{ stats.fotos }}</strong> fotos</span>
+      <span>🔎 <strong>{{ stats.clasificadas }}</strong> clasificadas</span>
+      <span>✅ <strong>{{ stats.usables }}</strong> usables</span>
+      <span>🎪 <strong>{{ stats.eventos }}</strong> eventos</span>
+    </div>
+    {% if lineas %}
+    <pre style="margin:0; max-height:220px; overflow:auto; white-space:pre-wrap; font-family:ui-monospace,Menlo,monospace; line-height:1.4;">{% for l in lineas %}{{ l }}
+{% endfor %}</pre>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Bandas <span class="muted">({{ activas }} activas{% if candidatas %} · {{ candidatas }} candidatas por revisar{% endif %}{% if sin_scrapear %} · <a href="/bandas?solo=sin_scrapear" style="color:#c90; font-weight:600;">● {{ sin_scrapear }} sin scrapear ›</a>{% endif %})</span></h2>
+
+{% if solo == "sin_scrapear" %}
+<div style="margin:8px 0; padding:8px 12px; background:#fff8e6; border-radius:6px; font-size:14px;">
+  Mostrando solo las <strong>{{ bandas|length }}</strong> bandas <strong style="color:#c90;">sin scrapear</strong>
+  (la próxima ingesta/pipeline baja exactamente estas). <a href="/bandas">← ver todas</a>
+</div>
+{% endif %}
+
+<div style="margin:12px 0; padding:12px; background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+  {% if candidatas %}
+    <div style="margin-bottom:8px;">
+      <a href="/bandas?todas=1&order={{ order }}" style="font-size:14px;">
+        → Revisar {{ candidatas }} candidatas (activa las reales, borra el ruido)
+      </a>
+    </div>
+  {% endif %}
+  <!-- Panel de control+progreso: el botón vive aquí y se deshabilita si ya corre -->
+  <div id="pipe-status" hx-get="/pipeline/status" hx-trigger="load"
+       hx-target="#pipe-status" hx-swap="outerHTML"></div>
+</div>
+
+<!-- Alta rápida: la fila nueva se inserta al final de la tabla sin recargar -->
+<form class="alta" hx-post="/bandas" hx-target="#tbody-bandas" hx-swap="beforeend"
+      hx-on::after-request="this.reset()">
+  <input name="nombre" placeholder="Nombre de la banda" required>
+  <input name="ig_handle" placeholder="@handle de IG (opcional)">
+  <button type="submit">+ Agregar</button>
+  <a href="/bandas?todas={{ 0 if todas else 1 }}&order={{ order }}" style="align-self:center; font-size:13px;">
+    {{ "Ocultar archivadas" if todas else "Ver archivadas" }}
+  </a>
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th><a href="/bandas?order=nombre&todas={{ todas }}">Nombre</a></th>
+      <th>Tipo</th>
+      <th>IG</th>
+      <th>Spotify</th>
+      <th>Géneros</th>
+      <th><a href="/bandas?order=popularity&todas={{ todas }}">Pop.</a></th>
+      <th>Seg. IG</th>
+      <th><a href="/bandas?order=prioridad&todas={{ todas }}">Prio.</a></th>
+      <th>Notas</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="tbody-bandas">
+    {% for b in bandas %}
+      {% include "_band_row.html" %}
+    {% else %}
+      <tr><td colspan="10" class="muted">Sin bandas todavía. Agrega la primera arriba
+        — o corre la ingesta (Fase 2) cuando esté lista.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

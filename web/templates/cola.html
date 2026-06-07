@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Cola de contenido <span class="muted">({{ listos }} lista(s) para el Sheet)</span></h2>
+
+<div style="display:flex; gap:10px; align-items:center; margin:14px 0;">
+  <form method="post" action="/cola/sync">
+    <button type="submit" {% if not listos %}disabled style="opacity:.5;"{% endif %}>
+      ⬆ Enviar {{ listos }} fila(s) al Sheet
+    </button>
+  </form>
+  <button hx-post="/cola/generar" hx-target="#gen-msg" hx-swap="innerHTML"
+          title="Corre generate.py: los memes pending llegan a Telegram">🎬 Generar memes</button>
+  <form method="post" action="/cola/pull">
+    <button type="submit" class="secundario"
+            title="Refleja rechazos/publicados del Sheet en la DB">↩ Traer status del Sheet</button>
+  </form>
+  <span id="gen-msg" class="muted"></span>
+</div>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Tipo</th><th>Banda</th><th>Integrante</th><th>Foto</th>
+        <th>Tema semilla</th><th>Status</th><th>Sheet</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for f in filas %}
+    <tr>
+      <td>{{ f.id }}</td>
+      <td>{{ f.tipo }}</td>
+      <td>{{ f.banda_nombre or "—" }}</td>
+      <td>{{ f.member_nombre or "—" }}</td>
+      <td>{% if f.foto_id %}<img src="/foto/{{ f.foto_id }}" style="height:42px; border-radius:4px;">{% else %}—{% endif %}</td>
+      <td>{{ f.tema_semilla or "" }}</td>
+      <td><span class="chip">{{ f.status }}</span></td>
+      <td>{{ f.sheet_row_id or "—" }}</td>
+      <td id="acciones-{{ f.id }}">
+        {% if f.status in ("borrador", "listo") %}
+        <button class="secundario" hx-post="/cola/{{ f.id }}/descartar"
+                hx-target="#acciones-{{ f.id }}" hx-swap="innerHTML">descartar</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="muted">Cola vacía. Las filas se crean desde la galería
+      de fotos de cada banda ("→ cola").</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

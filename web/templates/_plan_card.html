@@ -1,0 +1,43 @@
+{% set tipo_emoji = {"banda":"🎸","solista":"🎤","foro":"🏠","evento":"🎪","colectivo":"📣"} %}
+<div id="plan-{{ p.id }}" style="background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); overflow:hidden;">
+  <div style="position:relative;">
+    <img src="/foto/{{ p.photo_id }}" loading="lazy" style="width:100%; height:170px; object-fit:cover;">
+    <span style="position:absolute; top:6px; left:6px; background:rgba(27,94,63,.92); color:#fff; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px;">
+      {{ tipo_emoji.get(p.tipo,"🎸") }} meme de {{ p.tipo }}
+    </span>
+  </div>
+  <div style="padding:8px 10px; font-size:13px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+      <strong>{{ p.banda_nombre }}</strong>
+      <span class="chip">P{{ p.prioridad }}</span>
+    </div>
+    <div class="muted" style="margin:2px 0 6px;">
+      🗓 {{ p.scheduled_datetime[:10] }} {{ p.scheduled_datetime[11:16] }}
+      {% if p.followers_ig %}· {{ p.followers_ig }} seg{% endif %}
+    </div>
+    <form hx-post="/plan/{{ p.id }}/tema" hx-target="#tema-{{ p.id }}" hx-swap="innerHTML"
+          style="display:flex; gap:5px;">
+      <input name="tema_semilla" value="{{ p.tema_semilla or '' }}" placeholder="tema (opcional)"
+             style="flex:1;">
+      <button type="submit" class="secundario">↵</button>
+    </form>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; gap:4px;">
+      <span id="tema-{{ p.id }}" class="muted"></span>
+      <span style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
+        <button class="secundario" hx-post="/plan/{{ p.id }}/flyer"
+                hx-target="#plan-{{ p.id }}" hx-swap="outerHTML"
+                title="No es meme: es flyer. Lo manda a Eventos para escanear su fecha y mete otra banda"
+                style="font-size:12px;">🏴 flyer</button>
+        <button class="secundario" hx-post="/plan/{{ p.id }}/quitar"
+                hx-target="#plan-{{ p.id }}" hx-swap="outerHTML"
+                title="Lo quita de este plan y mete otra banda (puede reaparecer en otro mes)"
+                style="font-size:12px;">✕ cambiar</button>
+        <button class="secundario" hx-post="/plan/{{ p.id }}/eliminar"
+                hx-target="#plan-{{ p.id }}" hx-swap="outerHTML"
+                hx-confirm="¿Eliminar esta foto para SIEMPRE? Nunca volverá a sugerirse."
+                title="Lista negra: esta foto nunca se vuelve a sugerir (ni tras reclasificar)"
+                style="font-size:12px; color:#b00;">🗑 eliminar</button>
+      </span>
+    </div>
+  </div>
+</div>

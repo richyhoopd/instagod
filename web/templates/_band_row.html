@@ -1,0 +1,48 @@
+{% set tipo_emoji = {"banda":"🎸","solista":"🎤","foro":"🏠","evento":"🎪","colectivo":"📣"} %}
+<tr id="band-{{ b.id }}" {% if not b.activa %}class="inactiva"{% endif %}>
+  <td><a href="/bandas/{{ b.id }}/detalle" style="color:inherit;"><strong>{{ b.nombre }}</strong></a>{% if b.ciudad %} <span class="muted">· {{ b.ciudad }}</span>{% endif %}</td>
+  <td>
+    <!-- Selector inline: cambia el tipo al instante, en activas y candidatas -->
+    <select name="tipo" hx-post="/bandas/{{ b.id }}/tipo" hx-trigger="change"
+            hx-target="#band-{{ b.id }}" hx-swap="outerHTML" style="width:auto; padding:2px 4px;">
+      {% for t in ["banda","solista","foro","evento","colectivo"] %}
+        <option value="{{ t }}" {% if b.tipo == t %}selected{% endif %}>{{ tipo_emoji.get(t,"") }} {{ t }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td>
+    {% if b.ig_handle %}@{{ b.ig_handle }}{% else %}<span class="muted">—</span>{% endif %}
+    {% if b.scraped_at %}
+      <span title="Scrapeada {{ b.scraped_at[:10] }}"
+            style="color:#2c7a39; font-size:11px; font-weight:600;">✓ ya</span>
+    {% elif b.ig_handle and b.activa %}
+      <span title="Sin scrapear — la próxima ingesta la baja"
+            style="background:#ffe08a; color:#7a5b00; font-size:11px; padding:1px 6px; border-radius:8px; font-weight:600;">nueva</span>
+    {% endif %}
+  </td>
+  <td>{% if b.spotify_id %}<span title="{{ b.spotify_id }}">✓</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td>
+    {% for g in b.generos_str.split(", ") if b.generos_str %}<span class="chip">{{ g }}</span>{% endfor %}
+    {% if not b.generos_str %}<span class="muted">—</span>{% endif %}
+  </td>
+  <td>{{ b.popularity if b.popularity is not none else "—" }}</td>
+  <td>{{ b.followers_ig if b.followers_ig is not none else "—" }}</td>
+  <td class="prio">{{ b.prioridad }}</td>
+  <td class="muted">{{ b.notas or "" }}</td>
+  <td style="white-space:nowrap;">
+    {% if not b.activa %}
+      <button hx-post="/bandas/{{ b.id }}/activar"
+              hx-target="#band-{{ b.id }}" hx-swap="outerHTML"
+              title="Es una banda real: actívala">✓ Activar</button>
+      <button class="secundario" hx-post="/bandas/{{ b.id }}/borrar"
+              hx-target="#band-{{ b.id }}" hx-swap="outerHTML"
+              hx-confirm="¿Borrar {{ b.nombre }}?" title="No es banda / ruido">✕</button>
+    {% else %}
+      <button class="secundario" hx-get="/bandas/{{ b.id }}/edit"
+              hx-target="#band-{{ b.id }}" hx-swap="outerHTML">Editar</button>
+      <button class="secundario" hx-post="/bandas/{{ b.id }}/spotify"
+              hx-target="#band-{{ b.id }}" hx-swap="outerHTML"
+              title="Re-enriquecer con Spotify">♻</button>
+    {% endif %}
+  </td>
+</tr>

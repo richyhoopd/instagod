@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Calendarios <span class="muted">— de flyers/eventos, NO memes. Agrupados por semana y mes.</span></h2>
+
+{% if sin_fecha %}
+<div style="margin:12px 0; padding:12px; background:#fff8e6; border-radius:8px; border:1px solid #e8c860;">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+    <strong>🏴 {{ sin_fecha|length }} flyer(s) SIN fecha</strong>
+    <span class="muted" style="font-size:13px;">no salen en los calendarios hasta tener fecha.</span>
+    <form method="post" action="/eventos/parsear" style="display:inline;">
+      <button type="submit" class="secundario" style="font-size:12px;"
+              title="DeepSeek lee el OCR de cada flyer e intenta sacar la fecha">🧠 Parsear todos (auto)</button>
+    </form>
+    <a href="/eventos?solo=incompletos" style="font-size:13px;">✏️ ponerles fecha/lugar a mano en Eventos →</a>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; max-height:140px; overflow:auto;">
+    {% for e in sin_fecha %}
+      <a href="/eventos?solo=incompletos" title="{{ e.banda_nombre }} — ponle fecha en Eventos">
+        {% if e.flyer_path %}<img src="/flyer/{{ e.id }}" style="height:60px; border-radius:4px;" loading="lazy">
+        {% else %}<span class="chip">{{ e.banda_nombre }}</span>{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# Sección de releases: si TODOS ya salieron en un carrusel publicado, se
+   colapsa y el botón exige confirmación — no se re-publica por accidente. #}
+{% macro seccion_releases(titulo, eventos, periodo, margen) %}
+  {% set pendientes = eventos | rejectattr("status", "equalto", "anunciado") | list %}
+  {% if eventos and not pendientes %}
+  <details style="margin:{{ margen }};">
+    <summary style="cursor:pointer;"><strong>{{ titulo }}</strong>
+      <span class="muted">({{ eventos|length }})</span>
+      <span class="chip" style="font-size:11px; background:#e6f4ea; color:#1b5e3f;">✅ todos estos ya fueron publicados</span>
+    </summary>
+    <div style="margin-top:8px;">
+      {{ lista(eventos, "releases") }}
+      <button hx-post="/eventos/agenda/releases/{{ periodo }}" hx-target="#cal-msg" hx-swap="innerHTML"
+              hx-confirm="Estos releases YA salieron en un carrusel publicado en IG. ¿Seguro que quieres publicarlos OTRA VEZ?"
+              class="secundario" style="font-size:12px;">📤 volver a generar (ya publicado)</button>
+    </div>
+  </details>
+  {% else %}
+  <h4 style="margin:{{ margen }};">{{ titulo }} <span class="muted">({{ eventos|length }})</span>
+    <button hx-post="/eventos/agenda/releases/{{ periodo }}" hx-target="#cal-msg" hx-swap="innerHTML"
+            class="secundario" style="font-size:12px;">📤 generar post</button></h4>
+  {{ lista(eventos, "releases") }}
+  {% endif %}
+{% endmacro %}
+
+{% macro lista(eventos, modo) %}
+  {% if eventos %}
+  <table style="margin-bottom:6px;">
+    <thead><tr><th></th><th>Fecha</th><th>Banda</th>
+      <th>{{ "Lugar" if modo == "shows" else "Release" }}</th>
+      {% if modo == "shows" %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for e in eventos %}
+      {% set ids = (e.ids | join(",")) if e.ids else (e.id | string) %}
+      <tr {% if e.al_final %}style="opacity:.6;"{% endif %}>
+        <td style="width:54px;">
+          {% if e.flyer_path %}<img src="/flyer/{{ e.id }}" style="height:40px; border-radius:4px;">
+          {% elif e.cover_url %}<img src="{{ e.cover_url }}" style="height:40px; border-radius:4px;">
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td>{{ e.fecha_evento }}{% if e.al_final %} <span class="chip" style="font-size:10px;">al final</span>{% endif %}{% if modo == "releases" and e.status == "anunciado" %} <span class="chip" style="font-size:10px; background:#e6f4ea; color:#1b5e3f;">✓ publicado</span>{% endif %}</td>
+        <td><strong>{{ e.banda_nombre }}</strong></td>
+        <td>{{ (e.titulo if modo == "releases" else e.lugar) or "—" }}</td>
+        {% if modo == "shows" %}
+        <td style="white-space:nowrap;">
+          <form method="post" action="/eventos/al-final" style="display:inline;">
+            <input type="hidden" name="ids" value="{{ ids }}">
+            <button class="secundario" style="font-size:11px;"
+                    title="Mandar al final del carrusel (ej. fechas de otra ciudad)">⬇ al final</button>
+          </form>
+          <form method="post" action="/eventos/borrar" style="display:inline;"
+                onsubmit="return confirm('¿Quitar esta fecha del agenda?')">
+            <input type="hidden" name="ids" value="{{ ids }}">
+            <button class="secundario" style="font-size:11px; color:#b00;"
+                    title="No es agenda (ej. un foro que solo quiere booking): quitarlo">✕ quitar</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:4px 0;">— nada en esta ventana —</p>{% endif %}
+{% endmacro %}
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:14px;">
+
+  <section>
+    <h3>🗓 Shows (tocadas)</h3>
+    <div style="background:#fff; border-radius:8px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+      <h4 style="margin:0 0 6px;">Esta semana <span class="muted">({{ shows_semana|length }})</span>
+        <button hx-post="/eventos/agenda/shows/semanal" hx-target="#cal-msg" hx-swap="innerHTML"
+                class="secundario" style="font-size:12px;">📤 generar post</button></h4>
+      {{ lista(shows_semana, "shows") }}
+      <h4 style="margin:14px 0 6px;">Resto del mes <span class="muted">({{ shows_mes|length }})</span>
+        <button hx-post="/eventos/agenda/shows/mensual" hx-target="#cal-msg" hx-swap="innerHTML"
+                class="secundario" style="font-size:12px;">📤 generar post</button></h4>
+      {{ lista(shows_mes, "shows") }}
+    </div>
+  </section>
+
+  <section>
+    <h3>🎵 Música nueva (releases)</h3>
+    <div style="background:#fff; border-radius:8px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+      {{ seccion_releases("Esta semana", releases_semana, "semanal", "0 0 6px") }}
+      {{ seccion_releases("Resto del mes", releases_mes, "mensual", "14px 0 6px") }}
+    </div>
+  </section>
+</div>
+<p id="cal-msg" class="muted" style="margin-top:12px;"></p>
+<p class="muted" style="margin-top:6px; font-size:13px;">
+  Para editar fechas/lugares de los eventos ve a <a href="/eventos">Eventos</a>.
+</p>
+<script>
+  // Feedback de envío en los botones "generar post": al click se deshabilitan
+  // y muestran el estado; solo se re-habilitan si la petición FALLÓ.
+  document.body.addEventListener('htmx:beforeRequest', (e) => {
+    const b = e.detail.elt;
+    if (b.matches?.('button[hx-post^="/eventos/agenda/"]')) {
+      b.disabled = true;
+      b.dataset.label = b.textContent;
+      b.textContent = '⏳ enviando…';
+    }
+  });
+  document.body.addEventListener('htmx:afterRequest', (e) => {
+    const b = e.detail.elt;
+    if (b.matches?.('button[hx-post^="/eventos/agenda/"]')) {
+      if (e.detail.successful) {
+        b.textContent = '✅ enviado — aprueba en Telegram';
+      } else {
+        b.textContent = b.dataset.label;
+        b.disabled = false;
+      }
+    }
+  });
+</script>
+{% endblock %}

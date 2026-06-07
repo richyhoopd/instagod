@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block contenido %}
+{% set tipo_emoji = {"banda":"🎸","solista":"🎤","foro":"🏠","evento":"🎪","colectivo":"📣"} %}
+{% set dias = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"] %}
+{% set meses = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"] %}
+<h2>Programados <span class="muted">({{ filas|length }}) — aprobados, esperando su fecha de publicación</span></h2>
+
+{% if not filas %}
+  <p class="muted">Nada agendado todavía. Aprueba posts en Telegram (desde el Plan) y aparecerán aquí con su fecha/hora.</p>
+{% endif %}
+
+<table>
+  <thead><tr><th></th><th>Publica</th><th>Banda</th><th>Tipo</th><th>Estado</th><th>Sheet</th></tr></thead>
+  <tbody>
+    {% for f in filas %}
+    {% set fecha = f.scheduled_datetime %}
+    {% set ya_paso = fecha < ahora %}
+    <tr>
+      <td style="width:64px;">
+        {% if f.meme_url %}
+          <a href="{{ f.meme_url }}" target="_blank" title="Ver el meme compuesto">
+            <img src="{{ f.meme_url }}" style="height:64px; border-radius:4px;" loading="lazy"></a>
+        {% elif f.photo_id %}<img src="/foto/{{ f.photo_id }}" style="height:48px; border-radius:4px;">
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        <strong>{{ fecha[8:10] }} {{ meses[fecha[5:7]|int - 1] }}</strong> · {{ fecha[11:16] }}
+        <div class="muted" style="font-size:12px;">{{ fecha[:10] }}</div>
+      </td>
+      <td>{{ f.banda_nombre or "@gdlscene" }}</td>
+      <td>{{ tipo_emoji.get(f.tipo,"") }} {{ f.qtipo }}</td>
+      <td>
+        {% if ya_paso %}<span class="chip" style="background:#e6f0ff; color:#1456b8;">publicando…</span>
+        {% else %}<span class="chip">programado</span>{% endif %}
+      </td>
+      <td class="muted">#{{ f.sheet_row_id or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="muted" style="margin-top:10px; font-size:13px;">
+  El worker (<code>publish.py</code>, cron horario) publica cada uno cuando llega su hora.
+  Los que dicen "publicando…" ya vencieron y se publican en la próxima corrida.
+</p>
+{% endblock %}
