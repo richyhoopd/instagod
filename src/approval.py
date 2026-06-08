@@ -87,11 +87,13 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
     daemon (único poller) recibe el callback y resuelve.
     """
     import json
-    import urllib.parse
-    import urllib.request
+
+    import requests
 
     import config
 
+    # requests (no urllib): trae certifi, así no truena con el cert verify de la
+    # red de Ricardo (el resolver/proxy mete un cert que urllib rechaza).
     texto = f"{caption}\n\n{imagen_url}".strip()
     payload = {
         "chat_id": config.TELEGRAM_CHAT_ID,
@@ -99,6 +101,5 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
         "reply_markup": json.dumps({"inline_keyboard": construir_botones(queue_id)}),
     }
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = urllib.parse.urlencode(payload).encode()
-    with urllib.request.urlopen(urllib.request.Request(url, data=data)) as resp:
-        resp.read()
+    r = requests.post(url, data=payload, timeout=15)
+    r.raise_for_status()
