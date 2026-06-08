@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import calendar
 import sys
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Any
 
 import pytz

@@ -21,14 +21,14 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from typing import Any
 
-import config
 from src import db
 from src.ingest_ig import IngestRateLimited, _sleep, fetch_profile, get_session
 
-# Categoría IG (lowercase, substring) → tipo de actor.
+# Categoría IG (lowercase, por PALABRA completa) → tipo de actor.
 # El orden importa: se evalúa de arriba a abajo, primer match gana.
 _CAT_A_TIPO: list[tuple[tuple[str, ...], str]] = [
     (("record label", "music production", "producer", "production"), "colectivo"),
@@ -63,17 +63,30 @@ _BIO_MUSICA = ("ep ", "álbum", "single", "sencillo", "spotify", "escúchanos",
                "nuevo disco", "rock", "punk", "metal", "indie", "shoegaze", "post-punk")
 
 
+def _palabra_en(claves, texto: str) -> bool:
+    """True si alguna clave aparece como PALABRA completa en `texto`.
+
+    Match por límite de palabra (no substring): evita que 'bar' active "Bartender",
+    'pub' a "Public Figure" o 'club' a "nightclub". Las claves multipalabra (p. ej.
+    "live music venue") se buscan con sus espacios como frase, también con bordes.
+    """
+    return any(re.search(rf"\b{re.escape(k)}\b", texto) for k in claves)
+
+
 def clasificar(categoria: str | None, bio: str | None) -> tuple[str | None, str, str]:
     """(tipo|None, decision, motivo). decision ∈ {'activar','borrar','dudosa'}."""
     cat = (categoria or "").lower()
     low = (bio or "").lower()
 
-    for claves, tipo in _CAT_A_TIPO:
-        if any(k in cat for k in claves):
-            return tipo, "activar", f"categoría IG: {categoria}"
+    # BORRAR antes que ACTIVAR: las señales de "no es un actor de la escena"
+    # (photographer, store, personal blog, public figure…) son más específicas y
+    # deben descalificar primero, sin que una palabra genérica de actor las pise.
     for clave, etiqueta in _CAT_BORRAR.items():
-        if clave in cat:
+        if re.search(rf"\b{re.escape(clave)}\b", cat):
             return None, "borrar", etiqueta
+    for claves, tipo in _CAT_A_TIPO:
+        if _palabra_en(claves, cat):
+            return tipo, "activar", f"categoría IG: {categoria}"
 
     # Sin categoría útil → heurística de bio (queda dudosa, tipo tentativo).
     for claves, tipo in _BIO_TIPO:

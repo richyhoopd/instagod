@@ -21,9 +21,8 @@ import sys
 import time
 from typing import Any
 
-import config
 from src import db
-from src.ingest_ig import IngestRateLimited, _sleep, fetch_profile, get_session
+from src.ingest_ig import IngestRateLimited, fetch_profile, get_session
 
 _FOLLOWING_URL = "https://www.instagram.com/api/v1/friendships/{uid}/following/"
 _PAGE = 24

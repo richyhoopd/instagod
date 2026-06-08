@@ -52,10 +52,13 @@ def test_sin_lugar_no_se_fusiona() -> None:
 
 
 def test_al_final_ordena_ultimo(tmp_path):
+    from datetime import datetime
+
+    import pytz
+
+    import config
     from src import db
     from src.generate_agenda import eventos_ventana
-    from datetime import datetime
-    import pytz, config
     cx = db.connect(tmp_path / "t.db")
     db.init_db(cx)
     bid = db.insert(cx, "bands", nombre="B")

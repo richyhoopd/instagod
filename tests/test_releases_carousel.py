@@ -1,7 +1,7 @@
 """Carrusel de música nueva: parse de badge, chunks de 4, caption con tags."""
 from __future__ import annotations
 
-from src.generate_agenda import _caption_releases, _parse_titulo, _chunks
+from src.generate_agenda import _caption_releases, _chunks, _parse_titulo
 
 
 def test_parse_titulo_badge() -> None:

@@ -19,6 +19,7 @@ def test_prompt_sin_feedback_no_lo_menciona() -> None:
 def test_regenerate_texto_exacto_no_usa_llm() -> None:
     """Con texto_exacto, _regenerate devuelve ese texto tal cual (sin llamar al LLM)."""
     from unittest.mock import patch
+
     import generate
     item = {"row_id": 1, "caption": "viejo", "meta": {
         "banda": "Kabala", "integrante": "", "rol": "", "tema_semilla": None,
@@ -34,6 +35,7 @@ def test_regenerate_texto_exacto_no_usa_llm() -> None:
 
 def test_regenerate_feedback_se_pasa_al_caption() -> None:
     from unittest.mock import patch
+
     import generate
     item = {"row_id": 1, "caption": "viejo", "meta": {
         "banda": "Kabala", "integrante": "", "rol": "", "tema_semilla": None,

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from src import audience, db
 
-
 # Payload de muestra que simula la respuesta de la Graph API para
 # online_followers con period=lifetime. El campo "value" es un dict hora→count,
 # uno por día del historial.
@@ -73,3 +72,62 @@ def test_cargar_devuelve_filas_de_db(tmp_path) -> None:
     valores = {(f["dow"], f["hora"]): f["valor"] for f in filas}
     assert valores[(3, 19)] == 500
     assert valores[(5, 21)] == 900
+
+
+# ---------- _parsear: robustez ante datos sucios ----------
+
+def test_parsear_suma_misma_dow_hora() -> None:
+    # lunes 19h aparece en dos días distintos: 80 + 100 = 180 (suma histórica).
+    filas = audience._parsear_online_followers(_PAYLOAD_MUESTRA)
+    lunes_19 = next(f for f in filas if f["dow"] == 0 and f["hora"] == 19)
+    assert lunes_19["valor"] == 180
+
+
+def test_parsear_ignora_end_time_invalido() -> None:
+    payload = {"data": [{"values": [
+        {"value": {"19": 50}, "end_time": "fecha-mala"},      # no parsea → se salta
+        {"value": {"20": 70}, "end_time": "2026-06-01T23:00:00+0000"},
+    ]}]}
+    filas = audience._parsear_online_followers(payload)
+    claves = {(f["dow"], f["hora"]) for f in filas}
+    assert claves == {(0, 20)}                                # solo el válido
+
+
+def test_parsear_ignora_horas_fuera_de_rango_y_no_numericas() -> None:
+    payload = {"data": [{"values": [
+        {"value": {"24": 10, "99": 5, "abc": 3, "20": 70},
+         "end_time": "2026-06-01T23:00:00+0000"},
+    ]}]}
+    filas = audience._parsear_online_followers(payload)
+    claves = {(f["dow"], f["hora"]) for f in filas}
+    assert claves == {(0, 20)}                                # 24, 99, "abc" descartadas
+
+
+# ---------- upsert_audience + sync ----------
+
+def test_upsert_vacio_no_escribe(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    assert audience.upsert_audience(cx, 1, []) == 0
+    cx.close()
+
+
+def test_upsert_actualiza_en_conflicto(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    audience.upsert_audience(cx, 1, [{"dow": 3, "hora": 19, "valor": 500}])
+    n = audience.upsert_audience(cx, 1, [{"dow": 3, "hora": 19, "valor": 999}])
+    assert n == 1
+    filas = audience.cargar(cx, 1)
+    assert len(filas) == 1 and filas[0]["valor"] == 999   # mismo (dow,hora) → update
+    cx.close()
+
+
+def test_sync_usa_fetch_y_upsertea(tmp_path, monkeypatch) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    monkeypatch.setattr(audience, "fetch_online_followers",
+                        lambda account_id=1: [{"dow": 0, "hora": 20, "valor": 42}])
+    assert audience.sync(cx, 1) == 1
+    assert audience.cargar(cx, 1)[0]["valor"] == 42
+    cx.close()

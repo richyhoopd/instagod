@@ -4,7 +4,6 @@ from __future__ import annotations
 import publish
 from src import facebook, x_twitter
 
-
 # ---------- adaptar_caption (X) ----------
 
 def test_x_quita_arrobas_pero_deja_nombres():

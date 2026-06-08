@@ -80,8 +80,9 @@ def test_parsear_callback_invalido() -> None:
 # --- Helper puro: parsear imagen_url (string vs JSON-lista) ---
 
 def test_parse_imagen_url():
-    from src import approval
     import json
+
+    from src import approval
     assert approval._urls_de_imagen(json.dumps(["a","b","c"])) == ["a","b","c"]
     assert approval._urls_de_imagen("http://x/y.jpg") == ["http://x/y.jpg"]
     assert approval._urls_de_imagen("") == []

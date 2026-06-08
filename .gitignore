@@ -49,3 +49,8 @@ new_imp/
 
 # Pool de cuentas scraper (cookies de sesión = secretos)
 data/ig_accounts.json
+
+# Artefactos de cobertura (pytest-cov)
+.coverage
+coverage.xml
+htmlcov/

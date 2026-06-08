@@ -6,15 +6,19 @@ funciones puras contra los umbrales de config.
 """
 from __future__ import annotations
 
+import cv2
 import numpy as np
-import pytest
 
 import config
-from src import db
+from src import classify, db
 from src.classify import (
+    _solapan,
     caption_sugiere_evento,
+    clasificar_foto,
     contar_caras,
     decidir_usable,
+    es_grafico,
+    hay_persona,
     medir_nitidez,
     score_flyer,
 )
@@ -102,4 +106,118 @@ def test_flyer_crea_evento_idempotente(tmp_path) -> None:
     eventos = db.rows(cx, "SELECT * FROM events WHERE band_id = ?", (bid,))
     assert len(eventos) == 1
     assert eventos[0]["tipo"] == "flyer" and eventos[0]["status"] == "nuevo"
+    cx.close()
+
+
+# ---------- _solapan: deduplicación geométrica de cajas de cara ----------
+
+def test_solapan_detecta_cajas_encimadas() -> None:
+    a = (0, 0, 100, 100)
+    b = (10, 10, 100, 100)        # gran solape
+    assert _solapan(a, b) is True
+
+
+def test_no_solapan_cajas_separadas() -> None:
+    a = (0, 0, 50, 50)
+    b = (500, 500, 50, 50)        # sin intersección
+    assert _solapan(a, b) is False
+
+
+# ---------- decidir_usable: gráfico/póster nunca usable ----------
+
+def test_decidir_usable_grafico_nunca_usable() -> None:
+    arriba = config.CLASSIFY_NITIDEZ_MIN + 1
+    # aun con cara clara y nítida, un póster (grafico=True) se descarta.
+    assert decidir_usable(caras_claras=2, nitidez=arriba, flyer=False,
+                          grafico=True) is False
+
+
+# ---------- score_flyer: rama de texto MUY denso (cartel seguro) ----------
+
+def test_score_flyer_texto_muy_denso() -> None:
+    # > 2.5x el mínimo de chars → flyer aunque no haya fecha ni keywords.
+    txt = "x" * (int(config.CLASSIFY_OCR_MIN_CHARS * 2.5) + 5)
+    es, motivo = score_flyer(txt)
+    assert es is True and "denso" in motivo
+
+
+# ---------- es_grafico / hay_persona: no truenan con imágenes sintéticas ----------
+
+def test_es_grafico_devuelve_tupla_sin_error() -> None:
+    plana = np.full((900, 1200), 128, dtype=np.uint8)
+    es, n = es_grafico(plana)
+    assert isinstance(es, bool) and isinstance(n, int)
+    assert es is False           # imagen plana no tiene regiones tipo-texto
+
+
+def test_hay_persona_imagen_plana_es_false() -> None:
+    plana = np.full((900, 1200), 128, dtype=np.uint8)
+    assert hay_persona(plana) is False
+
+
+# ---------- clasificar_foto: integración contra DB con OCR mockeado ----------
+
+def _foto_en_db(cx, tmp_path, gris, tipo="foro", **extra):
+    """Escribe un PNG real y crea la fila photos+band; devuelve el dict de la foto.
+
+    Incluye `tipo` (en producción llega vía el JOIN con bands de clasificar()).
+    """
+    ruta = tmp_path / "foto.png"
+    cv2.imwrite(str(ruta), gris)
+    bid = db.insert(cx, "bands", nombre="Banda", tipo=tipo, activa=1)
+    pid = db.insert(cx, "photos", band_id=bid, path=str(ruta),
+                    source_post_id="POST1", **extra)
+    return {**db.get(cx, "photos", pid), "tipo": tipo}
+
+
+def test_clasificar_foto_nitida_sin_flyer_es_usable(tmp_path, monkeypatch) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    monkeypatch.setattr(classify, "texto_ocr", lambda p: "")          # sin OCR
+    monkeypatch.setattr(classify, "es_grafico", lambda g: (False, 0))  # no póster
+    nitida = _ruido()
+    foto = _foto_en_db(cx, tmp_path, nitida, tipo="foro")             # foro: no exige cara
+    etiqueta = clasificar_foto(cx, foto)
+    assert etiqueta.startswith("usable")
+    fila = db.get(cx, "photos", foto["id"])
+    assert fila["usable_meme"] == 1 and fila["nitidez"] > config.CLASSIFY_NITIDEZ_MIN
+    cx.close()
+
+
+def test_clasificar_foto_flyer_va_a_events_y_no_es_usable(tmp_path, monkeypatch) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    flyer_txt = ("FESTIVAL presenta a Kabala viernes 21 de noviembre 9:00 pm "
+                 "Foro Independencia boletos preventa cover acceso 8:00 hrs")
+    monkeypatch.setattr(classify, "texto_ocr", lambda p: flyer_txt)
+    foto = _foto_en_db(cx, tmp_path, _ruido(), tipo="banda")
+    etiqueta = clasificar_foto(cx, foto)
+    assert etiqueta.startswith("flyer")
+    fila = db.get(cx, "photos", foto["id"])
+    assert fila["usable_meme"] == 0
+    eventos = db.rows(cx, "SELECT * FROM events WHERE source_post_id = 'POST1'")
+    assert len(eventos) == 1 and eventos[0]["tipo"] == "flyer"
+    cx.close()
+
+
+def test_clasificar_foto_ilegible_marca_no_usable(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    bid = db.insert(cx, "bands", nombre="Banda", tipo="banda", activa=1)
+    pid = db.insert(cx, "photos", band_id=bid, path="/no/existe.png",
+                    source_post_id="X")
+    foto = db.get(cx, "photos", pid)
+    assert clasificar_foto(cx, foto) == "ilegible"
+    assert db.get(cx, "photos", pid)["usable_meme"] == 0
+    cx.close()
+
+
+def test_clasificar_foto_descartada_nunca_usable(tmp_path, monkeypatch) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    monkeypatch.setattr(classify, "texto_ocr", lambda p: "")
+    monkeypatch.setattr(classify, "es_grafico", lambda g: (False, 0))
+    foto = _foto_en_db(cx, tmp_path, _ruido(), tipo="foro", descartada=1)
+    clasificar_foto(cx, foto)
+    assert db.get(cx, "photos", foto["id"])["usable_meme"] == 0   # lista negra manda
     cx.close()

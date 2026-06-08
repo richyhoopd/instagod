@@ -1,0 +1,42 @@
+# Configuración de calidad: pytest + cobertura (con umbral) + ruff.
+# Herramientas OSS gratuitas. No convierte el repo en paquete instalable.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # Avisos de deps (FastAPI/Starlette) que no son nuestros y ensucian la salida.
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+# Umbral global: la suite cubre ~53%. 50 actúa de trinquete: si una regresión
+# baja la cobertura, CI falla. Súbelo conforme agregues tests al núcleo.
+fail_under = 50
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",   # bloques CLI, no son lógica testeable
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "out", "data", "secrets", "templates"]
+
+[tool.ruff.lint]
+# E/W (pycodestyle), F (pyflakes: bugs reales, imports muertos), I (orden imports).
+select = ["E", "W", "F", "I"]
+# E501 (línea larga) lo dispara la prosa en español de los prompts: no aporta.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# En tests permitimos lambdas inline (mocks), helpers de una línea y variables
+# de andamiaje. src/ se mantiene estricto: ahí F (pyflakes) sí caza bugs reales.
+"tests/**" = ["E731", "E702", "F841"]

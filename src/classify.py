@@ -22,6 +22,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,8 +32,6 @@ import numpy as np
 
 import config
 from src import db
-
-import re
 
 _ANCHO_NORM = 1200  # las métricas se calculan a este ancho
 

@@ -10,7 +10,6 @@ import argparse
 import sys
 from datetime import datetime
 
-import config
 from src import db, segments
 from src.segments import Segment
 
@@ -42,7 +41,9 @@ def dispatch(cx, registro: list[Segment], *, ahora: datetime | None = None,
 
 
 def main() -> int:
-    from src.catalogo import REGISTRO   # catálogo real (Task G); import tardío para no romper tests
+    from src.catalogo import (
+        REGISTRO,  # catálogo real (Task G); import tardío para no romper tests
+    )
     parser = argparse.ArgumentParser(description="Dispatcher de segmentos")
     parser.add_argument("--cuenta", default="gdlscene")
     parser.add_argument("--force", action="store_true")

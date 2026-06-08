@@ -5,8 +5,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 from src import ig_accounts
 
 AHORA = datetime(2026, 6, 8, 12, 0, 0)

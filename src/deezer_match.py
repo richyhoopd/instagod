@@ -24,7 +24,6 @@ from typing import Any
 
 import requests
 
-import config
 from src import db, deezer
 
 # Link de artista de Deezer dentro del HTML de un agregador de bio.

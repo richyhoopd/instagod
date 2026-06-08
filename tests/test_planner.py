@@ -5,7 +5,13 @@ from datetime import date
 
 import config
 from src import db
-from src.planner import _cap, proximo_mes, seleccionar
+from src.planner import (
+    _cap,
+    _slots_del_mes,
+    pick_replacement,
+    proximo_mes,
+    seleccionar,
+)
 
 
 def _seed(cx, nombre, prioridad, followers, n_fotos, nitidez=100.0, usadas=0):
@@ -86,4 +92,60 @@ def test_respeta_max_posts(tmp_path) -> None:
         _seed(cx, f"B{i}", 1, 1000, 5)
     sel = seleccionar(cx, max_posts=30)
     assert len(sel) == 30  # corta en el límite de slots
+    cx.close()
+
+
+# ---------- _slots_del_mes ----------
+
+def test_slots_del_mes_cuenta_y_orden() -> None:
+    slots = _slots_del_mes(2026, 6)   # junio: 30 días
+    por_dia = min(len(config.POSTING_SLOTS), config.POSTS_PER_DAY)
+    assert len(slots) == 30 * por_dia
+    assert slots == sorted(slots)              # ascendente global
+    assert all(s.tzinfo is not None for s in slots)   # tz-aware (America/Mexico_City)
+
+
+# ---------- pick_replacement: rellena con banda NUEVA, sin repetir ----------
+
+def _foto_id(cx, band_id):
+    return db.rows(cx, "SELECT id FROM photos WHERE band_id = ?", (band_id,))[0]["id"]
+
+
+def _plan_row(cx, band_id, photo_id, mes="2026-07"):
+    db.insert(cx, "content_queue", tipo="meme", band_id=band_id, photo_id=photo_id,
+              status=db.QUEUE_BORRADOR, scheduled_datetime=f"{mes}-05T19:00:00")
+
+
+def test_pick_replacement_prefiere_banda_nueva_por_impacto(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    a = _seed(cx, "A", 3, 1000, 1)          # ya en el plan (tocada)
+    b = _seed(cx, "B", 1, 100, 1)           # nueva, prioridad alta
+    _seed(cx, "C", 2, 9999, 1)              # nueva, más followers pero prioridad menor
+    _plan_row(cx, a, _foto_id(cx, a))       # A ocupa un slot del mes
+
+    repl = pick_replacement(cx, "2026-07")
+    assert repl is not None
+    assert repl["band_id"] == b             # P1 gana sobre P2 con más followers
+    cx.close()
+
+
+def test_pick_replacement_respeta_excluir_band(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    a = _seed(cx, "A", 3, 1000, 1)
+    b = _seed(cx, "B", 1, 100, 1)
+    c = _seed(cx, "C", 2, 9999, 1)
+    _plan_row(cx, a, _foto_id(cx, a))
+
+    repl = pick_replacement(cx, "2026-07", excluir_band=b)
+    assert repl["band_id"] == c             # B excluida → la siguiente por impacto
+    cx.close()
+
+
+def test_pick_replacement_sin_candidatas_devuelve_none(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    db.insert(cx, "bands", nombre="Vacia", activa=1)   # sin fotos usables
+    assert pick_replacement(cx, "2026-07") is None
     cx.close()
