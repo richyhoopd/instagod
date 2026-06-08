@@ -149,11 +149,18 @@ def elegir_candidatos(cx, n: int, *, account_id: int = 1) -> list[dict[str, Any]
         foto_id = _foto_no_usada(cx, b["band_id"])
         if foto_id is None:
             continue
+        # Misma señal que _clave_banda: con datos usa ER; cold-start usa followers/1M
+        tiene_datos = (b.get("n_posts") or 0) >= config.ENGAGEMENT_MIN_POSTS and b.get("er") is not None
+        band_score: float = (
+            b["er"] + config.SHARES_PESO * 0.001 * (b.get("shares") or 0)
+            if tiene_datos
+            else (b.get("followers_ig") or 0) / 1e6
+        )
         candidatos.append({
             "band_id": b["band_id"],
             "nombre": b["nombre"],
             "photo_id": foto_id,
             "formato_patron": patron_top,
-            "band_score": b,
+            "band_score": band_score,
         })
     return candidatos

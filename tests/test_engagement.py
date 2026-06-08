@@ -68,6 +68,8 @@ def test_elegir_candidatos_favorece_banda_de_mas_engagement(tmp_path) -> None:
     assert cands[0]["photo_id"] == f_grande and cands[1]["photo_id"] == f_chica
     # cold-start del eje formato: absurdo_domestico es el de mayor peso base.
     assert cands[0]["formato_patron"] == "absurdo_domestico"
+    # band_score debe ser float (contrato de rerank_cola)
+    assert all(isinstance(c["band_score"], (int, float)) for c in cands)
 
 
 def test_elegir_candidatos_salta_banda_sin_foto_usable(tmp_path) -> None:
