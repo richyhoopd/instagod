@@ -72,29 +72,43 @@ def _pretty(slot_iso: str) -> str:
         return slot_iso
 
 
-async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Resuelve los callbacks `aprobar:{qid}` / `rechazar:{qid}` del flujo asíncrono."""
-    query = update.callback_query
-    await query.answer()
-    accion, qid = approval.parsear_callback(query.data)
+def _aprobar_sync(qid: int):
+    """Abre+usa+cierra la conexión EN ESTE hilo (SQLite no cruza hilos).
 
+    Corre vía asyncio.to_thread; por eso la conexión NO puede venir del hilo del
+    event-loop — debe nacer aquí, donde se usa.
+    """
     cx = db.connect()
     try:
-        if accion == "aprobar":
-            aud = audience.cargar(cx)
-            slot = await _to_thread(approval.aprobar, cx, qid, audiencia=aud)
-            await query.edit_message_text(
-                f"✅ Aprobado — se publica el {_pretty(slot.isoformat())}")
-        else:
-            await _to_thread(approval.rechazar, cx, qid)
-            await query.edit_message_text("❌ Rechazado")
+        aud = audience.cargar(cx)
+        return approval.aprobar(cx, qid, audiencia=aud)
     finally:
         cx.close()
 
 
-async def _to_thread(fn, *args, **kwargs):
+def _rechazar_sync(qid: int) -> None:
+    cx = db.connect()
+    try:
+        approval.rechazar(cx, qid)
+    finally:
+        cx.close()
+
+
+async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resuelve los callbacks `aprobar:{qid}` / `rechazar:{qid}` del flujo asíncrono."""
     import asyncio
-    return await asyncio.to_thread(fn, *args, **kwargs)
+
+    query = update.callback_query
+    await query.answer()
+    accion, qid = approval.parsear_callback(query.data)
+
+    if accion == "aprobar":
+        slot = await asyncio.to_thread(_aprobar_sync, qid)
+        await query.edit_message_text(
+            f"✅ Aprobado — se publica el {_pretty(slot.isoformat())}")
+    else:
+        await asyncio.to_thread(_rechazar_sync, qid)
+        await query.edit_message_text("❌ Rechazado")
 
 
 def main() -> None:
