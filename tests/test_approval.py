@@ -42,6 +42,20 @@ def test_rechazar(tmp_path) -> None:
     assert fila["aprobacion"] == "rechazado" and fila["status"] == "descartado"
 
 
+def test_aprobar_inmediato_publica_ahora(tmp_path, monkeypatch):
+    from src import approval, db
+    cx = db.connect(tmp_path / "t.db"); db.init_db(cx)
+    qid = approval.encolar_pendiente(cx, tipo="anuncio", caption="x", imagen_url="u")
+    llamado = {}
+    slot = approval.aprobar(cx, qid, ahora=__import__("datetime").datetime(2026,6,9,2,0),
+                            _escribir_sheet=lambda **k: 5,
+                            _publicar=lambda: llamado.setdefault("pub", True))
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["aprobacion"] == "aprobado" and fila["status"] == "en_sheet"
+    # tipo 'anuncio' → scheduled = ahora (inmediato) y se llamó _publicar
+    assert slot.year == 2026 and slot.hour == 2 and llamado.get("pub")
+
+
 def test_aprobar_marca_eventos_anunciado(tmp_path) -> None:
     """Al aprobar, los events de evento_ids quedan status='anunciado'."""
     import json

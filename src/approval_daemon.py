@@ -72,16 +72,21 @@ def _pretty(slot_iso: str) -> str:
         return slot_iso
 
 
-def _aprobar_sync(qid: int):
+def _aprobar_sync(qid: int) -> dict:
     """Abre+usa+cierra la conexión EN ESTE hilo (SQLite no cruza hilos).
 
     Corre vía asyncio.to_thread; por eso la conexión NO puede venir del hilo del
     event-loop — debe nacer aquí, donde se usa.
+    Devuelve dict con {slot, inmediato} para que el caller arme el mensaje correcto.
     """
     cx = db.connect()
     try:
         aud = audience.cargar(cx)
-        return approval.aprobar(cx, qid, audiencia=aud)
+        # Leemos el tipo ANTES de aprobar para saber si es inmediato.
+        fila = db.get(cx, "content_queue", qid)
+        inmediato = fila.get("tipo") == "anuncio"
+        slot = approval.aprobar(cx, qid, audiencia=aud)
+        return {"slot": slot, "inmediato": inmediato}
     finally:
         cx.close()
 
@@ -94,6 +99,18 @@ def _rechazar_sync(qid: int) -> None:
         cx.close()
 
 
+async def _resolver_msg(query, texto: str) -> None:
+    """Edita el mensaje del callback sea texto o caption; si no se puede, ignora."""
+    from telegram.error import BadRequest
+    try:
+        await query.edit_message_text(texto)
+    except BadRequest:
+        try:
+            await query.edit_message_caption(caption=texto)
+        except BadRequest:
+            pass
+
+
 async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Resuelve los callbacks `aprobar:{qid}` / `rechazar:{qid}` del flujo asíncrono."""
     import asyncio
@@ -103,12 +120,16 @@ async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     accion, qid = approval.parsear_callback(query.data)
 
     if accion == "aprobar":
-        slot = await asyncio.to_thread(_aprobar_sync, qid)
-        await query.edit_message_text(
-            f"✅ Aprobado — se publica el {_pretty(slot.isoformat())}")
+        resultado = await asyncio.to_thread(_aprobar_sync, qid)
+        slot = resultado["slot"]
+        if resultado["inmediato"]:
+            texto = "✅ Aprobado — publicando ahora"
+        else:
+            texto = f"✅ Aprobado — se publica el {_pretty(slot.isoformat())}"
+        await _resolver_msg(query, texto)
     else:
         await asyncio.to_thread(_rechazar_sync, qid)
-        await query.edit_message_text("❌ Rechazado")
+        await _resolver_msg(query, "❌ Rechazado")
 
 
 def main() -> None:

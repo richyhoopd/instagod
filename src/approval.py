@@ -37,11 +37,17 @@ def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
 
 def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             ventana_trafico: str = "meme", audiencia: list[dict[str, Any]] | None = None,
-            _escribir_sheet: Callable[..., int] | None = None) -> datetime:
-    """Aprueba: elige slot de alto tráfico, escribe Sheet approved, marca en_sheet."""
+            _escribir_sheet: Callable[..., int] | None = None,
+            _publicar: Callable[[], None] | None = None) -> datetime:
+    """Aprueba: elige slot o publica inmediato (anuncios), escribe Sheet, marca en_sheet."""
     ahora = ahora or datetime.now()
     fila = db.get(cx, "content_queue", queue_id)
-    slot = timing.elegir_slot(ventana_trafico, ahora, audiencia=audiencia or [])
+    # Anuncios/agendas se publican de inmediato; memes se calendarizan en slot de alto tráfico.
+    inmediato = fila.get("tipo") == "anuncio"
+    if inmediato:
+        slot = ahora
+    else:
+        slot = timing.elegir_slot(ventana_trafico, ahora, audiencia=audiencia or [])
     escribir = _escribir_sheet or _sheet_real
     sheet_id = escribir(caption=fila.get("caption"),
                         imagen=fila.get("imagen_url"),
@@ -54,7 +60,25 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
         import json
         for eid in json.loads(fila["evento_ids"]):
             db.update(cx, "events", eid, status="anunciado")
+    if inmediato:
+        (_publicar or _publicar_ahora)()
     return slot
+
+
+def _publicar_ahora() -> None:
+    """Dispara publish.py como subproceso desacoplado (no bloquea el callback de Telegram)."""
+    import subprocess
+    import sys
+
+    import config
+    try:
+        subprocess.Popen(
+            [sys.executable, str(config.BASE_DIR / "publish.py")],
+            cwd=str(config.BASE_DIR),
+        )
+    except OSError as e:
+        import sys as _sys
+        print(f"[approval] No se pudo lanzar publish.py: {e}", file=_sys.stderr)
 
 
 def rechazar(cx, queue_id: int) -> None:
