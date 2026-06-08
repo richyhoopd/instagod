@@ -155,6 +155,16 @@ FORMATO_PATRONES = [
     "otro",
 ]
 
+# Cerebro de engagement (motor de segmentos) ---------------------------------
+ENGAGEMENT_MIN_POSTS = 2          # < esto por banda → cold-start (prioridad+followers)
+SHARES_PESO = 3.0                 # shares = crecimiento (reshare regala audiencia)
+ANTIREPEAT_DIAS = 14             # penaliza bandas publicadas en los últimos N días
+# Pesos cold-start del eje FORMATO (reglas ya probadas por Ricardo).
+FORMATO_PESOS_COLDSTART = {
+    "absurdo_domestico": 1.5, "declaracion_personaje": 1.2,
+    "dato_falso": 1.0, "comunicado": 0.9, "otro": 1.0,
+}
+
 
 def _resolve(path: str | None) -> Path:
     """Ruta absoluta relativa a la raíz del repo."""
