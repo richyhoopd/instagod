@@ -107,6 +107,12 @@ SPOTIFY_THROTTLE_S = float(_get("SPOTIFY_THROTTLE_S", "0.6") or "0.6")
 # Lock para que dos procesos (pipeline, cron, GUI) no llamen Spotify a la vez.
 SPOTIFY_LOCK_PATH = _get("SPOTIFY_LOCK_PATH", "./data/.spotify.lock")
 
+# ---------- Deezer (fuente primaria de releases; sin auth ni premium) ----------
+# API pública sin token; reemplaza a Spotify como fuente de datos (Spotify queda
+# solo para el link/embed). Reusa SPOTIFY_RELEASE_DAYS como ventana de novedad.
+DEEZER_API_BASE = _get("DEEZER_API_BASE", "https://api.deezer.com")
+DEEZER_THROTTLE_S = float(_get("DEEZER_THROTTLE_S", "0.3") or "0.3")
+
 # ---------- Clasificación de fotos (Fase 3) ----------
 # Umbral de nitidez (varianza del Laplaciano a ancho 1200px): debajo = borrosa.
 # Bajo (40) para no descartar fotos buenas de escenario (humo, poca luz).

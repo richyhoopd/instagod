@@ -1063,3 +1063,88 @@ def spotify_resolver_links() -> RedirectResponse:
     finally:
         cx.close()
     return RedirectResponse(f"/spotify?aviso={quote(aviso)}", status_code=303)
+
+
+# ============================== Deezer match =================================
+# Completar deezer_id de bandas activas 'pendiente': búsqueda en vivo + elección
+# manual, y un botón para el auto-match exacto por nombre.
+# Spec: docs/superpowers/specs/2026-06-08-deezer-releases-design.md
+
+# Tope de búsquedas en vivo al cargar /deezer: arriba de esto pedimos correr el
+# auto-match primero (96 búsquedas en una carga rozaría el ~50 req/5s de Deezer).
+_DEEZER_BUSQUEDA_VIVO_MAX = 15
+
+
+@app.get("/deezer", response_class=HTMLResponse)
+def deezer_view(request: Request, aviso: str = "") -> HTMLResponse:
+    """Bandas activas sin deezer_id. Candidatos en vivo solo si quedan pocas."""
+    from src import deezer, deezer_match
+    cx = db.connect()
+    try:
+        pendientes = db.rows(cx, """
+            SELECT * FROM bands
+             WHERE activa = 1 AND deezer_status = 'pendiente'
+             ORDER BY prioridad DESC, nombre COLLATE NOCASE
+        """)
+        muchas = len(pendientes) > _DEEZER_BUSQUEDA_VIVO_MAX
+        for b in pendientes:
+            b["candidatos"] = []
+            b["search_error"] = None
+            if muchas:
+                continue  # demasiadas: el banner pide correr Auto-match primero
+            try:
+                b["candidatos"] = deezer_match.candidatos(cx, b["id"])
+            except deezer.DeezerError as exc:
+                b["search_error"] = str(exc)
+    finally:
+        cx.close()
+    return templates.TemplateResponse(request, "deezer.html",
+                                      {"bandas": pendientes, "aviso": aviso,
+                                       "muchas": muchas})
+
+
+@app.post("/deezer/{band_id}/elegir", response_class=HTMLResponse)
+def deezer_elegir(request: Request, band_id: int,
+                  deezer_id: str = Form(...)) -> HTMLResponse:
+    from src import deezer_match
+    deezer_id = deezer_id.strip()
+    if not deezer_id:
+        raise HTTPException(400, "deezer_id vacío")
+    cx = db.connect()
+    try:
+        if db.get(cx, "bands", band_id) is None:
+            raise HTTPException(404)
+        try:
+            deezer_match.elegir(cx, band_id, deezer_id)
+        except Exception as exc:  # noqa: BLE001 — el id ya quedó; releases es bonus
+            print(f"♫ releases Deezer de {band_id}: ❌ {exc}")
+    finally:
+        cx.close()
+    return HTMLResponse("")
+
+
+@app.post("/deezer/{band_id}/no-esta", response_class=HTMLResponse)
+def deezer_no_esta(band_id: int) -> HTMLResponse:
+    from src import deezer_match
+    cx = db.connect()
+    try:
+        if db.get(cx, "bands", band_id) is None:
+            raise HTTPException(404)
+        deezer_match.marcar_no_esta(cx, band_id)
+    finally:
+        cx.close()
+    return HTMLResponse("")
+
+
+@app.post("/deezer/resolver-auto")
+def deezer_resolver_auto() -> RedirectResponse:
+    from urllib.parse import quote
+
+    from src import deezer_match
+    cx = db.connect()
+    try:
+        res = deezer_match.resolver_auto(cx)
+    finally:
+        cx.close()
+    aviso = f"Auto-match: {res['ok']} ligadas, {res['dudosas']} dudosas de {res['revisadas']}."
+    return RedirectResponse(f"/deezer?aviso={quote(aviso)}", status_code=303)

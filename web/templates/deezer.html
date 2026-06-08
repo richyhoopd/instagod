@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Deezer <span class="muted">({{ bandas|length }} pendientes)</span></h2>
+
+<p class="muted" style="max-width:760px;">
+  Bandas activas sin <code>deezer_id</code>. Deezer es la fuente de releases (sin
+  cap como Spotify). Los candidatos son la búsqueda de artista; abre el link para
+  confirmar. Si no está en Deezer, márcala con "no está" para no volver a buscarla.
+</p>
+
+<div style="display:flex; gap:10px; align-items:center; margin:14px 0;">
+  <form method="post" action="/deezer/resolver-auto">
+    <button type="submit" class="secundario"
+            title="Liga por nombre EXACTO todas las pendientes (barato, sin cap)">⚡ Auto-match por nombre</button>
+  </form>
+  {% if aviso %}<span class="muted">{{ aviso }}</span>{% endif %}
+</div>
+
+{% if muchas %}
+<p class="chip" style="background:#fff4d6; color:#8a6100;">
+  Hay muchas pendientes — corre <strong>⚡ Auto-match por nombre</strong> primero
+  (liga casi todas sin gastar el límite de Deezer). Las dudosas que queden ya
+  mostrarán candidatos aquí.</p>
+{% endif %}
+
+<table>
+  <thead>
+    <tr><th>Banda</th><th>Link de bio</th><th>Candidatos en Deezer</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for b in bandas %}
+      {% include "_deezer_row.html" %}
+    {% else %}
+      <tr><td colspan="4" class="muted">No hay bandas pendientes. 🎉</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

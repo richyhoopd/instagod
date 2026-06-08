@@ -75,7 +75,19 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
                 cx.close()
             enrich_spotify.enrich(objetivo, solo_pendientes=True)
         except RuntimeError as exc:  # faltan llaves → no abortamos el pipeline
-            print(f"   (saltado: {exc})")
+            print(f"   (saltado Spotify: {exc})")
+        # Deezer es la fuente primaria de releases (sin auth ni cap): auto-match
+        # de las pendientes, que de paso registra sus releases recientes.
+        try:
+            from src import deezer_match
+            cx = db.connect()
+            try:
+                r = deezer_match.resolver_auto(cx)
+                print(f"   Deezer auto-match: {r['ok']} ligadas, {r['dudosas']} dudosas.")
+            finally:
+                cx.close()
+        except Exception as exc:  # noqa: BLE001 — Deezer caído no aborta el pipeline
+            print(f"   (saltado Deezer: {exc})")
     if "events" not in skip:
         print("\n── 4/4 Parseo de eventos ──")
         parse_events.parse_all()

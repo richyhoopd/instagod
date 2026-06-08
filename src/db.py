@@ -29,6 +29,7 @@ TABLES: dict[str, set[str]] = {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
         "popularity", "followers_spotify", "generos",
         "genero_principal", "generos_fuente", "spotify_status",
+        "deezer_id", "deezer_status",
         "followers_ig", "link_externo", "bio", "scraped_at", "ig_user_id",
         "n_integrantes", "prioridad", "notas", "account_id",
     },
@@ -99,6 +100,9 @@ _MIGRATIONS = {
         "genero_principal": "TEXT",
         "generos_fuente": "TEXT",
         "spotify_status": "TEXT NOT NULL DEFAULT 'pendiente'",
+        # Deezer: fuente primaria de releases (espejo de spotify_id/status).
+        "deezer_id": "TEXT",
+        "deezer_status": "TEXT NOT NULL DEFAULT 'pendiente'",
         # Multi-cuenta Fase A: todo lo existente cae a la cuenta 1 (gdlscene).
         # SIN cláusula REFERENCES: SQLite prohíbe ADD COLUMN con FK y default
         # no-NULL bajo foreign_keys=ON; la integridad la cuida la app (igual
@@ -153,10 +157,13 @@ def init_db(cx: sqlite3.Connection) -> None:
                 "CREATE INDEX IF NOT EXISTS idx_queue_account ON content_queue(account_id)",
                 "CREATE INDEX IF NOT EXISTS idx_igposts_account ON ig_posts(account_id)"):
         cx.execute(idx)
-    # Backfill idempotente: banda que ya tiene spotify_id cuenta como match 'ok'.
+    # Backfill idempotente: banda que ya tiene spotify_id/deezer_id cuenta 'ok'.
     cx.execute("UPDATE bands SET spotify_status = 'ok' "
                "WHERE spotify_id IS NOT NULL AND spotify_id != '' "
                "  AND spotify_status = 'pendiente'")
+    cx.execute("UPDATE bands SET deezer_status = 'ok' "
+               "WHERE deezer_id IS NOT NULL AND deezer_id != '' "
+               "  AND deezer_status = 'pendiente'")
     cx.commit()
 
 

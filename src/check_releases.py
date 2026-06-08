@@ -73,29 +73,53 @@ def avisar_telegram(texto: str) -> bool:
     return r.ok
 
 
+def _check_deezer(cx) -> list[dict]:
+    """Releases nuevos vía Deezer de las bandas con deezer_status='ok'."""
+    from src import deezer
+
+    bandas = db.rows(cx, "SELECT * FROM bands WHERE deezer_status = 'ok' "
+                         "AND deezer_id IS NOT NULL")
+    if not bandas:
+        return []
+    out: list[dict] = []
+    print(f"Deezer: revisando {len(bandas)} banda(s)…")
+    for band in bandas:
+        try:
+            hallados = deezer.registrar_releases(cx, band["id"], band["deezer_id"])
+        except deezer.DeezerError as exc:
+            print(f"▶ {band['nombre']}: ❌ Deezer {exc}")
+            continue
+        for n in hallados:
+            out.append({"banda": band["nombre"], "titulo": n["titulo"],
+                        "fecha": n["release_date"]})
+            print(f"▶ {band['nombre']}: 🆕 {n['titulo']} ({n['release_date']})")
+    return out
+
+
 def check(dry_run: bool = False) -> list[dict]:
-    """Una pasada completa. Devuelve los releases nuevos encontrados."""
+    """Una pasada completa (Deezer + Spotify). Devuelve los releases nuevos."""
     cx = db.connect()
     nuevos: list[dict] = []
     try:
         db.init_db(cx)
+        # Deezer es la fuente primaria (sin auth ni cap); dedup compartido en events.
+        nuevos.extend(_check_deezer(cx))
+        # Spotify queda como fuente secundaria para las que tengan id.
         bandas = [b for b in db.list_bands(cx) if b.get("spotify_id")]
-        if not bandas:
-            print("No hay bandas con spotify_id.")
-            return []
-        sp = get_client()
-        print(f"Revisando releases de {len(bandas)} banda(s)…")
-        for band in bandas:
-            try:
-                hallados = _registrar_releases(sp, cx, band["id"], band["spotify_id"])
-            except SpotifyException as exc:
-                _checar_429(exc)
-                print(f"▶ {band['nombre']}: ❌ ({exc.http_status})")
-                continue
-            for n in hallados:
-                nuevos.append({"banda": band["nombre"], **n})
-                print(f"▶ {band['nombre']}: 🆕 {n['titulo']} ({n['fecha']})")
-            time.sleep(config.SPOTIFY_THROTTLE_S)
+        if bandas:
+            sp = get_client()
+            print(f"Spotify: revisando {len(bandas)} banda(s)…")
+            for band in bandas:
+                try:
+                    hallados = _registrar_releases(sp, cx, band["id"], band["spotify_id"])
+                except SpotifyException as exc:
+                    _checar_429(exc)
+                    print(f"▶ {band['nombre']}: ❌ ({exc.http_status})")
+                    continue
+                for n in hallados:
+                    nuevos.append({"banda": band["nombre"], **n})
+                    print(f"▶ {band['nombre']}: 🆕 {n['titulo']} ({n['fecha']})")
+                time.sleep(config.SPOTIFY_THROTTLE_S)
     finally:
         cx.close()
     if nuevos and not dry_run:
