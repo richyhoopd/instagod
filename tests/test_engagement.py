@@ -79,3 +79,19 @@ def test_elegir_candidatos_salta_banda_sin_foto_usable(tmp_path) -> None:
 
     cands = engagement.elegir_candidatos(cx, 5, account_id=1)
     assert [c["band_id"] for c in cands] == [con]
+
+
+# ---------- Task H: rerank dinámico de la cola ----------
+
+def test_rerank_reordena_futuros_por_score() -> None:
+    from src import engagement
+    # dos items futuros; el de patrón ganador debe quedar en el slot más cercano
+    items = [
+        {"queue_id": 1, "patron": "comunicado", "band_score": 0.1, "scheduled": "2026-06-10T20:00"},
+        {"queue_id": 2, "patron": "absurdo_domestico", "band_score": 0.1, "scheduled": "2026-06-11T20:00"},
+    ]
+    pesos = {"absurdo_domestico": 2.0, "comunicado": 0.5}
+    nuevo = engagement.rerank_cola(items, pesos_formato=pesos)
+    # el ganador (2) toma el slot más temprano (10), el otro el 11
+    asignado = {r["queue_id"]: r["scheduled"] for r in nuevo}
+    assert asignado[2] == "2026-06-10T20:00" and asignado[1] == "2026-06-11T20:00"

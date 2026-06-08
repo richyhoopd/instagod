@@ -58,6 +58,18 @@ def score_bandas(bandas: list[dict[str, Any]], *, min_posts: int) -> list[dict[s
     return sorted(bandas, key=lambda b: _clave_banda(b, min_posts=min_posts))
 
 
+def rerank_cola(items: list[dict[str, Any]], *, pesos_formato: dict[str, float]) -> list[dict[str, Any]]:
+    """Reasigna los slots futuros a los items mejor puntuados (formato×banda).
+
+    Los slots (scheduled) se mantienen como conjunto; se reparten al orden nuevo:
+    el item de mayor score toma el slot más temprano. PURO.
+    """
+    slots = sorted(i["scheduled"] for i in items)
+    rank = sorted(items, key=lambda i: -(pesos_formato.get(i["patron"], 1.0) * (i.get("band_score") or 0.0)
+                                         + pesos_formato.get(i["patron"], 1.0)))
+    return [{**it, "scheduled": slot} for it, slot in zip(rank, slots)]
+
+
 # ---------- Capa IO (queries; separada del núcleo PURO de arriba) ----------
 
 def _cargar_bandas(cx, account_id: int) -> list[dict[str, Any]]:
