@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 import config
+from src import db
 
 
 def score_formatos(posts: list[dict[str, Any]], *, min_posts: int) -> dict[str, float]:
@@ -55,3 +56,92 @@ def _clave_banda(b: dict[str, Any], *, min_posts: int) -> tuple:
 def score_bandas(bandas: list[dict[str, Any]], *, min_posts: int) -> list[dict[str, Any]]:
     """Ordena bandas por conveniencia (desc). PURO."""
     return sorted(bandas, key=lambda b: _clave_banda(b, min_posts=min_posts))
+
+
+# ---------- Capa IO (queries; separada del núcleo PURO de arriba) ----------
+
+def _cargar_bandas(cx, account_id: int) -> list[dict[str, Any]]:
+    """Filas por banda para score_bandas: extiende ig_insights.band_stats con
+    `shares` y `dias_desde_ultimo` por banda, e incluye `followers_ig`.
+
+    band_stats solo regresa bandas CON posts; aquí partimos de TODAS las bandas
+    activas de la cuenta (para que las cold-start sin posts también compitan) y
+    fusionamos las métricas calculadas. PURO sobre lectura: solo SELECTs.
+    """
+    from src import ig_insights
+
+    stats = {s["band_id"]: s for s in ig_insights.band_stats(cx)}
+    # shares + última fecha de publicación por banda (vía ig_posts del bot).
+    extra = {r["band_id"]: r for r in db.rows(cx, """
+        SELECT band_id,
+               SUM(COALESCE(shares, 0))            AS shares,
+               julianday('now') - julianday(MAX(timestamp)) AS dias_desde_ultimo
+          FROM ig_posts
+         WHERE band_id IS NOT NULL
+         GROUP BY band_id
+    """)}
+
+    out: list[dict[str, Any]] = []
+    for b in db.list_bands(cx, solo_activas=True):
+        if b.get("account_id") not in (None, account_id):
+            continue
+        s = stats.get(b["id"], {})
+        e = extra.get(b["id"], {})
+        dd = e.get("dias_desde_ultimo")
+        out.append({
+            "band_id": b["id"],
+            "nombre": b["nombre"],
+            "prioridad": b.get("prioridad") or 3,
+            "followers_ig": b.get("followers_ig"),
+            "n_posts": s.get("n_posts", 0),
+            "er": s.get("er"),
+            "shares": e.get("shares") or 0,
+            "dias_desde_ultimo": int(dd) if dd is not None else None,
+        })
+    return out
+
+
+def _cargar_formatos(cx) -> list[dict[str, Any]]:
+    """Filas de desempeño por formato para score_formatos (vía format_tags)."""
+    from src import format_tags
+
+    return format_tags.atributos_por_post(cx)
+
+
+def _foto_no_usada(cx, band_id: int) -> int | None:
+    """id de una foto usable, no descartada y no usada de la banda (o None)."""
+    filas = db.rows(cx, """
+        SELECT id FROM photos
+         WHERE band_id = ? AND usable_meme = 1 AND descartada = 0 AND usada = 0
+         ORDER BY id LIMIT 1
+    """, (band_id,))
+    return filas[0]["id"] if filas else None
+
+
+def elegir_candidatos(cx, n: int, *, account_id: int = 1) -> list[dict[str, Any]]:
+    """Cruza ambos ejes y devuelve hasta `n` candidatos a generar.
+
+    Eje BANDA: ordena con score_bandas; toma las mejores que tengan una foto
+    usable sin usar. Eje FORMATO: adjunta el patrón de mayor peso disponible
+    (score_formatos). La capa IO vive aquí; el scoring de arriba es PURO.
+    """
+    bandas = score_bandas(_cargar_bandas(cx, account_id),
+                          min_posts=config.ENGAGEMENT_MIN_POSTS)
+    pesos = score_formatos(_cargar_formatos(cx), min_posts=config.ENGAGEMENT_MIN_POSTS)
+    patron_top = max(pesos, key=pesos.get)
+
+    candidatos: list[dict[str, Any]] = []
+    for b in bandas:
+        if len(candidatos) >= n:
+            break
+        foto_id = _foto_no_usada(cx, b["band_id"])
+        if foto_id is None:
+            continue
+        candidatos.append({
+            "band_id": b["band_id"],
+            "nombre": b["nombre"],
+            "photo_id": foto_id,
+            "formato_patron": patron_top,
+            "band_score": b,
+        })
+    return candidatos

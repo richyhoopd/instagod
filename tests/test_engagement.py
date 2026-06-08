@@ -1,7 +1,7 @@
 """Cerebro de engagement: scoring puro de banda y formato + cold-start."""
 from __future__ import annotations
 
-from src import engagement
+from src import db, engagement
 
 
 def test_score_formatos_cold_start_usa_reglas() -> None:
@@ -43,3 +43,39 @@ def test_score_bandas_cold_start_por_followers() -> None:
     ]
     orden = [b["band_id"] for b in engagement.score_bandas(bandas, min_posts=2)]
     assert orden == [2, 1]  # sin datos → más followers primero
+
+
+# ---------- Capa IO + elegir_candidatos (Step 6, DB tmp) ----------
+
+def _cx(tmp_path):
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    return cx
+
+
+def test_elegir_candidatos_favorece_banda_de_mas_engagement(tmp_path) -> None:
+    # Dos bandas cold-start (sin posts): la de más followers debe salir primero
+    # y cada candidato trae una foto usable no usada + el patrón de mayor peso.
+    cx = _cx(tmp_path)
+    chica = db.upsert_band(cx, "Banda Chica", "chica", followers_ig=500, prioridad=3)
+    grande = db.upsert_band(cx, "Banda Grande", "grande", followers_ig=5000, prioridad=3)
+    f_chica = db.insert(cx, "photos", band_id=chica, path="/tmp/chica.jpg", usable_meme=1)
+    f_grande = db.insert(cx, "photos", band_id=grande, path="/tmp/grande.jpg", usable_meme=1)
+
+    cands = engagement.elegir_candidatos(cx, 2, account_id=1)
+
+    assert [c["band_id"] for c in cands] == [grande, chica]
+    assert cands[0]["photo_id"] == f_grande and cands[1]["photo_id"] == f_chica
+    # cold-start del eje formato: absurdo_domestico es el de mayor peso base.
+    assert cands[0]["formato_patron"] == "absurdo_domestico"
+
+
+def test_elegir_candidatos_salta_banda_sin_foto_usable(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    con = db.upsert_band(cx, "Con Foto", "confoto", followers_ig=5000, prioridad=3)
+    db.upsert_band(cx, "Sin Foto", "sinfoto", followers_ig=9000, prioridad=3)
+    # banda "Con Foto" tiene foto usable; "Sin Foto" (más followers) no.
+    db.insert(cx, "photos", band_id=con, path="/tmp/con.jpg", usable_meme=1)
+
+    cands = engagement.elegir_candidatos(cx, 5, account_id=1)
+    assert [c["band_id"] for c in cands] == [con]
