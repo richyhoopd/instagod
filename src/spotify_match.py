@@ -37,18 +37,28 @@ from src.enrich_spotify import (
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
-# Hosts cuyo HTML suele contener el link de Spotify embebido (lnk.to/ffm.to son
-# subdominios de marca → se chequean por sufijo, no por host exacto).
-_HOSTS_RESOLVIBLES = ("linktr.ee", "distrokid.com", "lnk.to", "songwhip.com",
-                      "linkfire.com", "ffm.to", "lnk.fi")
+# Hosts que NUNCA embeben el link de Spotify (redes/plataformas o el propio
+# Spotify/Deezer): no vale la pena bajar su HTML. Cualquier OTRO http(s) sí se
+# intenta — la extracción de `open.spotify.com/artist/<id>` es la confirmación
+# dura, así que probar agregadores desconocidos (amuse, hypeddit, beacons,
+# boletomovil…) es seguro y reduce el matcheo manual.
+_HOSTS_BLOQUEADOS = ("instagram.com", "facebook.com", "fb.com", "youtube.com",
+                     "youtu.be", "twitter.com", "x.com", "tiktok.com",
+                     "open.spotify.com", "deezer.com", "wa.me", "t.me")
 
 
 def es_link_resolvible(link: str | None) -> bool:
-    """¿El link apunta a un agregador del que vale la pena bajar el HTML?"""
+    """¿Vale la pena bajar el HTML para buscar el link de Spotify embebido?
+
+    Sí para cualquier http(s) que no esté en la blocklist (la extracción del
+    artist id es la confirmación; un agregador desconocido no hace daño probarlo).
+    """
     if not link:
         return False
-    bajo = link.lower()
-    return any(h in bajo for h in _HOSTS_RESOLVIBLES)
+    bajo = link.strip().lower()
+    if not bajo.startswith(("http://", "https://")):
+        return False
+    return not any(h in bajo for h in _HOSTS_BLOQUEADOS)
 
 
 def extraer_artist_id(html: str | None) -> str | None:

@@ -1085,6 +1085,7 @@ def deezer_view(request: Request, aviso: str = "") -> HTMLResponse:
         pendientes = db.rows(cx, """
             SELECT * FROM bands
              WHERE activa = 1 AND deezer_status = 'pendiente'
+               AND tipo IN ('banda','solista')
              ORDER BY prioridad DESC, nombre COLLATE NOCASE
         """)
         muchas = len(pendientes) > _DEEZER_BUSQUEDA_VIVO_MAX

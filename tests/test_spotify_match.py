@@ -30,16 +30,24 @@ def test_extraer_artist_id_de_html() -> None:
 
 
 def test_es_link_resolvible() -> None:
+    # agregadores conocidos
     assert spotify_match.es_link_resolvible("https://linktr.ee/kabala")
     assert spotify_match.es_link_resolvible("https://distrokid.com/hyperfollow/kabala")
     assert spotify_match.es_link_resolvible("https://kabala.lnk.to/single")
-    assert spotify_match.es_link_resolvible("https://ffm.to/kabala")
-    assert spotify_match.es_link_resolvible("https://songwhip.com/kabala")
-    assert spotify_match.es_link_resolvible("https://lnk.fi/kabala")  # linkfire short
-    # no resolvibles
+    # NUEVO: cualquier agregador desconocido también se intenta (la extracción
+    # del link de Spotify es la confirmación dura → seguro probar)
+    assert spotify_match.es_link_resolvible("https://share.amuse.io/track/x")
+    assert spotify_match.es_link_resolvible("https://hypeddit.com/abc")
+    assert spotify_match.es_link_resolvible("https://beacons.ai/kabala")
+    assert spotify_match.es_link_resolvible("https://www.boletomovil.com/evento/x")
+    # blocklist: redes sociales y plataformas que nunca embeben el link
     assert not spotify_match.es_link_resolvible("https://instagram.com/kabala")
+    assert not spotify_match.es_link_resolvible("https://youtube.com/@kabala")
+    assert not spotify_match.es_link_resolvible("https://www.facebook.com/kabala")
+    assert not spotify_match.es_link_resolvible("https://open.spotify.com/artist/x")
     assert not spotify_match.es_link_resolvible(None)
     assert not spotify_match.es_link_resolvible("")
+    assert not spotify_match.es_link_resolvible("no-es-url")
 
 
 # ---------- Resolvedor de links contra la DB ----------
