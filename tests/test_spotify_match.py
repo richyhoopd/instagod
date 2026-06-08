@@ -4,9 +4,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-import config
 from src import db, spotify_match
-
 
 # ---------- Fixtures HTML (páginas externas simuladas) ----------
 
@@ -265,3 +263,45 @@ def test_no_esta_marca_estado(client) -> None:
 def test_nav_tiene_link_spotify(client) -> None:
     resp = client.get("/spotify")
     assert 'href="/spotify"' in resp.text
+
+
+# ---------- Spotify solo para banda/solista (no foro/evento/colectivo) ----------
+
+def test_pendientes_con_link_excluye_no_musicales(cx) -> None:
+    """Foro/evento/colectivo nunca van a Spotify; banda/solista sí."""
+    from src import db
+    link = "https://linktr.ee/x"
+    for nombre, tipo in [("Banda", "banda"), ("Solista", "solista"),
+                         ("Foro", "foro"), ("Evento", "evento"), ("Colectivo", "colectivo")]:
+        bid = db.insert(cx, "bands", nombre=nombre, tipo=tipo, activa=1)
+        db.update(cx, "bands", bid, link_externo=link)
+    nombres = {b["nombre"] for b in spotify_match.bandas_pendientes_con_link(cx)}
+    assert nombres == {"Banda", "Solista"}
+
+
+def test_es_musical_helper() -> None:
+    assert db.es_musical({"tipo": "banda"}) and db.es_musical({"tipo": "solista"})
+    for t in ("foro", "evento", "colectivo"):
+        assert not db.es_musical({"tipo": t})
+
+
+def test_enrich_excluye_no_musicales(tmp_path, monkeypatch) -> None:
+    import contextlib
+
+    from src import enrich_spotify
+
+    db_path = tmp_path / "enrich2.db"
+    conn = db.connect(db_path)
+    db.init_db(conn)
+    db.insert(conn, "bands", nombre="Banda", tipo="banda")
+    db.insert(conn, "bands", nombre="Foro", tipo="foro")
+    conn.close()
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+    vistas = []
+    monkeypatch.setattr(enrich_spotify, "get_client", lambda: object())
+    monkeypatch.setattr(enrich_spotify, "spotify_lock", contextlib.nullcontext)
+    monkeypatch.setattr(enrich_spotify, "enrich_band",
+                        lambda sp, cx, band: vistas.append(band["nombre"]) or "ok")
+    enrich_spotify.enrich()
+    assert vistas == ["Banda"]  # Foro nunca va a Spotify

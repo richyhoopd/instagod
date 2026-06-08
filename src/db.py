@@ -75,6 +75,15 @@ QUEUE_EN_SHEET = "en_sheet"
 QUEUE_PUBLICADO = "publicado"
 QUEUE_DESCARTADO = "descartado"
 
+# Tipos de actor que SÍ son artistas musicales: solo estos van a Spotify
+# (foro/evento/colectivo no graban discos). Deezer y demás no se restringen.
+TIPOS_MUSICALES = ("banda", "solista")
+
+
+def es_musical(band: dict[str, Any]) -> bool:
+    """True si la banda es un artista grabable (banda/solista) → elegible a Spotify."""
+    return (band.get("tipo") or "banda") in TIPOS_MUSICALES
+
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     """Conexión SQLite con FK activas y filas como dict-like (sqlite3.Row)."""

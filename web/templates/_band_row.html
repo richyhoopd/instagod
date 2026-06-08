@@ -20,7 +20,17 @@
             style="background:#ffe08a; color:#7a5b00; font-size:11px; padding:1px 6px; border-radius:8px; font-weight:600;">nueva</span>
     {% endif %}
   </td>
-  <td>{% if b.spotify_id %}<span title="{{ b.spotify_id }}">✓</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td style="white-space:nowrap;">
+    {% if b.spotify_id %}
+      <a href="https://open.spotify.com/artist/{{ b.spotify_id }}" target="_blank"
+         title="Spotify" style="color:#1db954; font-weight:700; text-decoration:none;">Spotify</a>
+    {% elif b.tipo in ["banda","solista"] %}<span class="muted" style="font-size:11px;">spotify —</span>{% endif %}
+    {% if b.spotify_id and b.deezer_id %}<span class="muted">·</span>{% endif %}
+    {% if b.deezer_id %}
+      <a href="https://www.deezer.com/artist/{{ b.deezer_id }}" target="_blank"
+         title="Deezer" style="color:#a238ff; font-weight:700; text-decoration:none;">Deezer</a>
+    {% else %}<span class="muted" style="font-size:11px;">deezer —</span>{% endif %}
+  </td>
   <td>
     {% if b.genero_principal %}<span class="chip" style="background:#e6f0ff; font-weight:600;">{{ b.genero_principal }}</span>{% endif %}
     {% for g in b.generos_str.split(", ") if b.generos_str %}<span class="chip">{{ g }}</span>{% endfor %}

@@ -34,7 +34,6 @@ from src.enrich_spotify import (
     spotify_lock,
 )
 
-
 _MAX_LINEAS = 30  # 30 × ~80 chars ≈ 2400, bien bajo el límite de 4096 de Telegram
 
 
@@ -105,7 +104,8 @@ def check(dry_run: bool = False) -> list[dict]:
         # Deezer es la fuente primaria (sin auth ni cap); dedup compartido en events.
         nuevos.extend(_check_deezer(cx))
         # Spotify queda como fuente secundaria para las que tengan id.
-        bandas = [b for b in db.list_bands(cx) if b.get("spotify_id")]
+        bandas = [b for b in db.list_bands(cx)
+                  if b.get("spotify_id") and db.es_musical(b)]
         if bandas:
             sp = get_client()
             print(f"Spotify: revisando {len(bandas)} banda(s)…")

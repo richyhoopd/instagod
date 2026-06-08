@@ -25,8 +25,8 @@ from spotipy import SpotifyException
 
 from src import db
 from src.enrich_spotify import (
-    RateLimitado,
     _ARTIST_LINK,
+    RateLimitado,
     _checar_429,
     _registrar_releases,
     get_client,
@@ -88,6 +88,7 @@ def bandas_pendientes_con_link(cx) -> list[dict]:
     filas = db.rows(cx, """
         SELECT * FROM bands
          WHERE activa = 1 AND spotify_status = 'pendiente'
+           AND tipo IN ('banda','solista')
            AND link_externo IS NOT NULL AND link_externo != ''
     """)
     return [b for b in filas if es_link_resolvible(b["link_externo"])]

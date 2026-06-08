@@ -985,6 +985,7 @@ def spotify_view(request: Request, aviso: str = "") -> HTMLResponse:
         pendientes = db.rows(cx, """
             SELECT * FROM bands
              WHERE activa = 1 AND spotify_status = 'pendiente'
+               AND tipo IN ('banda','solista')
              ORDER BY prioridad DESC, nombre COLLATE NOCASE
         """)
     finally:
