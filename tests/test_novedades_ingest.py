@@ -6,11 +6,21 @@ docs/superpowers/specs/2026-06-07-fetch-incremental-design.md (Frente A).
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from src import db, ingest_ig
+
+
+def _pool(tmp_path: Path, *cuentas: dict) -> Path:
+    """Escribe un pool de cuentas scraper en tmp y devuelve la ruta."""
+    p = tmp_path / "ig_accounts.json"
+    if not cuentas:
+        cuentas = ({"label": "t", "sessionid": "s", "ua": "u", "quemada_hasta": None},)
+    p.write_text(json.dumps(list(cuentas)), encoding="utf-8")
+    return p
 
 
 @pytest.fixture()
@@ -46,12 +56,16 @@ def _post(shortcode: str, *, taken_at: int = 1_700_000_000, caption: str = "hola
 
 @pytest.fixture()
 def mock_red(monkeypatch, tmp_path):
-    """Mockea descarga de imagen, delays y PHOTOS_DIR. Devuelve el contador de fetch_profile."""
+    """Mockea descarga, delays, PHOTOS_DIR, un pool de 1 cuenta sana y la sesión."""
     monkeypatch.setattr(ingest_ig, "_download", lambda session, url, dest: dest.write_bytes(b"x") or True)
     monkeypatch.setattr(ingest_ig, "_sleep", lambda: None)
     # photos_dir bajo BASE_DIR para que path.relative_to(BASE_DIR) funcione
     monkeypatch.setattr(ingest_ig.config, "BASE_DIR", tmp_path)
     monkeypatch.setattr(ingest_ig.config, "resolve_photos_dir", lambda: tmp_path / "photos")
+    # Pool por defecto: 1 cuenta sana en JSON real; sesión dummy (sin red).
+    pool = _pool(tmp_path)
+    monkeypatch.setattr(ingest_ig.config, "resolve_ig_accounts_path", lambda: pool)
+    monkeypatch.setattr(ingest_ig, "get_session", lambda cuenta=None: object())
     return monkeypatch
 
 
@@ -76,7 +90,6 @@ def test_corte_en_post_conocido(cx, mock_red, monkeypatch) -> None:
     perfil_calls = []
     monkeypatch.setattr(ingest_ig, "fetch_profile",
                         lambda s, h: perfil_calls.append(h) or {"id": "111"})
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(_cx=cx)
     assert res["bandas_revisadas"] == 1
@@ -99,7 +112,6 @@ def test_solo_nuevos_se_insertan(cx, mock_red, monkeypatch) -> None:
             _post("VIEJO", taken_at=1_700_000_000)]
     monkeypatch.setattr(ingest_ig, "fetch_posts", lambda s, uid, count: feed)
     monkeypatch.setattr(ingest_ig, "fetch_profile", lambda s, h: {"id": "111"})
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(_cx=cx)
     assert res["fotos_nuevas"] == 2
@@ -130,7 +142,6 @@ def test_sin_cache_llama_perfil_y_persiste(cx, mock_red, monkeypatch) -> None:
     fetch_calls = []
     monkeypatch.setattr(ingest_ig, "fetch_posts",
                         lambda s, uid, count: fetch_calls.append(uid) or [])
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     ingest_ig.novedades(_cx=cx)
     assert perfil_calls == ["banda"]
@@ -144,13 +155,12 @@ def test_con_cache_no_llama_perfil(cx, mock_red, monkeypatch) -> None:
     monkeypatch.setattr(ingest_ig, "fetch_profile",
                         lambda s, h: perfil_calls.append(h) or {"id": "x"})
     monkeypatch.setattr(ingest_ig, "fetch_posts", lambda s, uid, count: [])
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     ingest_ig.novedades(_cx=cx)
     assert perfil_calls == []
 
 
-# ---------- banda que falla no tumba la corrida ----------
+# ---------- banda que falla (NO rate-limit) no tumba la corrida ----------
 
 def test_banda_fallida_continua(cx, mock_red, monkeypatch) -> None:
     _band(cx, "rota", ig_user_id="111")
@@ -158,12 +168,11 @@ def test_banda_fallida_continua(cx, mock_red, monkeypatch) -> None:
 
     def fake_posts(s, uid, count):
         if uid == "111":
-            raise ingest_ig.IngestRateLimited("HTTP 429")
+            raise LookupError("IG no devolvió datos")  # fallo aislado, no 401/429
         return [_post("OK1")]
 
     monkeypatch.setattr(ingest_ig, "fetch_posts", fake_posts)
     monkeypatch.setattr(ingest_ig, "fetch_profile", lambda s, h: {"id": "?"})
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(_cx=cx)
     assert "rota" in res["fallidas"]
@@ -181,7 +190,6 @@ def test_sin_scrapear_no_entra(cx, mock_red, monkeypatch) -> None:
     monkeypatch.setattr(ingest_ig, "fetch_posts",
                         lambda s, uid, count: revisadas.append(uid) or [])
     monkeypatch.setattr(ingest_ig, "fetch_profile", lambda s, h: {"id": "111"})
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(_cx=cx)
     assert res["bandas_revisadas"] == 0
@@ -195,7 +203,6 @@ def test_handles_explicitos_solo_scrapeadas(cx, mock_red, monkeypatch) -> None:
     monkeypatch.setattr(ingest_ig, "fetch_posts",
                         lambda s, uid, count: revisadas.append(uid) or [])
     monkeypatch.setattr(ingest_ig, "fetch_profile", lambda s, h: {"id": "?"})
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(handles=["scrapeada", "nueva"], _cx=cx)
     assert revisadas == ["111"]  # nueva no entra aunque se pida explícita
@@ -208,7 +215,6 @@ def test_actualiza_scraped_at(cx, mock_red, monkeypatch) -> None:
     bid = _band(cx, "banda", ig_user_id="111")
     monkeypatch.setattr(ingest_ig, "fetch_posts", lambda s, uid, count: [_post("N1")])
     monkeypatch.setattr(ingest_ig, "fetch_profile", lambda s, h: {"id": "111"})
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     ingest_ig.novedades(_cx=cx)
     assert db.get(cx, "bands", bid)["scraped_at"] != "2026-06-01T10:00:00"
@@ -225,7 +231,6 @@ def test_tope_revisa_las_mas_viejas(cx, mock_red, monkeypatch) -> None:
     revisadas = []
     monkeypatch.setattr(ingest_ig, "fetch_posts",
                         lambda s, uid, count: revisadas.append(uid) or [])
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(limite=2, _cx=cx)
     assert res["bandas_revisadas"] == 2
@@ -240,45 +245,59 @@ def test_handles_explicitos_ignoran_el_tope(cx, mock_red, monkeypatch) -> None:
     revisadas = []
     monkeypatch.setattr(ingest_ig, "fetch_posts",
                         lambda s, uid, count: revisadas.append(uid) or [])
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
     res = ingest_ig.novedades(handles=["a", "b", "c"], limite=1, _cx=cx)
     assert res["bandas_revisadas"] == 3  # explícito = intención, sin tope
 
 
-# ---------- circuit breaker: parar al detectar el bloqueo ----------
+# ---------- pool agotado corta la corrida ----------
 
-def test_circuit_breaker_corta_tras_401_seguidos(cx, mock_red, monkeypatch) -> None:
-    for i in range(6):
+def test_pool_agotado_corta(cx, mock_red, monkeypatch) -> None:
+    # 1 sola cuenta (la default de mock_red); el feed siempre da 401
+    for i in range(4):
         bid = db.insert(cx, "bands", nombre=f"b{i}", ig_handle=f"b{i}", activa=1)
         db.update(cx, "bands", bid, scraped_at=f"2026-06-0{i+1}", ig_user_id=str(i))
     monkeypatch.setattr(ingest_ig, "fetch_posts",
                         lambda s, uid, count: (_ for _ in ()).throw(
                             ingest_ig.IngestRateLimited("HTTP 401")))
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
-    res = ingest_ig.novedades(limite=6, max_bloqueos=3, _cx=cx)
+    res = ingest_ig.novedades(limite=4, _cx=cx)
     assert res["cortado_por_bloqueo"] is True
-    assert res["bandas_revisadas"] == 3  # paró tras 3 seguidos, no intentó las otras 3
-    assert len(res["fallidas"]) == 3
+    assert res["bandas_revisadas"] == 1   # la 1ª quema la única cuenta → pool agotado
+    assert res["pendientes"] == 4         # ninguna se revisó
 
 
-def test_circuit_breaker_resetea_con_exito(cx, mock_red, monkeypatch) -> None:
-    for i in range(5):
+# ---------- rotación a media corrida: una cuenta se quema, sigue con la otra ----------
+
+def test_rotacion_quema_una_sigue_con_otra(cx, mock_red, monkeypatch, tmp_path) -> None:
+    # pool de 2 cuentas sanas
+    pool = _pool(tmp_path,
+                 {"label": "a", "sessionid": "sa", "ua": "ua", "quemada_hasta": None},
+                 {"label": "b", "sessionid": "sb", "ua": "ub", "quemada_hasta": None})
+    monkeypatch.setattr(ingest_ig.config, "resolve_ig_accounts_path", lambda: pool)
+    # get_session devuelve un objeto que identifica la cuenta activa
+    monkeypatch.setattr(ingest_ig, "get_session", lambda cuenta=None: cuenta["label"])
+
+    for i in range(2):
         bid = db.insert(cx, "bands", nombre=f"b{i}", ig_handle=f"b{i}", activa=1)
         db.update(cx, "bands", bid, scraped_at=f"2026-06-0{i+1}", ig_user_id=str(i))
-    # orden por antigüedad: 0,1,2,3,4 → falla, ok, falla, falla, falla
-    secuencia = {"0": "fail", "1": "ok", "2": "fail", "3": "fail", "4": "fail"}
 
-    def fake(s, uid, count):
-        if secuencia[uid] == "fail":
+    # con la cuenta "a" el feed da 401; con "b" funciona
+    def fake(sess, uid, count):
+        if sess == "a":
             raise ingest_ig.IngestRateLimited("HTTP 401")
-        return []
+        return [_post(f"P{uid}")]
 
     monkeypatch.setattr(ingest_ig, "fetch_posts", fake)
-    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
 
-    res = ingest_ig.novedades(limite=5, max_bloqueos=3, _cx=cx)
-    # el ok en posición 1 resetea el contador → corta hasta el 3er fallo SEGUIDO (uid 2,3,4)
-    assert res["cortado_por_bloqueo"] is True
-    assert res["bandas_revisadas"] == 5
+    res = ingest_ig.novedades(limite=2, _cx=cx)
+    assert res["cortado_por_bloqueo"] is False
+    assert res["bandas_revisadas"] == 2
+    assert res["fotos_nuevas"] == 2  # ambas bandas procesadas con la cuenta "b"
+    # "a" quedó marcada en reposo en el JSON, "b" sigue sana
+    from src import ig_accounts
+    cuentas = {c["label"]: c for c in ig_accounts.cargar(pool)}
+    assert cuentas["a"]["quemada_hasta"] is not None
+    assert cuentas["b"]["quemada_hasta"] is None
+
+

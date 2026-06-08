@@ -36,7 +36,7 @@ from typing import Any, Iterator
 from curl_cffi import requests as creq
 
 import config
-from src import db
+from src import db, ig_accounts
 
 _TIMEOUT = 30
 # App-id web oficial de instagram.com; requerido por los endpoints /api/v1.
@@ -59,18 +59,50 @@ def _sleep() -> None:
     time.sleep(random.uniform(config.IG_INGEST_DELAY_MIN, config.IG_INGEST_DELAY_MAX))
 
 
-def get_session() -> creq.Session:
-    """Sesión curl_cffi con la cookie del navegador y su mismo user-agent."""
-    if not (config.IG_SCRAPER_SESSIONID and config.IG_SCRAPER_UA):
+def get_session(cuenta: dict[str, Any] | None = None) -> creq.Session:
+    """Sesión curl_cffi para una cuenta del pool (cookie + su user-agent exacto).
+
+    Sin `cuenta` cae a la cookie del `.env` (compatibilidad con el setup viejo).
+    """
+    sessionid = (cuenta or {}).get("sessionid") or config.IG_SCRAPER_SESSIONID
+    ua = (cuenta or {}).get("ua") or config.IG_SCRAPER_UA
+    if not (sessionid and ua):
         raise RuntimeError(
-            "Faltan IG_SCRAPER_SESSIONID / IG_SCRAPER_UA en el .env. "
-            "Saca ambos del navegador logueado: DevTools → Cookies → sessionid, "
-            "y navigator.userAgent en la consola."
+            "Faltan cuentas scraper. Agrega data/ig_accounts.json o "
+            "IG_SCRAPER_SESSIONID / IG_SCRAPER_UA en el .env (sácalos del "
+            "navegador logueado: DevTools → Cookies → sessionid, y navigator.userAgent)."
         )
     s = creq.Session(impersonate=_IMPERSONATE)
-    s.cookies.set("sessionid", config.IG_SCRAPER_SESSIONID, domain=".instagram.com")
-    s.headers.update({"x-ig-app-id": _IG_APP_ID, "User-Agent": config.IG_SCRAPER_UA})
+    s.cookies.set("sessionid", sessionid, domain=".instagram.com")
+    s.headers.update({"x-ig-app-id": _IG_APP_ID, "User-Agent": ua})
     return s
+
+
+class SesionRotatoria:
+    """Pool de cuentas scraper con rotación: al quemarse una, salta a la siguiente.
+
+    Arranca con la primera cuenta sana del pool. `rotar_por_quemada()` marca la
+    activa en reposo (persistido en el JSON) y cambia a la siguiente sana; si el
+    pool queda agotado, deja `session=None`. El reposo sobrevive entre corridas.
+    """
+
+    def __init__(self, ahora=None):
+        self._ahora = ahora
+        self.cuentas = ig_accounts.cargar()
+        self.cuenta = ig_accounts.siguiente_sana(self.cuentas, ahora=ahora)
+        self.session = get_session(self.cuenta) if self.cuenta else None
+
+    def disponible(self) -> bool:
+        return self.cuenta is not None
+
+    def rotar_por_quemada(self) -> bool:
+        """Quema la cuenta activa y pasa a la siguiente sana. False si no quedan."""
+        if self.cuenta:
+            ig_accounts.marcar_quemada(self.cuenta["label"], ahora=self._ahora)
+        self.cuentas = ig_accounts.cargar()  # relee para ver el reposo recién escrito
+        self.cuenta = ig_accounts.siguiente_sana(self.cuentas, ahora=self._ahora)
+        self.session = get_session(self.cuenta) if self.cuenta else None
+        return self.cuenta is not None
 
 
 def _get_json(session: creq.Session, url: str, params: dict | None = None) -> dict[str, Any]:
@@ -327,37 +359,44 @@ def novedades(handles: list[str] | None = None, max_posts: int | None = None,
             print("No hay bandas scrapeadas que revisar.")
             return resumen
 
-        session = get_session()
-        print(f"Novedades de {len(bandas)} banda(s)…")
-        bloqueos_seguidos = 0
+        rot = SesionRotatoria()
+        if not rot.disponible():
+            print("No hay cuentas scraper sanas (todas en reposo o sin configurar).")
+            resumen["cortado_por_bloqueo"] = True
+            resumen["pendientes"] += len(bandas)
+            return resumen
+
+        print(f"Novedades de {len(bandas)} banda(s) — cuenta '{rot.cuenta['label']}'…")
         for i, band in enumerate(bandas):
             handle = band["ig_handle"]
             print(f"▶ @{handle} ({band['nombre']})")
             resumen["bandas_revisadas"] += 1  # intentadas; las que truenan van a fallidas
-            try:
-                nuevos = _revisar_banda(session, cx, band, max_posts)
-            except IngestRateLimited as exc:
-                # Señal de soft-block: contar seguidas y cortar si se acumulan.
-                print(f"   ❌ {exc} — bloqueo de IG.")
-                resumen["fallidas"].append(handle)
-                bloqueos_seguidos += 1
-                if bloqueos_seguidos >= max_bloqueos:
-                    no_intentadas = len(bandas) - (i + 1)
+            # Reintenta la MISMA banda rotando de cuenta mientras el feed dé 401/429.
+            nuevos = None
+            while True:
+                try:
+                    nuevos = _revisar_banda(rot.session, cx, band, max_posts)
+                    break
+                except IngestRateLimited as exc:
+                    print(f"   ⚠️ {exc} — quemo '{rot.cuenta['label']}' y roto.")
+                    if rot.rotar_por_quemada():
+                        print(f"   ↻ ahora con cuenta '{rot.cuenta['label']}'.")
+                        continue  # reintenta esta banda con la nueva cuenta
+                    # Pool agotado: nadie más puede revisar. Cortar la corrida.
+                    no_intentadas = len(bandas) - i  # esta inclusive
                     resumen["cortado_por_bloqueo"] = True
                     resumen["pendientes"] += no_intentadas
-                    print(f"   🛑 {max_bloqueos} bloqueos seguidos: corto la corrida "
-                          f"({no_intentadas} sin intentar) para no empeorar el block.")
+                    print(f"   🛑 todas las cuentas en reposo: corto ({no_intentadas} sin revisar).")
+                    return resumen
+                except Exception as exc:  # noqa: BLE001 — banda caída no tumba la corrida
+                    print(f"   ❌ {exc} — se salta esta banda y se continúa.")
+                    resumen["fallidas"].append(handle)
                     break
-            except Exception as exc:  # noqa: BLE001 — una banda caída no debe tumbar la corrida
-                print(f"   ❌ {exc} — se salta esta banda y se continúa.")
-                resumen["fallidas"].append(handle)
-                bloqueos_seguidos = 0  # fallo aislado, no es el block
-            else:
-                bloqueos_seguidos = 0  # éxito resetea el contador
-                if nuevos:
-                    resumen["con_novedades"] += 1
-                    resumen["fotos_nuevas"] += len(nuevos)
-                    resumen["posts_nuevos"].extend(nuevos)
+            if nuevos:
+                resumen["con_novedades"] += 1
+                resumen["fotos_nuevas"] += len(nuevos)
+                resumen["posts_nuevos"].extend(nuevos)
+            if nuevos is not None:
                 print(f"   ✅ {len(nuevos)} foto(s) nueva(s)")
             if i < len(bandas) - 1:
                 _sleep()  # mismo delay anti-bot entre bandas

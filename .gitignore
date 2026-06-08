@@ -46,3 +46,6 @@ playwright-report/
 Becas y apoyos - Tec de Monterrey.docx
 repos_github_ordenados.xlsx
 new_imp/
+
+# Pool de cuentas scraper (cookies de sesión = secretos)
+data/ig_accounts.json

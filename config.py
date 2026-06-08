@@ -87,6 +87,10 @@ IG_INGEST_MAX_POSTS = int(_get("IG_INGEST_MAX_POSTS", "12") or "12")
 # profundizar el bloqueo. El cron diario cubre todas en pocos días.
 NOVEDADES_BANDAS_POR_CORRIDA = int(_get("NOVEDADES_BANDAS_POR_CORRIDA", "25") or "25")
 NOVEDADES_MAX_BLOQUEOS = int(_get("NOVEDADES_MAX_BLOQUEOS", "3") or "3")
+# Pool de cuentas scraper: al quemarse una (401/429), reposa estas horas antes
+# de reintentarla. Las cuentas viven en data/ig_accounts.json (ver ig_accounts).
+SCRAPER_COOLDOWN_HORAS = int(_get("SCRAPER_COOLDOWN_HORAS", "12") or "12")
+IG_ACCOUNTS_PATH = _get("IG_ACCOUNTS_PATH", "./data/ig_accounts.json")
 IG_INGEST_DELAY_MIN = float(_get("IG_INGEST_DELAY_MIN", "4") or "4")
 IG_INGEST_DELAY_MAX = float(_get("IG_INGEST_DELAY_MAX", "10") or "10")
 # Sesión de instaloader cacheada: evita relogins (cada login es señal de riesgo).
@@ -168,6 +172,11 @@ def resolve_db_path() -> Path:
     p = _resolve(DB_PATH)
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def resolve_ig_accounts_path() -> Path:
+    """Ruta absoluta al JSON del pool de cuentas scraper."""
+    return _resolve(IG_ACCOUNTS_PATH)
 
 
 def resolve_photos_dir() -> Path:
