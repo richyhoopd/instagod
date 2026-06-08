@@ -44,6 +44,12 @@ def _resumen_texto(res: dict, rel: dict | None, errores: list[str]) -> str:
     lineas.append(f"Bandas revisadas: {res['bandas_revisadas']} · "
                   f"con novedades: {res['con_novedades']} · "
                   f"fotos nuevas: {res['fotos_nuevas']}")
+    if res.get("pendientes"):
+        lineas.append(f"⏳ {res['pendientes']} pendientes para la próxima corrida "
+                      "(rotación por antigüedad).")
+    if res.get("cortado_por_bloqueo"):
+        lineas.append("🛑 IG soft-bloqueó el feed: corté la corrida para no "
+                      "empeorarlo; se retoman mañana.")
     if rel:
         lineas.append(f"Releases IG: {rel['releases_nuevos']} nuevos "
                       f"({rel['saltados_dedupe']} dedupe, {rel['fallidos']} fallidos)")

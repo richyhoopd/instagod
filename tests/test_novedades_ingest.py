@@ -212,3 +212,73 @@ def test_actualiza_scraped_at(cx, mock_red, monkeypatch) -> None:
 
     ingest_ig.novedades(_cx=cx)
     assert db.get(cx, "bands", bid)["scraped_at"] != "2026-06-01T10:00:00"
+
+
+# ---------- rotación por antigüedad (tope por corrida) ----------
+
+def test_tope_revisa_las_mas_viejas(cx, mock_red, monkeypatch) -> None:
+    # 4 bandas con scraped_at distinto; tope 2 → solo las 2 MÁS VIEJAS
+    for h, fecha, uid in [("vieja", "2026-06-01", "1"), ("media", "2026-06-03", "2"),
+                          ("fresca", "2026-06-05", "3"), ("muy_vieja", "2026-05-20", "4")]:
+        bid = db.insert(cx, "bands", nombre=h, ig_handle=h, activa=1)
+        db.update(cx, "bands", bid, scraped_at=fecha, ig_user_id=uid)
+    revisadas = []
+    monkeypatch.setattr(ingest_ig, "fetch_posts",
+                        lambda s, uid, count: revisadas.append(uid) or [])
+    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
+
+    res = ingest_ig.novedades(limite=2, _cx=cx)
+    assert res["bandas_revisadas"] == 2
+    assert revisadas == ["4", "1"]  # muy_vieja (may-20) y vieja (jun-01)
+    assert res["pendientes"] == 2
+
+
+def test_handles_explicitos_ignoran_el_tope(cx, mock_red, monkeypatch) -> None:
+    for h, uid in [("a", "1"), ("b", "2"), ("c", "3")]:
+        bid = db.insert(cx, "bands", nombre=h, ig_handle=h, activa=1)
+        db.update(cx, "bands", bid, scraped_at="2026-06-01", ig_user_id=uid)
+    revisadas = []
+    monkeypatch.setattr(ingest_ig, "fetch_posts",
+                        lambda s, uid, count: revisadas.append(uid) or [])
+    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
+
+    res = ingest_ig.novedades(handles=["a", "b", "c"], limite=1, _cx=cx)
+    assert res["bandas_revisadas"] == 3  # explícito = intención, sin tope
+
+
+# ---------- circuit breaker: parar al detectar el bloqueo ----------
+
+def test_circuit_breaker_corta_tras_401_seguidos(cx, mock_red, monkeypatch) -> None:
+    for i in range(6):
+        bid = db.insert(cx, "bands", nombre=f"b{i}", ig_handle=f"b{i}", activa=1)
+        db.update(cx, "bands", bid, scraped_at=f"2026-06-0{i+1}", ig_user_id=str(i))
+    monkeypatch.setattr(ingest_ig, "fetch_posts",
+                        lambda s, uid, count: (_ for _ in ()).throw(
+                            ingest_ig.IngestRateLimited("HTTP 401")))
+    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
+
+    res = ingest_ig.novedades(limite=6, max_bloqueos=3, _cx=cx)
+    assert res["cortado_por_bloqueo"] is True
+    assert res["bandas_revisadas"] == 3  # paró tras 3 seguidos, no intentó las otras 3
+    assert len(res["fallidas"]) == 3
+
+
+def test_circuit_breaker_resetea_con_exito(cx, mock_red, monkeypatch) -> None:
+    for i in range(5):
+        bid = db.insert(cx, "bands", nombre=f"b{i}", ig_handle=f"b{i}", activa=1)
+        db.update(cx, "bands", bid, scraped_at=f"2026-06-0{i+1}", ig_user_id=str(i))
+    # orden por antigüedad: 0,1,2,3,4 → falla, ok, falla, falla, falla
+    secuencia = {"0": "fail", "1": "ok", "2": "fail", "3": "fail", "4": "fail"}
+
+    def fake(s, uid, count):
+        if secuencia[uid] == "fail":
+            raise ingest_ig.IngestRateLimited("HTTP 401")
+        return []
+
+    monkeypatch.setattr(ingest_ig, "fetch_posts", fake)
+    monkeypatch.setattr(ingest_ig, "get_session", lambda: object())
+
+    res = ingest_ig.novedades(limite=5, max_bloqueos=3, _cx=cx)
+    # el ok en posición 1 resetea el contador → corta hasta el 3er fallo SEGUIDO (uid 2,3,4)
+    assert res["cortado_por_bloqueo"] is True
+    assert res["bandas_revisadas"] == 5

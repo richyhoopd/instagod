@@ -276,6 +276,7 @@ def ingest(handles: list[str] | None = None, max_posts: int | None = None,
 
 
 def novedades(handles: list[str] | None = None, max_posts: int | None = None,
+              limite: int | None = None, max_bloqueos: int | None = None,
               _cx=None) -> dict[str, Any]:
     """Chequeo ligero de NOVEDADES sobre bandas YA scrapeadas (Frente A).
 
@@ -284,18 +285,29 @@ def novedades(handles: list[str] | None = None, max_posts: int | None = None,
     baja la primera página de posts y CORTA en cuanto aparece un `source_post_id`
     ya presente en `photos` de esa banda — solo se descargan los nuevos.
 
-    Banda que falle (sesión caída, 429, perfil 404) → se loguea y se continúa;
-    el resumen lista las fallidas. `posts_nuevos` es el insumo de los pasos
-    siguientes del orquestador (detección de releases, clasificación).
+    El feed de IG soft-bloquea (401) tras ~33 llamadas por ventana, así que:
+    - **Rotación por antigüedad**: sin `handles`, revisa solo las `limite` bandas
+      MÁS viejas de revisar (orden por `scraped_at`); como cada éxito actualiza
+      `scraped_at`, en pocas corridas pasan todas. Con `handles` explícitos no
+      hay tope (es intención del usuario).
+    - **Circuit breaker**: tras `max_bloqueos` 401/429 SEGUIDOS aborta la corrida
+      (seguir solo profundiza el bloqueo); las no intentadas conservan su
+      `scraped_at` viejo → entran primero la próxima vez.
+
+    Banda que falle aislada → se loguea y se continúa; el resumen lista las
+    fallidas. `posts_nuevos` alimenta los pasos siguientes del orquestador.
 
     `_cx`: conexión inyectable para tests; en producción se abre una nueva.
     """
     max_posts = max_posts or config.IG_INGEST_MAX_POSTS
+    limite = limite or config.NOVEDADES_BANDAS_POR_CORRIDA
+    max_bloqueos = max_bloqueos or config.NOVEDADES_MAX_BLOQUEOS
     propia = _cx is None
     cx = _cx or db.connect()
     resumen: dict[str, Any] = {
         "bandas_revisadas": 0, "con_novedades": 0, "fotos_nuevas": 0,
-        "fallidas": [], "posts_nuevos": [],
+        "fallidas": [], "posts_nuevos": [], "pendientes": 0,
+        "cortado_por_bloqueo": False,
     }
     try:
         if propia:
@@ -305,22 +317,43 @@ def novedades(handles: list[str] | None = None, max_posts: int | None = None,
         if handles:
             quiero = {h.lstrip("@").lower() for h in handles}
             bandas = [b for b in bandas if b["ig_handle"].lower() in quiero]
+        else:
+            # Rotación: las más viejas de revisar primero, tope por corrida.
+            bandas.sort(key=lambda b: b["scraped_at"])
+            total = len(bandas)
+            bandas = bandas[:limite]
+            resumen["pendientes"] = max(0, total - len(bandas))
         if not bandas:
             print("No hay bandas scrapeadas que revisar.")
             return resumen
 
         session = get_session()
         print(f"Novedades de {len(bandas)} banda(s)…")
+        bloqueos_seguidos = 0
         for i, band in enumerate(bandas):
             handle = band["ig_handle"]
             print(f"▶ @{handle} ({band['nombre']})")
             resumen["bandas_revisadas"] += 1  # intentadas; las que truenan van a fallidas
             try:
                 nuevos = _revisar_banda(session, cx, band, max_posts)
+            except IngestRateLimited as exc:
+                # Señal de soft-block: contar seguidas y cortar si se acumulan.
+                print(f"   ❌ {exc} — bloqueo de IG.")
+                resumen["fallidas"].append(handle)
+                bloqueos_seguidos += 1
+                if bloqueos_seguidos >= max_bloqueos:
+                    no_intentadas = len(bandas) - (i + 1)
+                    resumen["cortado_por_bloqueo"] = True
+                    resumen["pendientes"] += no_intentadas
+                    print(f"   🛑 {max_bloqueos} bloqueos seguidos: corto la corrida "
+                          f"({no_intentadas} sin intentar) para no empeorar el block.")
+                    break
             except Exception as exc:  # noqa: BLE001 — una banda caída no debe tumbar la corrida
                 print(f"   ❌ {exc} — se salta esta banda y se continúa.")
                 resumen["fallidas"].append(handle)
+                bloqueos_seguidos = 0  # fallo aislado, no es el block
             else:
+                bloqueos_seguidos = 0  # éxito resetea el contador
                 if nuevos:
                     resumen["con_novedades"] += 1
                     resumen["fotos_nuevas"] += len(nuevos)

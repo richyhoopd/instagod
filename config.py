@@ -81,6 +81,12 @@ IG_SCRAPER_UA = _get("IG_SCRAPER_UA")
 # Login por script dispara checkpoints; la cookie del navegador es la vía estable.
 IG_SCRAPER_SESSIONID = _get("IG_SCRAPER_SESSIONID")
 IG_INGEST_MAX_POSTS = int(_get("IG_INGEST_MAX_POSTS", "12") or "12")
+# Modo NOVEDADES: el feed de IG aguanta ~33 llamadas por ventana antes de
+# soft-bloquear (401). Revisamos solo las N bandas más "viejas de revisar" por
+# corrida (rotación por scraped_at) y cortamos tras M 401 seguidos para no
+# profundizar el bloqueo. El cron diario cubre todas en pocos días.
+NOVEDADES_BANDAS_POR_CORRIDA = int(_get("NOVEDADES_BANDAS_POR_CORRIDA", "25") or "25")
+NOVEDADES_MAX_BLOQUEOS = int(_get("NOVEDADES_MAX_BLOQUEOS", "3") or "3")
 IG_INGEST_DELAY_MIN = float(_get("IG_INGEST_DELAY_MIN", "4") or "4")
 IG_INGEST_DELAY_MAX = float(_get("IG_INGEST_DELAY_MAX", "10") or "10")
 # Sesión de instaloader cacheada: evita relogins (cada login es señal de riesgo).
