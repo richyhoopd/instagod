@@ -52,6 +52,7 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
 
     print(f"═══ PIPELINE sobre {len(objetivo)} banda(s) activa(s) ═══\n")
     t0 = time.time()
+    _posts_nuevos: list = []
 
     if "ingest" not in skip:
         print("── 1/4 Ingesta de Instagram ──")
@@ -63,8 +64,9 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
         if handles or rescan:
             ingest_ig.ingest(handles, rescan=rescan)
         else:
-            ingest_ig.ingest(None)      # solo bandas nuevas (scraped_at IS NULL)
-            ingest_ig.novedades()       # solo lo nuevo de las ya scrapeadas
+            ingest_ig.ingest(None)              # solo bandas nuevas (scraped_at IS NULL)
+            _novedades = ingest_ig.novedades()  # solo lo nuevo de las ya scrapeadas
+            _posts_nuevos = (_novedades or {}).get("posts_nuevos", [])
     if "classify" not in skip:
         print("\n── 2/4 Clasificación de fotos ──")
         classify.clasificar(objetivo)
@@ -98,6 +100,19 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
     if "events" not in skip:
         print("\n── 4/4 Parseo de eventos ──")
         parse_events.parse_all()
+        # Detección por CAPTION (autoritativa, independiente de la imagen): los
+        # posts nuevos pasan por el detector y un backfill barre lo ingerido sin
+        # evento (idempotente por photos.evento_analizado).
+        from src import detect_releases_ig
+        cx = db.connect()
+        try:
+            if _posts_nuevos:
+                detect_releases_ig.detectar(cx, _posts_nuevos)
+            detect_releases_ig.backfill_eventos(cx, dias=30)
+        except Exception as exc:  # noqa: BLE001 — LLM/red caídos no abortan el pipeline
+            print(f"   (detección por caption saltada: {exc})")
+        finally:
+            cx.close()
 
     print(f"\n═══ Pipeline terminado en {time.time() - t0:.0f}s. "
           "Cura en la GUI y genera contenido. ═══")

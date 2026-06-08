@@ -243,3 +243,27 @@ def test_pipeline_con_handles_no_corre_novedades(monkeypatch) -> None:
     pipeline.run(handles=["kabala"], skip={"classify", "spotify", "events"})
     assert llamadas["ingest"] == [(["kabala"], False)]
     assert llamadas["novedades"] == 0
+
+
+# ---------- pipeline corre detección por caption (eventos no dependen de imagen) ----------
+
+def test_pipeline_corre_deteccion_por_caption(monkeypatch) -> None:
+    from src import pipeline
+    llamadas = {"detectar": 0, "backfill": 0}
+    monkeypatch.setattr(pipeline, "_bandas_activas", lambda h: ["x"])
+    monkeypatch.setattr(pipeline.ingest_ig, "ingest", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.ingest_ig, "novedades",
+                        lambda *a, **k: {"posts_nuevos": [{"band_id": 1, "shortcode": "S1",
+                                                           "caption": "estreno", "path": "p", "fecha": "2026-06-01"}]})
+    monkeypatch.setattr(pipeline.classify, "clasificar", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.parse_events, "parse_all", lambda *a, **k: None)
+    from src import detect_releases_ig
+    monkeypatch.setattr(detect_releases_ig, "detectar",
+                        lambda cx, posts: llamadas.__setitem__("detectar", len(posts)) or
+                        {"revisados": 1, "releases_nuevos": 0, "saltados_dedupe": 0, "fallidos": 0, "nuevos": []})
+    monkeypatch.setattr(detect_releases_ig, "backfill_eventos",
+                        lambda cx, **k: llamadas.__setitem__("backfill", 1) or
+                        {"revisados": 0, "releases_nuevos": 0, "saltados_dedupe": 0, "fallidos": 0, "nuevos": []})
+    pipeline.run(skip={"spotify"})  # ingest+classify+events corren mockeados
+    assert llamadas["detectar"] == 1   # los posts nuevos pasan por el detector de caption
+    assert llamadas["backfill"] == 1   # + red de seguridad sobre lo ingerido sin evento

@@ -301,8 +301,10 @@ def clasificar_foto(cx, foto: dict[str, Any]) -> str:
         _registrar_flyer(cx, foto)
         return f"flyer→events ({motivo_flyer})"
     if grafico:
-        # Si además trae fecha/keywords, lo mandamos a eventos como flyer.
-        if _RE_FECHA.search(texto):
+        # Póster dibujado → flyer si trae fecha en el OCR O si el CAPTION anuncia
+        # evento (no descartar pósters de evento en silencio; la fecha exacta la
+        # pone luego el detector por caption / parse_events).
+        if _RE_FECHA.search(texto) or caption_sugiere_evento(foto.get("caption_original")):
             _registrar_flyer(cx, foto)
             return f"flyer dibujado→events (mser {n_mser})"
         return f"gráfico/póster descartado (mser {n_mser})"

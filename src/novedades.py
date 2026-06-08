@@ -40,6 +40,33 @@ def _proceso_activo() -> bool:
     )
 
 
+# Señales de que un caption ANUNCIA evento/release (para el monitor de completitud).
+_SENALES_EVENTO = ("junio", "julio", "agosto", " pm", "sencillo", "estreno",
+                   "disponible", "en vivo", "toca", "concierto", "ep", "álbum", "album")
+
+
+def _monitor_escapados(cx) -> int:
+    """Cuenta posts con foto + caption de evento/release pero SIN evento (alarma).
+
+    Debería ser 0 tras la detección+backfill. Si no, algo se escapó y el aviso
+    de Telegram lo reporta para revisión manual.
+    """
+    like = " OR ".join("lower(p.caption_original) LIKE ?" for _ in _SENALES_EVENTO)
+    params = [f"%{s.strip()}%" for s in _SENALES_EVENTO]
+    rows = cx.execute(f"""
+        SELECT COUNT(DISTINCT p.band_id || ':' || p.source_post_id)
+          FROM photos p
+         WHERE p.source_post_id IS NOT NULL AND p.caption_original IS NOT NULL
+           AND ({like})
+           AND NOT EXISTS (SELECT 1 FROM events e
+                            WHERE e.band_id = p.band_id
+                              AND e.source_post_id IN (p.source_post_id,
+                                                       'ig:' || p.source_post_id,
+                                                       p.source_post_id || '#show'))
+    """, params).fetchone()
+    return int(rows[0]) if rows else 0
+
+
 def _resumen_texto(res: dict, rel: dict | None, errores: list[str]) -> str:
     lineas = ["🔄 Novedades @gdlscene"]
     lineas.append(f"Bandas revisadas: {res['bandas_revisadas']} · "
@@ -105,13 +132,16 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             errores.append(f"parseo de flyers falló: {exc}")
 
-    # Red de seguridad: posts recientes con fotos pero SIN evento (el flyer no se
-    # detectó por imagen) → se analizan por caption. Cubre el hueco de @angelxcecena.
+    # Red de seguridad: posts con fotos pero SIN evento (la imagen no se detectó
+    # como flyer) → se analizan por caption. Idempotente (photos.evento_analizado),
+    # ventana amplia. Luego el monitor cuenta lo que AÚN se escapó (debería ser 0).
+    escapados = 0
     try:
         cx = db.connect()
         db.init_db(cx)
         try:
-            extra = detect_releases_ig.backfill_eventos(cx, dias=7)
+            extra = detect_releases_ig.backfill_eventos(cx, dias=30)
+            escapados = _monitor_escapados(cx)
         finally:
             cx.close()
         if rel is None:
@@ -122,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001
         errores.append(f"backfill de eventos falló: {exc}")
 
+    if escapados:
+        errores.append(f"{escapados} post(s) con caption de evento aún SIN evento "
+                       "(revisa /eventos)")
     texto = _resumen_texto(res, rel, errores)
     print(texto)
     hubo_algo = res["fotos_nuevas"] or res.get("fallidas") or errores \

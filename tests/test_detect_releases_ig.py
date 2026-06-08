@@ -313,3 +313,35 @@ def test_release_y_show_crea_ambos(cx, monkeypatch):
     assert len(rel) == 1 and rel[0]["source_post_id"] == "DZL"          # Música Nueva/Próximos
     assert len(show) == 1 and show[0]["source_post_id"] == "DZL#show"   # agenda de shows
     assert show[0]["fecha_evento"] == "2026-06-10" and show[0]["lugar"] == "Foro X"
+
+
+# ---------- evento_analizado: marca por post para backfill idempotente ----------
+
+def test_migracion_evento_analizado(cx):
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(photos)")}
+    assert "evento_analizado" in cols
+    assert "evento_analizado" in db.TABLES["photos"]
+
+
+def test_detectar_marca_evento_analizado(cx, monkeypatch):
+    bid = _banda(cx, "Banda")
+    # foto real del post (para que el marcado tenga a qué pegarle)
+    db.insert(cx, "photos", band_id=bid, path="p/Z_0.jpg", source_post_id="Z1",
+              caption_original="algo")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {"es_release": False, "es_show": False})
+    dr.detectar(cx, [_post(bid, shortcode="Z1", caption="solo una foto")])
+    fila = db.rows(cx, "SELECT evento_analizado FROM photos WHERE source_post_id='Z1'")[0]
+    assert fila["evento_analizado"] == 1  # marcado aunque NO sea evento (no re-LLM)
+
+
+def test_backfill_ignora_analizados(cx, monkeypatch):
+    from datetime import datetime
+    bid = _banda(cx, "Banda")
+    hoy = datetime(2026, 6, 9)
+    # ya analizado (sin evento) → el backfill NO lo vuelve a tocar
+    db.insert(cx, "photos", band_id=bid, path="p/A_0.jpg", source_post_id="A1",
+              caption_original="nada", fecha="2026-06-08", evento_analizado=1)
+    llamado = []
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: llamado.append(1) or {"es_release": False})
+    dr.backfill_eventos(cx, dias=30, hoy=hoy)
+    assert llamado == []  # no re-LLM lo ya analizado

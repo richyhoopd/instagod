@@ -39,7 +39,7 @@ TABLES: dict[str, set[str]] = {
     "photos": {
         "band_id", "member_id", "path", "source_post_id", "fecha",
         "faces_count", "es_grupal", "nitidez", "usable_meme", "descartada",
-        "caption_original", "usada",
+        "caption_original", "usada", "evento_analizado",
     },
     "events": {
         "band_id", "tipo", "fecha_evento", "titulo", "cover_url", "lugar", "ciudad",
@@ -150,6 +150,9 @@ _MIGRATIONS = {
     },
     "photos": {
         "descartada": "INTEGER NOT NULL DEFAULT 0",
+        # El caption de este post ya pasó por el detector de eventos/releases
+        # (sea cual sea el resultado). Hace el backfill idempotente: nunca re-LLM.
+        "evento_analizado": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 

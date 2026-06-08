@@ -151,7 +151,8 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
         caption = (post.get("caption") or "").strip()
         shortcode = post.get("shortcode")
         if not caption:
-            continue  # nada que analizar: ni LLM
+            _marcar_analizado(cx, post)  # sin caption: nada que re-analizar
+            continue
 
         try:
             data = _llm_release(caption, post.get("fecha"))
@@ -163,6 +164,8 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
             print(f"⚠ {shortcode}: el LLM no devolvió JSON válido; se salta")
             resumen["fallidos"] += 1
             continue
+        # Análisis exitoso (cualquier resultado): marcar para no re-LLM en backfill.
+        _marcar_analizado(cx, post)
         es_r = bool(data.get("es_release"))
         es_s = bool(data.get("es_show"))
 
@@ -224,6 +227,14 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
     return resumen
 
 
+def _marcar_analizado(cx, post: dict[str, Any]) -> None:
+    """Marca todas las fotos del post como caption ya analizado (backfill idempotente)."""
+    cx.execute("UPDATE photos SET evento_analizado = 1 "
+               "WHERE band_id = ? AND source_post_id = ?",
+               (post["band_id"], post.get("shortcode")))
+    cx.commit()
+
+
 def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any],
                     sufijo: str = "") -> bool:
     """Crea un evento tipo='fecha' (agenda) desde el caption. Devuelve True si insertó.
@@ -269,6 +280,7 @@ def backfill_eventos(cx, dias: int = 30, hoy=None) -> dict[str, int]:
           FROM photos p
          WHERE p.source_post_id IS NOT NULL AND p.fecha >= ?
            AND p.caption_original IS NOT NULL AND p.caption_original != ''
+           AND COALESCE(p.evento_analizado, 0) = 0
            AND NOT EXISTS (SELECT 1 FROM events e
                             WHERE e.band_id = p.band_id
                               AND e.source_post_id IN (p.source_post_id,

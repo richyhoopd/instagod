@@ -221,3 +221,27 @@ def test_clasificar_foto_descartada_nunca_usable(tmp_path, monkeypatch) -> None:
     clasificar_foto(cx, foto)
     assert db.get(cx, "photos", foto["id"])["usable_meme"] == 0   # lista negra manda
     cx.close()
+
+
+def test_poster_grafico_con_caption_evento_va_a_flyer(tmp_path, monkeypatch):
+    """Un póster gráfico cuyo OCR NO lee la fecha pero el CAPTION anuncia evento
+    debe registrarse como flyer (no descartarse en silencio)."""
+    import numpy as np
+    from src import classify, db
+    cx = db.connect(tmp_path / "c.db"); db.init_db(cx)
+    bid = db.insert(cx, "bands", nombre="Angel", tipo="banda")
+    pid = db.insert(cx, "photos", band_id=bid, path="p/x.jpg", source_post_id="DZL",
+                    caption_original="Estreno mi EP el 10 de junio 7:30 PM")
+    # Simula: imagen legible, sin caras, póster gráfico (MSER alto), OCR SIN fecha.
+    monkeypatch.setattr(classify, "cargar_normalizada", lambda p: np.zeros((10, 10), "uint8"))
+    monkeypatch.setattr(classify, "medir_nitidez", lambda g: 1042.0)
+    monkeypatch.setattr(classify, "contar_caras", lambda g: (0, 0))
+    monkeypatch.setattr(classify, "texto_ocr", lambda p: "RESISTENCIA CULTURA PERREO")  # sin fecha
+    monkeypatch.setattr(classify, "score_flyer", lambda t, ce: (False, ""))
+    monkeypatch.setattr(classify, "es_grafico", lambda g: (True, 2000))
+    registrado = []
+    monkeypatch.setattr(classify, "_registrar_flyer", lambda cx2, f: registrado.append(f["id"]))
+    etiqueta = classify.clasificar_foto(cx, db.get(cx, "photos", pid))
+    assert registrado == [pid]            # se registró como flyer
+    assert "flyer" in etiqueta.lower()
+    cx.close()

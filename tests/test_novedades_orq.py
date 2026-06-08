@@ -110,3 +110,23 @@ def test_resumen_nombra_proximos_y_salidos() -> None:
     texto = novedades._resumen_texto(res, rel, [])
     assert "🔜 Duck Fizz — A Ciegas (sale 2099-06-19)" in texto
     assert "🎵 X — Viejo (salió 2000-01-01)" in texto
+
+
+def test_monitor_escapados_cuenta_posts_sin_evento(tmp_path) -> None:
+    """Posts con foto + caption de evento pero SIN evento → el monitor los cuenta."""
+    from src import db, novedades
+    cx = db.connect(tmp_path / "mon.db")
+    db.init_db(cx)
+    bid = db.insert(cx, "bands", nombre="X", ig_handle="x")
+    # post con señal de evento y SIN evento → cuenta
+    db.insert(cx, "photos", band_id=bid, path="p/1.jpg", source_post_id="P1",
+              caption_original="Estreno el 10 de junio 7pm", fecha="2026-06-08")
+    # post normal (sin señal) → no cuenta
+    db.insert(cx, "photos", band_id=bid, path="p/2.jpg", source_post_id="P2",
+              caption_original="gracias por venir", fecha="2026-06-08")
+    # post con señal PERO ya con evento → no cuenta
+    db.insert(cx, "photos", band_id=bid, path="p/3.jpg", source_post_id="P3",
+              caption_original="sencillo disponible", fecha="2026-06-08")
+    db.insert(cx, "events", band_id=bid, tipo="release", source_post_id="P3", status="nuevo")
+    assert novedades._monitor_escapados(cx) == 1
+    cx.close()
