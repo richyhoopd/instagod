@@ -166,6 +166,18 @@ FORMATO_PESOS_COLDSTART = {
 }
 
 
+# Slot de alto tráfico por defecto por segmento (cold-start: hasta que IG
+# online_followers tenga datos). (dow 0=lun..6=dom, hora 24h local).
+TIMING_DEFAULTS = {
+    "agenda_semanal":   (3, 19),   # jueves 7pm: arranque de finde
+    "agenda_mensual":   (0, 19),   # lunes 7pm
+    "releases_semanal": (4, 18),   # viernes 6pm: día de estrenos
+    "releases_mensual": (4, 18),
+    "meme":             (2, 20),   # miércoles 8pm
+}
+TIMING_DEFAULT_FALLBACK = (3, 19)
+
+
 def _resolve(path: str | None) -> Path:
     """Ruta absoluta relativa a la raíz del repo."""
     p = Path(path or "")
