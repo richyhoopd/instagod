@@ -378,7 +378,9 @@ def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple
     finally:
         cx.close()
 
-    unicos, omitidos = _unicos_flyers(eventos)
+    # Agrupamos por fecha+foro ANTES del dedup visual: un evento (varias bandas)
+    # = un solo flyer, igual que la GUI y que el caption (que ya agrupa).
+    unicos, omitidos = _unicos_flyers(agrupar_por_evento(eventos))
     kicker = "la escena, esta semana" if periodo == "semanal" else "la escena, este mes"
     # Reservamos lugar para la PORTADA y el CTA final (carrusel IG topa en 10).
     flyers = unicos[:_IG_CAROUSEL_MAX - 2]
@@ -404,13 +406,14 @@ def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple
 
 
 def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[dict[str, Any]]:
-    """Parte la agenda en bloques de ≤8 flyers → cada parte cabe en un carrusel.
+    """Reparte TODOS los flyers en partes que llenan el carrusel (≤10 slides).
 
-    A diferencia de build_agenda_carousel (que recorta a 8 y descarta el resto),
-    aquí TODOS los flyers únicos se reparten en partes. Cada parte = portada
-    (con "Parte k/N" si hay más de una) + ≤8 flyers + CTA (≤10 slides, el tope
-    de IG). Devuelve una lista de dicts {caption, pngs, evento_ids, parte, partes};
-    [] si no hay flyers con imagen y fecha en la ventana.
+    Layout: la PORTADA va SOLO en la parte 1 (ocupa 1 slot), y NINGUNA parte
+    lleva slide de CTA (el CTA vive en el CAPTION, que _caption_agenda ya pone).
+    Así Parte 1 = portada + ≤9 flyers (10 slides) y Partes 2+ = ≤10 flyers.
+    Un evento (fecha+foro) = un solo flyer (agrupamos antes del dedup visual),
+    igual que la GUI y el caption. Devuelve dicts {caption, pngs, evento_ids,
+    parte, partes}; [] si no hay flyers con imagen y fecha en la ventana.
     """
     hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
     dias = _PERIODOS[periodo]
@@ -420,7 +423,8 @@ def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[di
     finally:
         cx.close()
 
-    unicos, omitidos = _unicos_flyers(eventos)
+    # Agrupamos por fecha+foro ANTES del dedup visual: una tarjeta por evento.
+    unicos, omitidos = _unicos_flyers(agrupar_por_evento(eventos))
     if not unicos:
         return []
     if omitidos:
@@ -428,22 +432,30 @@ def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[di
 
     kicker = "la escena, esta semana" if periodo == "semanal" else "la escena, este mes"
     rango = _rango_shows(hoy, dias)
-    bloques = _chunks(unicos, _IG_CAROUSEL_MAX - 2)  # 8 flyers por parte
+
+    # Parte 1 cede 1 slot a la portada → hasta 9 flyers; partes 2+ hasta 10.
+    primero = unicos[:_IG_CAROUSEL_MAX - 1]
+    resto = _chunks(unicos[_IG_CAROUSEL_MAX - 1:], _IG_CAROUSEL_MAX)
+    bloques = [primero] + [b for b in resto if b]
     partes_n = len(bloques)
+    total = len(unicos)
 
     salida: list[dict[str, Any]] = []
+    pagina = 0  # índice corrido del flyer sobre el total
     for k, bloque in enumerate(bloques, start=1):
-        ctx = {"kicker": kicker, "rango": rango, "parte": k, "partes": partes_n}
-        cover = compose_mod.render_card("agenda_cover.html", ctx, prefix="agenda_cover")
-        pngs = [str(cover)]
-        for i, (e, p) in enumerate(bloque, start=1):
+        pngs: list[str] = []
+        if k == 1:  # la portada solo en la primera parte
+            ctx = {"kicker": kicker, "rango": rango, "parte": 1, "partes": partes_n}
+            cover = compose_mod.render_card("agenda_cover.html", ctx, prefix="agenda_cover")
+            pngs.append(str(cover))
+        for e, p in bloque:
+            pagina += 1
             png = compose_mod.render_card("agenda_flyer.html", {
                 "flyer_url": compose_mod._to_src(str(p)),
-                "pagina": i, "paginas": len(bloque),
+                "pagina": pagina, "paginas": total,
             }, prefix="agenda_flyer")
             pngs.append(str(png))
-        cta = compose_mod.render_card("agenda_cta.html", {"kicker": kicker}, prefix="agenda_cta")
-        pngs.append(str(cta))
+        # Sin slide de CTA: el CTA va en el caption (_caption_agenda lo agrega).
 
         sufijo = f" (Parte {k}/{partes_n})" if partes_n > 1 else ""
         caption = _caption_agenda(bloque, periodo, rango, sufijo=sufijo)
