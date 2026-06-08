@@ -102,6 +102,31 @@ def etiquetar_post(caption: str, *, _llm: Callable[[str], str] | None = None) ->
         return "otro"
 
 
+def etiquetar_publicados(cx, *, _llm=None) -> dict[str, int]:
+    """Backfill: etiqueta content_queue.formato_patron desde ig_posts.caption.
+
+    Cubre posts históricos publicados cuyo caption vive en ig_posts (la columna
+    content_queue.caption es nueva y puede estar vacía para ellos).
+    Solo toca filas donde q.formato_patron IS NULL.
+    Devuelve {"etiquetados": N, "fallados": M}.
+    """
+    pendientes = db.rows(cx, """
+        SELECT q.id AS queue_id, p.caption
+          FROM ig_posts p JOIN content_queue q ON q.id = p.queue_id
+         WHERE p.caption IS NOT NULL AND p.caption != ''
+           AND q.formato_patron IS NULL
+    """)
+    res = {"etiquetados": 0, "fallados": 0}
+    for fila in pendientes:
+        try:
+            patron = etiquetar_post(fila["caption"], _llm=_llm)
+            db.update(cx, "content_queue", fila["queue_id"], formato_patron=patron)
+            res["etiquetados"] += 1
+        except Exception:
+            res["fallados"] += 1
+    return res
+
+
 def etiquetar_cola(cx) -> dict[str, int]:
     """Etiqueta con LLM los items de content_queue que no tienen formato_patron.
 
