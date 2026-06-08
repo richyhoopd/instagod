@@ -1143,8 +1143,24 @@ def deezer_resolver_auto() -> RedirectResponse:
     from src import deezer_match
     cx = db.connect()
     try:
-        res = deezer_match.resolver_auto(cx)
+        res = deezer_match.resolver_preciso(cx)
     finally:
         cx.close()
-    aviso = f"Auto-match: {res['ok']} ligadas, {res['dudosas']} dudosas de {res['revisadas']}."
+    aviso = (f"Match: {res['ok_link']} por link + {res['ok_spotify']} por Spotify; "
+             f"{res['sin_confirmar']} sin confirmar (revísalas abajo).")
+    return RedirectResponse(f"/deezer?aviso={quote(aviso)}", status_code=303)
+
+
+@app.post("/deezer/purgar")
+def deezer_purgar() -> RedirectResponse:
+    from urllib.parse import quote
+
+    from src import deezer_match
+    cx = db.connect()
+    try:
+        res = deezer_match.purgar(cx)
+    finally:
+        cx.close()
+    aviso = (f"Purga: {res['bandas']} bandas des-ligadas, {res['releases']} releases "
+             "de Deezer borrados. Corre el match preciso de nuevo.")
     return RedirectResponse(f"/deezer?aviso={quote(aviso)}", status_code=303)

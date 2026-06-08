@@ -82,8 +82,9 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
             from src import deezer_match
             cx = db.connect()
             try:
-                r = deezer_match.resolver_auto(cx)
-                print(f"   Deezer auto-match: {r['ok']} ligadas, {r['dudosas']} dudosas.")
+                r = deezer_match.resolver_preciso(cx)
+                print(f"   Deezer match: {r['ok_link']} por link, {r['ok_spotify']} por "
+                      f"Spotify, {r['sin_confirmar']} sin confirmar.")
             finally:
                 cx.close()
         except Exception as exc:  # noqa: BLE001 — Deezer caído no aborta el pipeline

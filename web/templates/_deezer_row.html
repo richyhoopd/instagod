@@ -17,7 +17,8 @@
       {% for c in b.candidatos %}
         <div style="display:flex; align-items:center; gap:8px; margin:2px 0;">
           <a href="{{ c.link }}" target="_blank" title="ver en Deezer">{{ c.nombre }}</a>
-          <span class="muted" style="font-size:11px;">{{ c.nb_album }} álbumes · {{ c.nb_fan }} fans</span>
+          <span class="muted" style="font-size:11px;">{{ c.nb_album }} álbumes · {{ c.nb_fan }} fans
+            {% if c.albumes_muestra %}· {{ c.albumes_muestra|join(", ") }}{% endif %}</span>
           <button hx-post="/deezer/{{ b.id }}/elegir" hx-target="#deezer-{{ b.id }}"
                   hx-swap="outerHTML" hx-vals='{"deezer_id": "{{ c.id }}"}'
                   style="padding:2px 8px; font-size:12px;">es este</button>

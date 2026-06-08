@@ -8,10 +8,15 @@
   confirmar. Si no está en Deezer, márcala con "no está" para no volver a buscarla.
 </p>
 
-<div style="display:flex; gap:10px; align-items:center; margin:14px 0;">
+<div style="display:flex; gap:10px; align-items:center; margin:14px 0; flex-wrap:wrap;">
   <form method="post" action="/deezer/resolver-auto">
+    <button type="submit"
+            title="Liga SOLO con confirmación dura: link de Deezer en bio o solapamiento de discografía con Spotify (no adivina por nombre)">🎯 Match preciso</button>
+  </form>
+  <form method="post" action="/deezer/purgar"
+        onsubmit="return confirm('¿Des-ligar TODAS las bandas de Deezer y borrar sus releases dz:?');">
     <button type="submit" class="secundario"
-            title="Liga por nombre EXACTO todas las pendientes (barato, sin cap)">⚡ Auto-match por nombre</button>
+            title="Revierte matches viejos del algoritmo débil">🧹 Purgar matches</button>
   </form>
   {% if aviso %}<span class="muted">{{ aviso }}</span>{% endif %}
 </div>

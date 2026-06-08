@@ -20,7 +20,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(deezer_match, "candidatos",
                         lambda cx, band_id: [{"id": "111", "nombre": "Kabala",
                                               "link": "https://deezer.com/artist/111",
-                                              "nb_album": 2, "nb_fan": 9}])
+                                              "nb_album": 2, "nb_fan": 9,
+                                              "albumes_muestra": ["Demo"]}])
     from web.app import app
     with TestClient(app) as c:
         c._bid = bid
@@ -48,14 +49,27 @@ def test_deezer_no_esta(client) -> None:
     cx.close()
 
 
-def test_deezer_resolver_auto(client, monkeypatch) -> None:
+def test_deezer_resolver_preciso(client, monkeypatch) -> None:
     llamado = {}
 
     def fake(cx):
         llamado["si"] = True
-        return {"revisadas": 1, "ok": 1, "dudosas": 0}
+        return {"revisadas": 1, "ok_link": 0, "ok_spotify": 1, "sin_confirmar": 0}
 
-    monkeypatch.setattr(deezer_match, "resolver_auto", fake)
+    monkeypatch.setattr(deezer_match, "resolver_preciso", fake)
     r = client.post("/deezer/resolver-auto")
+    assert r.status_code in (200, 303)
+    assert llamado.get("si")
+
+
+def test_deezer_purgar(client, monkeypatch) -> None:
+    llamado = {}
+
+    def fake(cx):
+        llamado["si"] = True
+        return {"bandas": 3, "releases": 5}
+
+    monkeypatch.setattr(deezer_match, "purgar", fake)
+    r = client.post("/deezer/purgar")
     assert r.status_code in (200, 303)
     assert llamado.get("si")

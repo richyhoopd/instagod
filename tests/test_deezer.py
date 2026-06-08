@@ -83,35 +83,115 @@ def test_get_http_error(cx, monkeypatch) -> None:
         deezer.buscar_artista("X")
 
 
-# ---------- match ----------
+# ---------- cross-check de discografía (precisión) ----------
 
-def test_resolver_auto_match_exacto(cx, monkeypatch) -> None:
-    db.insert(cx, "bands", nombre="Kabala", activa=1)
-    db.insert(cx, "bands", nombre="Ambigua", activa=1)
+def test_comparten_release_titulo_y_anio() -> None:
+    spot = {("nuevo sencillo", 2026), ("primer disco", 2024)}
+    # mismo título + mismo año → comparten
+    assert deezer_match.comparten_release(spot, {("nuevo sencillo", 2026)})
+    # mismo título, año ±1 (Deezer a veces difiere) → comparten
+    assert deezer_match.comparten_release(spot, {("primer disco", 2025)})
+    # mismo título pero año lejano → NO
+    assert not deezer_match.comparten_release(spot, {("primer disco", 2020)})
+    # títulos distintos (la Kabala falsa) → NO
+    assert not deezer_match.comparten_release(spot, {("caminos de gloria", 2025)})
 
-    def fake_buscar(nombre):
-        if nombre.casefold() == "kabala":
-            return [{"id": "111", "nombre": "Kabala", "nb_album": 2, "nb_fan": 1, "link": ""}]
-        return [{"id": "222", "nombre": "Otra Cosa", "nb_album": 1, "nb_fan": 1, "link": ""}]
 
-    monkeypatch.setattr(deezer_match.deezer, "buscar_artista", fake_buscar)
+# ---------- match preciso ----------
+
+class _FakeSp:
+    def __init__(self, titulos_anios):
+        self._d = titulos_anios
+
+    def artist_albums(self, artist_id, **kw):
+        items = [{"name": t, "release_date": f"{y}-01-01"} for t, y in self._d]
+        return {"items": items}
+
+
+def test_resolver_preciso_confirma_por_spotify(cx, monkeypatch) -> None:
+    # banda con spotify_id; el candidato CORRECTO comparte discografía
+    bid = db.insert(cx, "bands", nombre="Kabala", activa=1, spotify_id="SP1")
+    cands = [
+        {"id": "FALSA", "nombre": "Kabala", "nb_album": 22, "nb_fan": 9999, "link": ""},
+        {"id": "REAL", "nombre": "Kabala", "nb_album": 2, "nb_fan": 30, "link": ""},
+    ]
+    disco = {"FALSA": [{"album_id": "x", "titulo": "Caminos De Gloria",
+                        "release_date": "2025-07-15", "record_type": "album", "cover_url": ""}],
+             "REAL": [{"album_id": "y", "titulo": "Nuestro Demo",
+                       "release_date": "2026-02-01", "record_type": "ep", "cover_url": ""}]}
+    monkeypatch.setattr(deezer_match.deezer, "buscar_artista", lambda n: cands)
+    monkeypatch.setattr(deezer_match.deezer, "albums", lambda aid: disco[aid])
     monkeypatch.setattr(deezer_match.deezer, "registrar_releases", lambda *a, **k: [])
-    res = deezer_match.resolver_auto(cx)
-    bandas = {b["nombre"]: b for b in db.rows(cx, "SELECT * FROM bands")}
-    assert bandas["Kabala"]["deezer_id"] == "111"
-    assert bandas["Kabala"]["deezer_status"] == "ok"
-    assert bandas["Ambigua"]["deezer_status"] == "pendiente"  # match no exacto → queda
-    assert res["ok"] == 1
+    # Spotify de la banda real lista "Nuestro Demo" 2026 → coincide con REAL, no FALSA
+    sp = _FakeSp({("Nuestro Demo", 2026)})
+
+    res = deezer_match.resolver_preciso(cx, sp=sp)
+    b = db.get(cx, "bands", bid)
+    assert b["deezer_id"] == "REAL"      # NO la falsa de 22 álbumes
+    assert b["deezer_status"] == "ok"
+    assert res["ok_spotify"] == 1
 
 
-def test_resolver_auto_excluye_no_esta(cx, monkeypatch) -> None:
+def test_resolver_preciso_rechaza_si_no_comparte(cx, monkeypatch) -> None:
+    bid = db.insert(cx, "bands", nombre="Kabala", activa=1, spotify_id="SP1")
+    cands = [{"id": "FALSA", "nombre": "Kabala", "nb_album": 22, "nb_fan": 9999, "link": ""}]
+    monkeypatch.setattr(deezer_match.deezer, "buscar_artista", lambda n: cands)
+    monkeypatch.setattr(deezer_match.deezer, "albums",
+                        lambda aid: [{"album_id": "x", "titulo": "Caminos De Gloria",
+                                      "release_date": "2025-07-15", "record_type": "album",
+                                      "cover_url": ""}])
+    reg = []
+    monkeypatch.setattr(deezer_match.deezer, "registrar_releases",
+                        lambda *a, **k: reg.append(a) or [])
+    sp = _FakeSp({("Otra Cosa", 2024)})  # no comparte nada con la Kabala falsa
+
+    res = deezer_match.resolver_preciso(cx, sp=sp)
+    b = db.get(cx, "bands", bid)
+    assert b["deezer_id"] is None             # NO se adivinó
+    assert b["deezer_status"] == "pendiente"  # queda para revisión manual
+    assert res["sin_confirmar"] == 1
+    assert reg == []                          # nunca registró releases
+
+
+def test_resolver_preciso_confirma_por_link_bio(cx, monkeypatch) -> None:
+    bid = db.insert(cx, "bands", nombre="Quien Sos", activa=1,
+                    link_externo="https://beacons.ai/quiensos")
+    monkeypatch.setattr(deezer_match, "deezer_id_de_link", lambda url: "777")
+    monkeypatch.setattr(deezer_match.deezer, "registrar_releases", lambda *a, **k: [])
+    res = deezer_match.resolver_preciso(cx, sp=None)
+    b = db.get(cx, "bands", bid)
+    assert b["deezer_id"] == "777" and b["deezer_status"] == "ok"
+    assert res["ok_link"] == 1
+
+
+def test_resolver_preciso_excluye_no_esta(cx, monkeypatch) -> None:
     bid = db.insert(cx, "bands", nombre="Kabala", activa=1)
     db.update(cx, "bands", bid, deezer_status="no_esta")
     llamadas = []
+    monkeypatch.setattr(deezer_match, "deezer_id_de_link", lambda url: None)
     monkeypatch.setattr(deezer_match.deezer, "buscar_artista",
                         lambda n: llamadas.append(n) or [])
-    deezer_match.resolver_auto(cx)
-    assert llamadas == []  # no_esta no se vuelve a buscar
+    deezer_match.resolver_preciso(cx, sp=None)
+    assert llamadas == []
+
+
+# ---------- purga de matches falsos ----------
+
+def test_purgar_limpia_ids_y_releases(cx) -> None:
+    bid = db.insert(cx, "bands", nombre="Kabala", activa=1, deezer_id="FALSA")
+    db.update(cx, "bands", bid, deezer_status="ok")
+    db.insert(cx, "events", band_id=bid, tipo="release", titulo="Ajeno",
+              fecha_evento="2025-07-15", source_post_id="dz:x", status="nuevo")
+    # un release de OTRA fuente NO se debe borrar
+    db.insert(cx, "events", band_id=bid, tipo="release", titulo="Propio",
+              fecha_evento="2026-01-01", source_post_id="sp:y", status="nuevo")
+
+    res = deezer_match.purgar(cx)
+    b = db.get(cx, "bands", bid)
+    assert b["deezer_id"] is None and b["deezer_status"] == "pendiente"
+    sources = {r["source_post_id"] for r in db.rows(cx, "SELECT source_post_id FROM events")}
+    assert "dz:x" not in sources and "sp:y" in sources
+    assert res["bandas"] == 1 and res["releases"] == 1
 
 
 # ---------- registro de releases + dedup ----------
