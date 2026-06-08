@@ -145,6 +145,16 @@ GENEROS = [
     "folk/cantautor", "cumbia/tropical", "funk/soul", "rock",
 ]
 
+# Taxonomía CERRADA de patrones de formato de meme (eje formato del engagement).
+# El LLM mapea cada caption a UNO de estos; lo que no mapea cae a 'otro'.
+FORMATO_PATRONES = [
+    "absurdo_domestico",     # integrante + objeto/situación cotidiana (los del microondas)
+    "declaracion_personaje",  # "X asegura que…", declaración deadpan de un integrante
+    "dato_falso",            # estadística inventada ("el 73% de los bajistas…")
+    "comunicado",            # comunicado/reporte institucional satírico
+    "otro",
+]
+
 
 def _resolve(path: str | None) -> Path:
     """Ruta absoluta relativa a la raíz del repo."""
