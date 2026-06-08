@@ -183,6 +183,12 @@ TIMING_DEFAULTS = {
 }
 TIMING_DEFAULT_FALLBACK = (3, 19)
 
+# Motor de frescura (Task X2): mínimos de releases para generar el carrusel.
+# Semanal = solo lo NO anunciado; si hay menos que esto, no se genera (silencio).
+# Mensual = recap (incluye todo) con este piso.
+SEGMENT_MIN_RELEASES_SEMANAL = 3
+SEGMENT_MIN_RELEASES_MENSUAL = 3
+
 
 def _resolve(path: str | None) -> Path:
     """Ruta absoluta relativa a la raíz del repo."""

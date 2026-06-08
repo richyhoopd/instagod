@@ -52,6 +52,9 @@ TABLES: dict[str, set[str]] = {
         "account_id",
         # Motor de segmentos (Task A)
         "template", "formato_patron", "aprobacion", "caption", "imagen_url",
+        # Motor de frescura (Task X2): ids de events incluidos en el carrusel,
+        # para marcarlos 'anunciado' al aprobar.
+        "evento_ids",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -137,6 +140,9 @@ _MIGRATIONS = {
         "aprobacion": "TEXT",            # NULL | 'pendiente' | 'aprobado' | 'rechazado'
         "caption": "TEXT",               # caption de la propuesta (hasta aprobarse)
         "imagen_url": "TEXT",            # URL Cloudinary de la propuesta (o JSON-list si carrusel)
+        # Motor de frescura (Task X2): JSON list de events.id incluidos en el
+        # carrusel, para marcarlos 'anunciado' al aprobar.
+        "evento_ids": "TEXT",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.

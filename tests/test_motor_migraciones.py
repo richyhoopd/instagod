@@ -26,6 +26,13 @@ def test_columna_aprobacion_y_propuesta(tmp_path) -> None:
     assert f["aprobacion"] == "pendiente" and f["caption"] == "hola"
 
 
+def test_columna_evento_ids_en_content_queue(tmp_path) -> None:
+    # Motor de frescura (Task X2): ids de events del carrusel, JSON en texto.
+    cx = _cx(tmp_path)
+    qid = db.insert(cx, "content_queue", tipo="anuncio", evento_ids="[1,2]")
+    assert db.get(cx, "content_queue", qid)["evento_ids"] == "[1,2]"
+
+
 def test_tablas_audience_y_segment_runs(tmp_path) -> None:
     cx = _cx(tmp_path)
     db.insert(cx, "audience_activity", account_id=1, dow=4, hora=19, valor=120)
