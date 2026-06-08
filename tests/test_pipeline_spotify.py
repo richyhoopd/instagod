@@ -205,3 +205,41 @@ def test_plist_generado_es_valido_y_tiene_rutas(tmp_path) -> None:
     assert data["StandardOutPath"] == log
     assert data["StandardErrorPath"] == log
     assert data["Label"] == "com.gdlscene.novedades"
+
+
+# ---------- pipeline incremental: ingest(nuevas) + novedades(ya scrapeadas) ----------
+
+def _stub_pipeline(monkeypatch):
+    """Mockea todo el pipeline salvo el paso ingest; devuelve el registro de llamadas."""
+    from src import pipeline
+    llamadas = {"ingest": [], "novedades": 0}
+    monkeypatch.setattr(pipeline, "_bandas_activas", lambda h: ["x"])
+    monkeypatch.setattr(pipeline.ingest_ig, "ingest",
+                        lambda handles=None, **k: llamadas["ingest"].append((handles, k.get("rescan", False))))
+    monkeypatch.setattr(pipeline.ingest_ig, "novedades",
+                        lambda *a, **k: llamadas.__setitem__("novedades", llamadas["novedades"] + 1))
+    return pipeline, llamadas
+
+
+def test_pipeline_sin_handles_es_incremental(monkeypatch) -> None:
+    pipeline, llamadas = _stub_pipeline(monkeypatch)
+    pipeline.run(skip={"classify", "spotify", "events"})
+    # bandas nuevas completas (ingest sin handles, sin rescan) + novedades de las scrapeadas
+    assert llamadas["ingest"] == [(None, False)]
+    assert llamadas["novedades"] == 1
+
+
+def test_pipeline_rescan_no_corre_novedades(monkeypatch) -> None:
+    pipeline, llamadas = _stub_pipeline(monkeypatch)
+    pipeline.run(skip={"classify", "spotify", "events"}, rescan=True)
+    # rescan = re-scrape completo explícito; no se duplica con novedades
+    assert llamadas["ingest"] == [(None, True)]
+    assert llamadas["novedades"] == 0
+
+
+def test_pipeline_con_handles_no_corre_novedades(monkeypatch) -> None:
+    pipeline, llamadas = _stub_pipeline(monkeypatch)
+    monkeypatch.setattr(pipeline, "_bandas_activas", lambda h: ["x"])
+    pipeline.run(handles=["kabala"], skip={"classify", "spotify", "events"})
+    assert llamadas["ingest"] == [(["kabala"], False)]
+    assert llamadas["novedades"] == 0

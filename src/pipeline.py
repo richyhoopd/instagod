@@ -55,10 +55,16 @@ def run(handles: list[str] | None = None, skip: set[str] | None = None,
 
     if "ingest" not in skip:
         print("── 1/4 Ingesta de Instagram ──")
-        # Pasamos `handles` (no `objetivo`): sin handles, la ingesta solo baja las
-        # bandas NUEVAS (scraped_at IS NULL). Clasificación/Spotify/eventos sí
-        # corren sobre todo (son idempotentes y baratos).
-        ingest_ig.ingest(handles, rescan=rescan)
+        # Incremental: NUNCA re-baja posts ya scrapeados.
+        #  - handles explícitos o --rescan: scrapeo dirigido/completo (lo pediste).
+        #  - default (sin handles): bandas NUEVAS completas (scraped_at IS NULL)
+        #    + posts NUEVOS de las ya scrapeadas vía novedades (corte por post
+        #    conocido). Sin overlap: una banda es nueva XOR ya scrapeada.
+        if handles or rescan:
+            ingest_ig.ingest(handles, rescan=rescan)
+        else:
+            ingest_ig.ingest(None)      # solo bandas nuevas (scraped_at IS NULL)
+            ingest_ig.novedades()       # solo lo nuevo de las ya scrapeadas
     if "classify" not in skip:
         print("\n── 2/4 Clasificación de fotos ──")
         classify.clasificar(objetivo)
