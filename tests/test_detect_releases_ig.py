@@ -49,7 +49,7 @@ def test_release_crea_evento(cx, monkeypatch):
     assert ev["titulo"] == "Noche Eterna"
     assert ev["fecha_evento"] == "2026-06-05"
     assert ev["cover_url"] == "/fotos/banda/ABC123.jpg"
-    assert ev["source_post_id"] == "ig:ABC123"
+    assert ev["source_post_id"] == "ABC123"  # llave unificada (sin prefijo ig:)
     assert ev["status"] == "nuevo"
     assert ev["parseado_por_llm"] == 1
     assert res["revisados"] == 1
@@ -100,15 +100,17 @@ def test_dedupe_vs_spotify_existente(cx, monkeypatch):
     assert res["releases_nuevos"] == 0
 
 
-def test_dedupe_por_shortcode_repetido(cx, monkeypatch):
+def test_mismo_post_actualiza_no_duplica(cx, monkeypatch):
+    # evento previo del MISMO post (con la llave vieja 'ig:') → se actualiza, no duplica
     bid = _banda(cx)
     db.insert(cx, "events", band_id=bid, tipo="release", titulo="Algo",
               fecha_evento="2026-06-01", source_post_id="ig:ABC123")
     monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
         "es_release": True, "titulo": "Otro Titulo", "tipo": "album", "fecha": "2026-06-05"})
     res = dr.detectar(cx, [_post(bid, shortcode="ABC123")])
-    assert len(_eventos(cx)) == 1
-    assert res["saltados_dedupe"] == 1
+    assert len(_eventos(cx)) == 1                 # una sola fila (merge sobre la vieja)
+    assert _eventos(cx)[0]["titulo"] == "Otro Titulo"
+    assert res["releases_nuevos"] == 1
 
 
 def test_fecha_lejana_si_inserta(cx, monkeypatch):
@@ -161,3 +163,69 @@ def test_caption_vacio_no_llama_llm(cx, monkeypatch):
     assert res["revisados"] == 2
     assert res["releases_nuevos"] == 0
     assert res["fallidos"] == 0
+
+
+# ---------- merge: post flyer + caption de release = UNA sola fila ----------
+
+def test_merge_no_duplica_evento_del_post(cx, monkeypatch):
+    bid = _banda(cx, "Duck Fizz")
+    # classify ya creó un evento flyer de ESE post (source_post_id = shortcode bare)
+    db.insert(cx, "events", band_id=bid, tipo="flyer",
+              source_post_id="DZVaOLPFob5", status="nuevo")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "A Ciegas", "tipo": "sencillo",
+        "fecha": "2026-06-19"})
+    res = dr.detectar(cx, [_post(bid, shortcode="DZVaOLPFob5",
+                                 caption="A Ciegas próximo sencillo", fecha="2026-06-08")])
+    rel = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))
+    assert len(rel) == 1                       # NO se crea una fila paralela
+    assert rel[0]["titulo"] == "A Ciegas"      # se actualizó el flyer existente
+    assert rel[0]["fecha_evento"] == "2026-06-19"
+    assert rel[0]["source_post_id"] == "DZVaOLPFob5"   # llave unificada (sin ig:)
+    assert res["releases_nuevos"] == 1
+
+
+def test_segunda_corrida_no_duplica(cx, monkeypatch):
+    bid = _banda(cx, "Duck Fizz")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "A Ciegas", "tipo": "sencillo", "fecha": "2026-06-19"})
+    post = _post(bid, shortcode="DZVaOLPFob5", caption="A Ciegas")
+    dr.detectar(cx, [post])
+    dr.detectar(cx, [post])  # otra vez
+    rel = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))
+    assert len(rel) == 1
+
+
+def test_detectar_devuelve_lista_de_nuevos(cx, monkeypatch):
+    bid = _banda(cx, "Duck Fizz")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "A Ciegas", "tipo": "sencillo", "fecha": "2026-06-19"})
+    res = dr.detectar(cx, [_post(bid, shortcode="X1", caption="A Ciegas")])
+    assert res["nuevos"] == [{"banda": "Duck Fizz", "titulo": "A Ciegas",
+                              "fecha": "2026-06-19"}]
+
+
+# ---------- limpieza de duplicados existentes ----------
+
+def test_purgar_releases_dup_colapsa(cx):
+    bid = _banda(cx, "Duck Fizz")
+    # dos releases del mismo post/fecha: uno con título (ig:) y uno sin (bare)
+    db.insert(cx, "events", band_id=bid, tipo="release", titulo="A Ciegas",
+              fecha_evento="2026-06-19", source_post_id="ig:DZVaOLPFob5", status="nuevo")
+    db.insert(cx, "events", band_id=bid, tipo="release", titulo=None,
+              fecha_evento="2026-06-19", source_post_id="DZVaOLPFob5", status="nuevo")
+    n = dr.purgar_releases_dup(cx)
+    rel = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))
+    assert len(rel) == 1 and rel[0]["titulo"] == "A Ciegas"  # conserva el que tiene título
+    assert n == 1
+
+
+def test_release_guarda_flyer_path_servible(cx, monkeypatch):
+    """El cover queda como flyer_path local → la GUI lo sirve por /flyer/{id}."""
+    bid = _banda(cx, "Duck Fizz")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "A Ciegas", "tipo": "sencillo", "fecha": "2099-06-19"})
+    dr.detectar(cx, [_post(bid, shortcode="Z1", caption="A Ciegas",
+                           path="data/photos/duckfizz/Z1_0.jpg")])
+    ev = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))[0]
+    assert ev["flyer_path"] == "data/photos/duckfizz/Z1_0.jpg"  # servible por /flyer/{id}

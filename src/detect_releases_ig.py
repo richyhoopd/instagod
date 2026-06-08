@@ -141,7 +141,8 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
     """
     from src import db
 
-    resumen = {"revisados": 0, "releases_nuevos": 0, "saltados_dedupe": 0, "fallidos": 0}
+    resumen = {"revisados": 0, "releases_nuevos": 0, "saltados_dedupe": 0,
+               "fallidos": 0, "nuevos": []}
     for post in posts:
         resumen["revisados"] += 1
         caption = (post.get("caption") or "").strip()
@@ -170,18 +171,67 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
         fecha_evento = str(data["fecha"])[:10] if data.get("fecha") else post.get("fecha")
         if fecha_evento:
             fecha_evento = fecha_evento[:10]
-        source_post_id = f"ig:{shortcode}"
+        # Llave unificada: el shortcode bare (mismo que usa classify para el flyer).
+        source_post_id = shortcode
 
-        if _es_dupe(cx, post["band_id"], source_post_id, str(titulo), fecha_evento):
+        # ¿Ya hay un evento de ESTE post (flyer que creó classify, o release de una
+        # corrida previa, o el viejo 'ig:')? Entonces se ACTUALIZA en sitio, no se
+        # inserta otra fila → un post = un evento.
+        existente = cx.execute(
+            "SELECT id, tipo FROM events WHERE band_id=? AND source_post_id IN (?, ?)",
+            (post["band_id"], shortcode, f"ig:{shortcode}")).fetchone()
+
+        # Dedup vs Spotify/Deezer (otra fuente con el mismo título+fecha cercanos).
+        if existente is None and _es_dupe(cx, post["band_id"], source_post_id,
+                                          str(titulo), fecha_evento):
             print(f"↷ {shortcode}: '{titulo}' ya existe (Spotify gana); se salta")
             resumen["saltados_dedupe"] += 1
             continue
 
-        db.insert(cx, "events", band_id=post["band_id"], tipo="release",
-                  titulo=str(titulo)[:200], fecha_evento=fecha_evento,
-                  cover_url=post.get("path"), source_post_id=source_post_id,
-                  status="nuevo", parseado_por_llm=1)
+        # cover_url para la tarjeta (file://) y flyer_path para que la GUI sirva
+        # la imagen local vía /flyer/{id} (cover_url crudo no es URL servible).
+        campos = dict(tipo="release", titulo=str(titulo)[:200], fecha_evento=fecha_evento,
+                      cover_url=post.get("path"), flyer_path=post.get("path"),
+                      source_post_id=source_post_id, status="nuevo", parseado_por_llm=1)
+        if existente:
+            db.update(cx, "events", existente["id"], **campos)
+        else:
+            db.insert(cx, "events", band_id=post["band_id"], **campos)
         resumen["releases_nuevos"] += 1
+        resumen["nuevos"].append({"banda": _nombre_banda(cx, post["band_id"]),
+                                  "titulo": str(titulo), "fecha": fecha_evento})
         print(f"✓ {shortcode}: release '{titulo}' ({fecha_evento})")
 
     return resumen
+
+
+def _nombre_banda(cx, band_id: int) -> str:
+    row = cx.execute("SELECT nombre FROM bands WHERE id=?", (band_id,)).fetchone()
+    return row["nombre"] if row else "?"
+
+
+def purgar_releases_dup(cx) -> int:
+    """Colapsa releases duplicados del mismo post/fecha (banda, fecha_evento).
+
+    Conserva la fila con título (y, a igualdad, la de source_post_id más
+    informativa). Devuelve cuántas filas se borraron. Limpieza única para los
+    duplicados creados antes del merge por shortcode.
+    """
+    from src import db
+
+    grupos: dict[tuple, list[dict]] = {}
+    for ev in db.rows(cx, "SELECT * FROM events WHERE tipo='release'"):
+        grupos.setdefault((ev["band_id"], ev["fecha_evento"]), []).append(ev)
+    borradas = 0
+    for filas in grupos.values():
+        if len(filas) < 2:
+            continue
+        # mejor = con título; desempate: source_post_id no nulo más largo
+        mejor = sorted(filas, key=lambda e: (bool(e["titulo"]),
+                                             len(e["source_post_id"] or "")), reverse=True)[0]
+        for e in filas:
+            if e["id"] != mejor["id"]:
+                cx.execute("DELETE FROM events WHERE id=?", (e["id"],))
+                borradas += 1
+    cx.commit()
+    return borradas

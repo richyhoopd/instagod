@@ -108,6 +108,11 @@
   <section>
     <h3>🎵 Música nueva (releases)</h3>
     <div style="background:#fff; border-radius:8px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+      <h4 style="margin:0 0 6px;">🔜 Próximos lanzamientos
+        <span class="muted">({{ releases_proximos|length }})</span>
+        <span class="muted" style="font-weight:normal; font-size:12px;">— anunciados, aún no salen</span></h4>
+      {{ lista(releases_proximos, "releases") }}
+      <hr style="border:0; border-top:1px solid #eee; margin:14px 0;">
       {{ seccion_releases("Esta semana", releases_semana, "semanal", "0 0 6px") }}
       {{ seccion_releases("Resto del mes", releases_mes, "mensual", "14px 0 6px") }}
     </div>

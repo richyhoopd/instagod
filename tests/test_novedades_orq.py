@@ -92,3 +92,15 @@ def test_no_corre_con_pipeline_activo(pasos, monkeypatch) -> None:
     monkeypatch.setattr(novedades, "_proceso_activo", lambda: True)
     assert novedades.main([]) == 0  # salida limpia, no es error
     assert llamadas == []
+
+
+def test_resumen_nombra_proximos_y_salidos() -> None:
+    from src import novedades
+    res = {"bandas_revisadas": 5, "con_novedades": 2, "fotos_nuevas": 3,
+           "fallidas": [], "pendientes": 0, "cortado_por_bloqueo": False}
+    rel = {"releases_nuevos": 2, "saltados_dedupe": 0, "fallidos": 0,
+           "nuevos": [{"banda": "Duck Fizz", "titulo": "A Ciegas", "fecha": "2099-06-19"},
+                      {"banda": "X", "titulo": "Viejo", "fecha": "2000-01-01"}]}
+    texto = novedades._resumen_texto(res, rel, [])
+    assert "🔜 Duck Fizz — A Ciegas (sale 2099-06-19)" in texto
+    assert "🎵 X — Viejo (salió 2000-01-01)" in texto

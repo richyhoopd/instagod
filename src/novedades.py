@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import datetime
 
 from src import classify, db, detect_releases_ig, ingest_ig, parse_events
 from src.check_releases import avisar_telegram
@@ -53,6 +54,12 @@ def _resumen_texto(res: dict, rel: dict | None, errores: list[str]) -> str:
     if rel:
         lineas.append(f"Releases IG: {rel['releases_nuevos']} nuevos "
                       f"({rel['saltados_dedupe']} dedupe, {rel['fallidos']} fallidos)")
+        hoy = datetime.now().strftime("%Y-%m-%d")
+        for n in rel.get("nuevos", []):
+            futuro = (n.get("fecha") or "") > hoy
+            ico = "🔜" if futuro else "🎵"
+            verbo = "sale" if futuro else "salió"
+            lineas.append(f"  {ico} {n['banda']} — {n['titulo']} ({verbo} {n.get('fecha') or '?'})")
     if res.get("fallidas"):
         lineas.append("❌ Bandas fallidas: " + ", ".join(res["fallidas"]))
     for e in errores:

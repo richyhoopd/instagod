@@ -98,6 +98,21 @@ def eventos_ventana(cx, dias: int, *, hoy: datetime | None = None) -> list[dict[
     """, (desde, hasta))
 
 
+def releases_proximos(cx, dias: int = 60, *, hoy: datetime | None = None) -> list[dict[str, Any]]:
+    """RELEASES con fecha FUTURA (de HOY a HOY+dias): anuncios de "ya viene"."""
+    hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
+    desde = hoy.strftime("%Y-%m-%d")
+    hasta = (hoy + timedelta(days=dias)).strftime("%Y-%m-%d")
+    return db.rows(cx, """
+        SELECT e.*, b.nombre AS banda_nombre, b.ig_handle AS banda_handle
+          FROM events e JOIN bands b ON b.id = e.band_id
+         WHERE e.tipo = 'release'
+           AND e.fecha_evento > ? AND e.fecha_evento <= ?
+           AND e.irrelevante = 0
+         ORDER BY e.fecha_evento, b.nombre
+    """, (desde, hasta))
+
+
 def releases_ventana(cx, dias: int, *, hoy: datetime | None = None,
                      solo_frescos: bool = False) -> list[dict[str, Any]]:
     """RELEASES que salieron en los últimos `dias` (de HOY-dias a HOY).

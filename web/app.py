@@ -644,7 +644,8 @@ def calendario(request: Request) -> HTMLResponse:
 
     Separada del plan de memes: con flyers NO se hacen memes, solo calendarios.
     """
-    from src.generate_agenda import agrupar_por_evento, eventos_ventana, releases_ventana
+    from src.generate_agenda import (agrupar_por_evento, eventos_ventana,
+                                      releases_proximos, releases_ventana)
     cx = db.connect()
     try:
         # Secciones EXCLUYENTES: "esta semana" = días 0-7; "este mes" = días 8-30,
@@ -658,6 +659,7 @@ def calendario(request: Request) -> HTMLResponse:
         ctx = {
             "shows_semana": agrupar_por_evento(shows7),
             "shows_mes": agrupar_por_evento(shows_resto),
+            "releases_proximos": releases_proximos(cx, 60),
             "releases_semana": rel7,
             "releases_mes": rel_resto,
             "sin_fecha": db.rows(cx, """
