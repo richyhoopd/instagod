@@ -80,11 +80,30 @@ def parsear_callback(data: str) -> tuple[str, int]:
     return accion, int(qid)
 
 
-def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
-    """sendMessage con los 2 botones inline (sin poller). Lo usan los generadores.
+def _urls_de_imagen(imagen_url: str) -> list[str]:
+    """Parsea imagen_url: JSON-lista → list; string plano → [string]; vacío → []. PURO."""
+    import json
+    if not imagen_url:
+        return []
+    try:
+        parsed = json.loads(imagen_url)
+        if isinstance(parsed, list):
+            return parsed
+        # json.loads de una cadena sin comillas extras devuelve str
+        return [imagen_url]
+    except (json.JSONDecodeError, ValueError):
+        return [imagen_url]
 
-    Manda el caption + el link de la imagen y el teclado Aprobar/Rechazar. El
-    daemon (único poller) recibe el callback y resuelve.
+
+def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
+    """Manda la propuesta a Telegram con botones Aprobar/Rechazar.
+
+    - Carrusel (>=2 URLs): sendMediaGroup con las fotos, luego sendMessage con
+      caption + botones (Telegram no permite botones en media groups).
+    - Single (1 URL): sendPhoto con caption + botones.
+    - Sin imagen: sendMessage solo texto + botones (fallback).
+
+    Usa requests (trae certifi, sin problemas de certs de red).
     """
     import json
 
@@ -92,14 +111,54 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
 
     import config
 
-    # requests (no urllib): trae certifi, así no truena con el cert verify de la
-    # red de Ricardo (el resolver/proxy mete un cert que urllib rechaza).
-    texto = f"{caption}\n\n{imagen_url}".strip()
-    payload = {
-        "chat_id": config.TELEGRAM_CHAT_ID,
-        "text": texto,
-        "reply_markup": json.dumps({"inline_keyboard": construir_botones(queue_id)}),
-    }
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-    r = requests.post(url, data=payload, timeout=15)
-    r.raise_for_status()
+    base_url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
+    chat_id = config.TELEGRAM_CHAT_ID
+    botones = {"inline_keyboard": construir_botones(queue_id)}
+    urls = _urls_de_imagen(imagen_url)
+
+    if len(urls) >= 2:
+        # Enviar fotos como álbum
+        media = [{"type": "photo", "media": u} for u in urls[:10]]
+        r = requests.post(
+            f"{base_url}/sendMediaGroup",
+            data={"chat_id": chat_id, "media": json.dumps(media)},
+            timeout=20,
+        )
+        r.raise_for_status()
+        # Botones van en mensaje separado (Telegram no los permite en media groups)
+        r2 = requests.post(
+            f"{base_url}/sendMessage",
+            data={
+                "chat_id": chat_id,
+                "text": caption[:4000],
+                "reply_markup": json.dumps(botones),
+            },
+            timeout=20,
+        )
+        r2.raise_for_status()
+
+    elif len(urls) == 1:
+        r = requests.post(
+            f"{base_url}/sendPhoto",
+            data={
+                "chat_id": chat_id,
+                "photo": urls[0],
+                "caption": caption[:1000],
+                "reply_markup": json.dumps(botones),
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+
+    else:
+        # Sin imagen: solo texto + botones
+        r = requests.post(
+            f"{base_url}/sendMessage",
+            data={
+                "chat_id": chat_id,
+                "text": caption,
+                "reply_markup": json.dumps(botones),
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
