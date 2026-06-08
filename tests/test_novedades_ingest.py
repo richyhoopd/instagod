@@ -301,3 +301,18 @@ def test_rotacion_quema_una_sigue_con_otra(cx, mock_red, monkeypatch, tmp_path) 
     assert cuentas["b"]["quemada_hasta"] is None
 
 
+
+
+def test_post_pineado_no_corta_los_nuevos(cx, mock_red, monkeypatch) -> None:
+    """Un post FIJADO (conocido, arriba del feed) no debe esconder los nuevos."""
+    bid = _band(cx, "banda", ig_user_id="111")
+    db.insert(cx, "photos", band_id=bid, path="x.jpg", source_post_id="PINEADO")
+    # feed: el pineado (conocido) arriba, y debajo dos posts NUEVOS reales
+    feed = [_post("PINEADO"),
+            _post("NUEVO1", taken_at=1_700_000_300),
+            _post("NUEVO2", taken_at=1_700_000_200)]
+    monkeypatch.setattr(ingest_ig, "fetch_posts", lambda s, uid, count: feed)
+    res = ingest_ig.novedades(_cx=cx)
+    assert res["fotos_nuevas"] == 2  # NO se cortó en el pineado
+    nuevos = {p["shortcode"] for p in res["posts_nuevos"]}
+    assert nuevos == {"NUEVO1", "NUEVO2"}

@@ -435,7 +435,8 @@ def _revisar_banda(session: creq.Session, cx, band: dict[str, Any],
         ya = db.rows(cx, "SELECT 1 FROM photos WHERE band_id = ? AND source_post_id = ?",
                      (band["id"], shortcode))
         if ya:
-            break  # primer post conocido → todo lo de aquí en adelante ya existe
+            continue  # conocido (¿pineado?): se salta SIN cortar — los posts nuevos
+                      # pueden estar DEBAJO de un post fijado/viejo en el feed.
         nuevos.extend(_ingest_item(session, cx, band, band_dir, item))
     _marcar_scrapeada(cx, band["id"])
     return nuevos
