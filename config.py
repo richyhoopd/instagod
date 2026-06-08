@@ -81,11 +81,12 @@ IG_SCRAPER_UA = _get("IG_SCRAPER_UA")
 # Login por script dispara checkpoints; la cookie del navegador es la vía estable.
 IG_SCRAPER_SESSIONID = _get("IG_SCRAPER_SESSIONID")
 IG_INGEST_MAX_POSTS = int(_get("IG_INGEST_MAX_POSTS", "12") or "12")
-# Modo NOVEDADES: el feed de IG aguanta ~33 llamadas por ventana antes de
-# soft-bloquear (401). Revisamos solo las N bandas más "viejas de revisar" por
-# corrida (rotación por scraped_at) y cortamos tras M 401 seguidos para no
-# profundizar el bloqueo. El cron diario cubre todas en pocos días.
-NOVEDADES_BANDAS_POR_CORRIDA = int(_get("NOVEDADES_BANDAS_POR_CORRIDA", "25") or "25")
+# Modo NOVEDADES: cada cuenta scraper aguanta ~33 llamadas de feed por ventana.
+# Con el pool de cuentas (data/ig_accounts.json) la corrida rota a otra cuenta
+# al quemarse una, así que el tope puede cubrir TODAS las bandas en una corrida
+# (~33×N cuentas de presupuesto). Las más "viejas de revisar" primero (rotación
+# por scraped_at); si el pool se agota se corta y el resto queda para la próxima.
+NOVEDADES_BANDAS_POR_CORRIDA = int(_get("NOVEDADES_BANDAS_POR_CORRIDA", "100") or "100")
 NOVEDADES_MAX_BLOQUEOS = int(_get("NOVEDADES_MAX_BLOQUEOS", "3") or "3")
 # Pool de cuentas scraper: al quemarse una (401/429), reposa estas horas antes
 # de reintentarla. Las cuentas viven en data/ig_accounts.json (ver ig_accounts).
