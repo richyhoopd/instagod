@@ -40,7 +40,13 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             _escribir_sheet: Callable[..., int] | None = None,
             _publicar: Callable[[], None] | None = None) -> datetime:
     """Aprueba: elige slot o publica inmediato (anuncios), escribe Sheet, marca en_sheet."""
-    ahora = ahora or datetime.now()
+    # OJO timezone: usar la hora de la cuenta (config.TIMEZONE), NO datetime.now()
+    # naive. La máquina puede estar en otro huso (+04) y el "inmediato" saldría
+    # con fecha futura que get_due_rows (que compara en CST) nunca ve vencida.
+    if ahora is None:
+        import pytz
+        import config
+        ahora = datetime.now(pytz.timezone(config.TIMEZONE))
     fila = db.get(cx, "content_queue", queue_id)
     # Anuncios/agendas se publican de inmediato; memes se calendarizan en slot de alto tráfico.
     inmediato = fila.get("tipo") == "anuncio"

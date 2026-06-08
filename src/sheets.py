@@ -186,8 +186,20 @@ def update_row(row_id: int | str, **fields: Any) -> None:
 def _parse_dt(raw: Any, tz: "pytz.BaseTzInfo") -> datetime | None:
     if not raw:
         return None
+    s = str(raw).strip()
+    dt = None
     try:
-        dt = datetime.fromisoformat(str(raw).strip())
+        dt = datetime.fromisoformat(s)
     except ValueError:
+        # Google Sheets (value_input_option=USER_ENTERED) reinterpreta el ISO y
+        # lo devuelve como "2026-06-09 3:35:30" — SIN la 'T' y con hora de UN
+        # dígito, que fromisoformat rechaza. strptime sí tolera el cero faltante.
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                dt = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                continue
+    if dt is None:
         return None
     return tz.localize(dt) if dt.tzinfo is None else dt
