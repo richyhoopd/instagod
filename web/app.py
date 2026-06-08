@@ -648,20 +648,19 @@ def calendario(request: Request) -> HTMLResponse:
                                       releases_proximos, releases_ventana)
     cx = db.connect()
     try:
-        # Secciones EXCLUYENTES: "esta semana" = días 0-7; "este mes" = días 8-30,
-        # para que un evento de esta semana NO aparezca también en el mes.
+        # "Esta semana" (días 0-7) = lo que Ricardo postea miér/jue antes del finde.
+        # "Todo el mes" = TODO lo registrado en la ventana de 30 días (incluida esta
+        # semana) — coherente con lo que genera el botón "post mensual".
         shows7 = eventos_ventana(cx, 7)
-        ids7 = {e["id"] for e in shows7}
-        shows_resto = [e for e in eventos_ventana(cx, 30) if e["id"] not in ids7]
+        shows_mes = eventos_ventana(cx, 30)
         rel7 = releases_ventana(cx, 7)
-        ids_rel7 = {e["id"] for e in rel7}
-        rel_resto = [e for e in releases_ventana(cx, 30) if e["id"] not in ids_rel7]
+        rel_mes = releases_ventana(cx, 30)
         ctx = {
             "shows_semana": agrupar_por_evento(shows7),
-            "shows_mes": agrupar_por_evento(shows_resto),
+            "shows_mes": agrupar_por_evento(shows_mes),
             "releases_proximos": releases_proximos(cx, 60),
             "releases_semana": rel7,
-            "releases_mes": rel_resto,
+            "releases_mes": rel_mes,
             "sin_fecha": db.rows(cx, """
                 SELECT e.id, e.flyer_path, b.nombre AS banda_nombre FROM events e
                   JOIN bands b ON b.id = e.band_id

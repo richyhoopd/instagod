@@ -98,7 +98,7 @@
         <button hx-post="/eventos/agenda/shows/semanal" hx-target="#cal-msg" hx-swap="innerHTML"
                 class="secundario" style="font-size:12px;">📤 generar post</button></h4>
       {{ lista(shows_semana, "shows") }}
-      <h4 style="margin:14px 0 6px;">Resto del mes <span class="muted">({{ shows_mes|length }})</span>
+      <h4 style="margin:14px 0 6px;">Todo el mes <span class="muted">({{ shows_mes|length }})</span>
         <button hx-post="/eventos/agenda/shows/mensual" hx-target="#cal-msg" hx-swap="innerHTML"
                 class="secundario" style="font-size:12px;">📤 generar post</button></h4>
       {{ lista(shows_mes, "shows") }}
@@ -114,7 +114,7 @@
       {{ lista(releases_proximos, "releases") }}
       <hr style="border:0; border-top:1px solid #eee; margin:14px 0;">
       {{ seccion_releases("Esta semana", releases_semana, "semanal", "0 0 6px") }}
-      {{ seccion_releases("Resto del mes", releases_mes, "mensual", "14px 0 6px") }}
+      {{ seccion_releases("Todo el mes", releases_mes, "mensual", "14px 0 6px") }}
     </div>
   </section>
 </div>
