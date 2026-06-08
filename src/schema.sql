@@ -242,3 +242,30 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE TRIGGER IF NOT EXISTS trg_accounts_updated
     AFTER UPDATE ON accounts FOR EACH ROW
     BEGIN UPDATE accounts SET updated_at = datetime('now') WHERE id = OLD.id; END;
+
+-- -----------------------------------------------------------------------------
+-- audience_activity — "seguidores en línea" de IG (online_followers) por
+-- día-de-semana y hora, por cuenta. Alimenta timing de alto tráfico.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audience_activity (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL DEFAULT 1,
+    dow         INTEGER NOT NULL,                 -- 0=lunes … 6=domingo
+    hora        INTEGER NOT NULL,                 -- 0-23 (hora local de la cuenta)
+    valor       INTEGER NOT NULL,                 -- seguidores online promedio
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, dow, hora)
+);
+
+-- -----------------------------------------------------------------------------
+-- segment_runs — idempotencia del dispatcher: 1 corrida por segmento+ventana.
+-- ventana = clave de periodo (ej. '2026-W23' semanal, '2026-06' mensual).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS segment_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    segmento    TEXT NOT NULL,
+    account_id  INTEGER NOT NULL DEFAULT 1,
+    ventana     TEXT NOT NULL,
+    corrido_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (segmento, account_id, ventana)
+);

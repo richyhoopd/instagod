@@ -49,6 +49,8 @@ TABLES: dict[str, set[str]] = {
         "tipo", "band_id", "member_id", "photo_id", "event_id",
         "tema_semilla", "status", "scheduled_datetime", "sheet_row_id", "meme_url",
         "account_id",
+        # Motor de segmentos (Task A)
+        "template", "formato_patron", "aprobacion", "caption", "imagen_url",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -60,6 +62,9 @@ TABLES: dict[str, set[str]] = {
         "ig_post_id", "fecha",
         "likes", "comments", "views", "reach", "saved", "shares",
     },
+    # Motor de segmentos (Task A)
+    "audience_activity": {"account_id", "dow", "hora", "valor", "updated_at"},
+    "segment_runs": {"segmento", "account_id", "ventana", "corrido_at"},
 }
 
 # Estados de content_queue (espejo del CHECK en schema.sql).
@@ -112,6 +117,13 @@ _MIGRATIONS = {
         "meme_url": "TEXT",
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
         "account_id": "INTEGER NOT NULL DEFAULT 1",
+        # Motor de segmentos: etiquetado de formato y compuerta de aprobación.
+        # La compuerta es columna separada (status tiene CHECK fijo en la DB viva).
+        "template": "TEXT",
+        "formato_patron": "TEXT",
+        "aprobacion": "TEXT",            # NULL | 'pendiente' | 'aprobado' | 'rechazado'
+        "caption": "TEXT",               # caption de la propuesta (hasta aprobarse)
+        "imagen_url": "TEXT",            # URL Cloudinary de la propuesta (o JSON-list si carrusel)
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
