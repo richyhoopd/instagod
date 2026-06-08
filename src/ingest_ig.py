@@ -290,18 +290,28 @@ def ingest(handles: list[str] | None = None, max_posts: int | None = None,
                   "(usa --rescan para re-bajar, o activa candidatas nuevas).")
             return
 
-        session = get_session()
-        print(f"Ingesta de {len(bandas)} banda(s), máx {max_posts} posts c/u…")
+        rot = SesionRotatoria()
+        if not rot.disponible():
+            print("No hay cuentas scraper sanas (todas en reposo o sin configurar).")
+            return
+        print(f"Ingesta de {len(bandas)} banda(s), máx {max_posts} c/u — cuenta '{rot.cuenta['label']}'…")
         for band in bandas:
             print(f"▶ @{band['ig_handle']} ({band['nombre']})")
-            try:
-                nuevas = ingest_band(session, cx, band, max_posts)
-                print(f"   ✅ {nuevas} foto(s) nueva(s)")
-            except LookupError as exc:
-                print(f"   ❌ {exc}")
-            except IngestRateLimited as exc:
-                print(f"   ❌ {exc} — corto la sesión por seguridad; reintenta en unas horas.")
-                break
+            while True:
+                try:
+                    nuevas = ingest_band(rot.session, cx, band, max_posts)
+                    print(f"   ✅ {nuevas} foto(s) nueva(s)")
+                    break
+                except LookupError as exc:
+                    print(f"   ❌ {exc}")
+                    break
+                except IngestRateLimited as exc:
+                    print(f"   ⚠️ {exc} — quemo '{rot.cuenta['label']}' y roto.")
+                    if rot.rotar_por_quemada():
+                        print(f"   ↻ ahora con cuenta '{rot.cuenta['label']}'.")
+                        continue  # reintenta esta banda con la nueva cuenta
+                    print("   🛑 todas las cuentas en reposo: corto la ingesta.")
+                    return
             _sleep()
     finally:
         cx.close()
