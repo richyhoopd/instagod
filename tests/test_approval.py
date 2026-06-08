@@ -42,6 +42,22 @@ def test_rechazar(tmp_path) -> None:
     assert fila["aprobacion"] == "rechazado" and fila["status"] == "descartado"
 
 
+def test_aprobar_marca_eventos_anunciado(tmp_path) -> None:
+    """Al aprobar, los events de evento_ids quedan status='anunciado'."""
+    import json
+    cx = _cx(tmp_path)
+    bid = db.insert(cx, "bands", nombre="SilentNoir")
+    e1 = db.insert(cx, "events", band_id=bid, tipo="release", fecha_evento="2026-06-01")
+    e2 = db.insert(cx, "events", band_id=bid, tipo="release", fecha_evento="2026-06-02")
+    qid = approval.encolar_pendiente(cx, tipo="anuncio", caption="x", imagen_url="u",
+                                     evento_ids=json.dumps([e1, e2]))
+    approval.aprobar(cx, qid, ahora=datetime(2026, 6, 8, 10, 0),
+                     ventana_trafico="meme", audiencia=[],
+                     _escribir_sheet=lambda **k: 99)
+    assert db.get(cx, "events", e1)["status"] == "anunciado"
+    assert db.get(cx, "events", e2)["status"] == "anunciado"
+
+
 # --- Helpers PUROS del daemon (la cáscara que hace polling no se testea) ---
 
 def test_construir_botones() -> None:

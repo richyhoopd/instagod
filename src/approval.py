@@ -17,17 +17,22 @@ def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
                       band_id: int | None = None, member_id: int | None = None,
                       photo_id: int | None = None, event_id: int | None = None,
                       template: str | None = None, formato_patron: str | None = None,
-                      tema_semilla: str | None = None, account_id: int = 1) -> int:
+                      tema_semilla: str | None = None, account_id: int = 1,
+                      evento_ids: str | None = None) -> int:
     """Crea el item pendiente de aprobación. Devuelve queue_id.
 
     status sigue su ciclo normal ('borrador'); la compuerta humana vive en la
     columna separada 'aprobacion' (la DB tiene CHECK fijo en status).
+
+    evento_ids: JSON list de events.id incluidos en el carrusel, para marcarlos
+    'anunciado' al aprobar (motor de frescura, Task X2).
     """
     return db.insert(cx, "content_queue", tipo=tipo, status="borrador",
                      aprobacion="pendiente", caption=caption, imagen_url=imagen_url,
                      band_id=band_id, member_id=member_id, photo_id=photo_id,
                      event_id=event_id, template=template, formato_patron=formato_patron,
-                     tema_semilla=tema_semilla, account_id=account_id)
+                     tema_semilla=tema_semilla, account_id=account_id,
+                     evento_ids=evento_ids)
 
 
 def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
@@ -43,6 +48,12 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
                         scheduled=slot.isoformat())
     db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
               sheet_row_id=str(sheet_id), scheduled_datetime=slot.isoformat())
+    # Motor de frescura: los releases incluidos en el carrusel quedan 'anunciado'
+    # para que el semanal solo-fresco no los vuelva a publicar.
+    if fila.get("evento_ids"):
+        import json
+        for eid in json.loads(fila["evento_ids"]):
+            db.update(cx, "events", eid, status="anunciado")
     return slot
 
 
