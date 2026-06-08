@@ -27,6 +27,7 @@ from typing import Any
 import pytz
 
 import config
+from src import approval
 from src import compose as compose_mod
 from src import covers, db, host, sheets, telegram_bot
 from src.generate_anuncios import _MESES
@@ -397,6 +398,46 @@ def build_card(eventos: list[dict[str, Any]], periodo: str, modo: str = "shows",
             linea += f" (@{ev['banda_handle']})"
         lineas.append(linea)
     return "\n".join(lineas), pngs
+
+
+def generar_segmento_agenda(cx, account_id: int, *, periodo: str, modo: str) -> None:
+    """Generador NO-BLOQUEANTE para el motor de segmentos (dispatcher).
+
+    Arma el carrusel (reusa build_agenda_carousel/build_releases_carousel según
+    modo), sube los PNG al host (mismo patrón que main(): URL simple o JSON-list
+    si es carrusel) y en vez de bloquear con request_carousel_approval ENCOLA la
+    propuesta (approval.encolar_pendiente) y la manda a Telegram con botones
+    (approval.enviar_a_telegram). El daemon de aprobación resuelve después.
+
+    Firma con periodo/modo keyword-only para que
+    functools.partial(generar_segmento_agenda, periodo=, modo=) deje (cx,
+    account_id) posicionales y cumpla el contrato Callable[[Any, int], None] de
+    Segment. NO toca main() (vía manual).
+    """
+    import json
+
+    if modo == "shows":
+        caption, pngs = build_agenda_carousel(periodo)
+        if len(pngs) < 2:
+            print(f"⚠️ {modo} {periodo}: sin flyers con imagen y fecha en la ventana; no se encola.")
+            return
+    else:
+        caption, pngs = build_releases_carousel(periodo)
+        if not pngs:
+            print(f"⚠️ {modo} {periodo}: sin releases en la ventana; no se encola.")
+            return
+
+    ahora = datetime.now(pytz.timezone(config.TIMEZONE))
+    urls = [host.upload(p, public_id=f"{modo}_{periodo}_{ahora:%Y%m%d}_{i}")
+            for i, p in enumerate(pngs)]
+    # 1 imagen → URL simple; carrusel → JSON list (publish.py lo detecta).
+    imagen = urls[0] if len(urls) == 1 else json.dumps(urls)
+
+    queue_id = approval.encolar_pendiente(
+        cx, tipo="anuncio", caption=caption, imagen_url=imagen,
+        tema_semilla=f"{modo} {periodo}", account_id=account_id)
+    approval.enviar_a_telegram(caption, imagen, queue_id)
+    print(f"✅ {modo} {periodo}: encolado (queue_id={queue_id}) y enviado a Telegram para aprobación.")
 
 
 async def main(periodo: str, modo: str = "shows") -> None:
