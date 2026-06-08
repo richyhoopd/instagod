@@ -163,19 +163,23 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
             print(f"⚠ {shortcode}: el LLM no devolvió JSON válido; se salta")
             resumen["fallidos"] += 1
             continue
-        # SHOW por caption: crea el evento si la imagen no puntuó como flyer
-        # (rellena el hueco). Si ya hay evento del post, lo deja a parse_events.
-        if data.get("es_show") and not data.get("es_release"):
-            if _registrar_show(cx, post, data):
+        es_r = bool(data.get("es_release"))
+        es_s = bool(data.get("es_show"))
+
+        # SHOW (evento en vivo → agenda de shows). Puede coexistir con el release
+        # (un estreno presencial es ambos): si también es release usa una llave
+        # aparte (#show) para tener una fila en CADA calendario. Show-solo usa la
+        # llave del post (y si la imagen ya hizo flyer, lo deja a parse_events).
+        if es_s:
+            if _registrar_show(cx, post, data, sufijo="#show" if es_r else ""):
                 resumen["releases_nuevos"] += 1
                 resumen["nuevos"].append({
                     "banda": _nombre_banda(cx, post["band_id"]),
                     "titulo": data.get("titulo") or "(show)",
                     "fecha": (str(data.get("fecha"))[:10] if data.get("fecha")
                               else post.get("fecha"))})
-            continue
 
-        if not data.get("es_release"):
+        if not es_r:
             continue
 
         titulo = data.get("titulo")
@@ -220,18 +224,21 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
     return resumen
 
 
-def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any]) -> bool:
-    """Crea un evento tipo='fecha' desde el caption si el post NO tiene evento aún.
+def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any],
+                    sufijo: str = "") -> bool:
+    """Crea un evento tipo='fecha' (agenda) desde el caption. Devuelve True si insertó.
 
-    Devuelve True si insertó. Si ya existe un evento del post (flyer que hizo
-    classify), no toca nada (lo maneja parse_events).
+    La llave es `shortcode+sufijo`: vacío para show-solo (y si ya hay evento del
+    post, lo deja a parse_events); '#show' para el show acompañante de un release
+    (coexiste con la fila del release en su propio calendario).
     """
     from src import db
 
     shortcode = post.get("shortcode")
+    llave = f"{shortcode}{sufijo}"
     ya = cx.execute(
         "SELECT 1 FROM events WHERE band_id=? AND source_post_id IN (?, ?)",
-        (post["band_id"], shortcode, f"ig:{shortcode}")).fetchone()
+        (post["band_id"], llave, f"ig:{llave}")).fetchone()
     if ya:
         return False
     fecha = (str(data["fecha"])[:10] if data.get("fecha") else post.get("fecha"))
@@ -239,8 +246,8 @@ def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any]) -> bool:
               titulo=(data.get("titulo") or None), fecha_evento=fecha,
               lugar=(data.get("lugar") or None), ciudad=(data.get("ciudad") or None),
               flyer_path=post.get("path"), cover_url=post.get("path"),
-              source_post_id=shortcode, status="nuevo", parseado_por_llm=1)
-    print(f"✓ {shortcode}: show '{data.get('titulo') or '?'}' ({fecha})")
+              source_post_id=llave, status="nuevo", parseado_por_llm=1)
+    print(f"✓ {llave}: show '{data.get('titulo') or '?'}' ({fecha})")
     return True
 
 

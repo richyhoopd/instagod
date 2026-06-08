@@ -298,3 +298,18 @@ def test_backfill_ignora_posts_con_evento(cx, monkeypatch):
     monkeypatch.setattr(dr, "_llm_release", lambda cap, f: llamado.append(1) or {"es_release": False})
     dr.backfill_eventos(cx, dias=30, hoy=hoy)
     assert llamado == []  # no re-analiza el que ya tiene evento
+
+
+def test_release_y_show_crea_ambos(cx, monkeypatch):
+    """Un estreno presencial (release + show) aparece en AMBOS calendarios."""
+    bid = _banda(cx, "Angel")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "es_show": True, "titulo": "La 4T Del Perreo",
+        "tipo": "album", "fecha": "2026-06-10", "lugar": "Foro X", "ciudad": "GDL"})
+    dr.detectar(cx, [_post(bid, shortcode="DZL", caption="Estreno EP 10 jun 7:30pm",
+                           path="p/x.jpg")])
+    rel = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))
+    show = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='fecha'", (bid,))
+    assert len(rel) == 1 and rel[0]["source_post_id"] == "DZL"          # Música Nueva/Próximos
+    assert len(show) == 1 and show[0]["source_post_id"] == "DZL#show"   # agenda de shows
+    assert show[0]["fecha_evento"] == "2026-06-10" and show[0]["lugar"] == "Foro X"
