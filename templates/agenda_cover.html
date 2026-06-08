@@ -24,7 +24,7 @@
 </head>
 <body>
   <div class="card">
-    <div class="kicker">{{ kicker }}</div>
+    <div class="kicker">{{ kicker }}{% if partes and partes > 1 %} · Parte {{ parte }}/{{ partes }}{% endif %}</div>
     <div class="titulo">La Agenda<br>de la Escena</div>
     <div class="rango">{{ rango }}</div>
     <div class="pie"><span class="line"></span>@gdlscene<span class="line"></span></div>

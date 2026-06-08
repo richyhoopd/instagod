@@ -314,23 +314,13 @@ def build_releases_carousel(periodo: str, *, hoy: datetime | None = None,
     return _caption_releases(visibles, periodo, omitidos=omitidos), pngs, evento_ids
 
 
-def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple[str, list[str]]:
-    """Carrusel de la agenda: PORTADA + las fotos de los flyers con fecha en el rango.
+def _unicos_flyers(eventos: list[dict[str, Any]]) -> tuple[list[tuple[dict, "Any"]], int]:
+    """Dedup visual de flyers: devuelve [(evento, ruta_abs)] únicos + nº omitidos.
 
-    Omite flyers visualmente duplicados (dos artistas subiendo el mismo cartel).
-    Devuelve (caption_ig, [rutas_png]); pngs[0] es la portada. Abre su propia
-    conexión SQLite (lo llama un hilo aparte; las conexiones no cruzan hilos).
+    Solo entran eventos con flyer_path existente; descarta los visualmente
+    iguales (dos artistas subiendo el mismo cartel) vía _phash.
     """
     from pathlib import Path
-    hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
-    dias = _PERIODOS[periodo]
-    cx = db.connect()
-    try:
-        eventos = eventos_ventana(cx, dias, hoy=hoy)
-    finally:
-        cx.close()
-
-    # Dedup visual de flyers; solo eventos que traen imagen de flyer.
     unicos, vistos = [], []
     for e in eventos:
         if not e.get("flyer_path"):
@@ -345,6 +335,50 @@ def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple
         vistos.append(h)
         unicos.append((e, p))
     omitidos = max(0, len([e for e in eventos if e.get("flyer_path")]) - len(unicos))
+    return unicos, omitidos
+
+
+def _caption_agenda(unicos: list[tuple[dict, "Any"]], periodo: str, rango: str,
+                    *, sufijo: str = "") -> str:
+    """Caption de una agenda: encabezado + línea por evento (fusionado) + @tags.
+
+    sufijo se añade al encabezado (p. ej. " (Parte 1/2)") cuando hay partes.
+    """
+    grupos = agrupar_por_evento([e for e, _ in unicos])
+    lema = "semana" if periodo == "semanal" else "mes"
+    lineas = [f"La agenda de la {lema} ({rango}){sufijo}:"]
+    handles: list[str] = []
+    for g in grupos:
+        d = datetime.fromisoformat(g["fecha_evento"][:10])
+        linea = f"• {d.day} {_MES_ABREV[d.month - 1]} — {g['banda_nombre']}"
+        if g.get("lugar"):
+            linea += f" en {g['lugar']}"
+        lineas.append(linea)
+        for h in g.get("handles", []):
+            if h and h not in handles:
+                handles.append(h)
+    lineas += ["", "↗ Comparte y comenta a quién vas a ver."]
+    if handles:  # etiqueta a todos los artistas de los flyers
+        lineas += ["", " ".join(f"@{h}" for h in handles)]
+    return "\n".join(lineas)
+
+
+def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple[str, list[str]]:
+    """Carrusel de la agenda: PORTADA + las fotos de los flyers con fecha en el rango.
+
+    Omite flyers visualmente duplicados (dos artistas subiendo el mismo cartel).
+    Devuelve (caption_ig, [rutas_png]); pngs[0] es la portada. Abre su propia
+    conexión SQLite (lo llama un hilo aparte; las conexiones no cruzan hilos).
+    """
+    hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
+    dias = _PERIODOS[periodo]
+    cx = db.connect()
+    try:
+        eventos = eventos_ventana(cx, dias, hoy=hoy)
+    finally:
+        cx.close()
+
+    unicos, omitidos = _unicos_flyers(eventos)
     kicker = "la escena, esta semana" if periodo == "semanal" else "la escena, este mes"
     # Reservamos lugar para la PORTADA y el CTA final (carrusel IG topa en 10).
     flyers = unicos[:_IG_CAROUSEL_MAX - 2]
@@ -363,24 +397,62 @@ def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple
     pngs.append(str(cta))
 
     # Caption: eventos (fusionando misma fecha+foro) + ETIQUETAS de cada @handle.
-    grupos = agrupar_por_evento([e for e, _ in unicos])
-    lineas = [f"La agenda de la {'semana' if periodo == 'semanal' else 'mes'} ({rango}):"]
-    handles: list[str] = []
-    for g in grupos:
-        d = datetime.fromisoformat(g["fecha_evento"][:10])
-        linea = f"• {d.day} {_MES_ABREV[d.month - 1]} — {g['banda_nombre']}"
-        if g.get("lugar"):
-            linea += f" en {g['lugar']}"
-        lineas.append(linea)
-        for h in g.get("handles", []):
-            if h and h not in handles:
-                handles.append(h)
-    lineas += ["", "↗ Comparte y comenta a quién vas a ver."]
-    if handles:  # etiqueta a todos los artistas de los flyers
-        lineas += ["", " ".join(f"@{h}" for h in handles)]
+    caption = _caption_agenda(unicos, periodo, rango)
     if omitidos:
         print(f"   (se omitieron {omitidos} flyer(s) duplicados)")
-    return "\n".join(lineas), pngs
+    return caption, pngs
+
+
+def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[dict[str, Any]]:
+    """Parte la agenda en bloques de ≤8 flyers → cada parte cabe en un carrusel.
+
+    A diferencia de build_agenda_carousel (que recorta a 8 y descarta el resto),
+    aquí TODOS los flyers únicos se reparten en partes. Cada parte = portada
+    (con "Parte k/N" si hay más de una) + ≤8 flyers + CTA (≤10 slides, el tope
+    de IG). Devuelve una lista de dicts {caption, pngs, evento_ids, parte, partes};
+    [] si no hay flyers con imagen y fecha en la ventana.
+    """
+    hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
+    dias = _PERIODOS[periodo]
+    cx = db.connect()
+    try:
+        eventos = eventos_ventana(cx, dias, hoy=hoy)
+    finally:
+        cx.close()
+
+    unicos, omitidos = _unicos_flyers(eventos)
+    if not unicos:
+        return []
+    if omitidos:
+        print(f"   (se omitieron {omitidos} flyer(s) duplicados)")
+
+    kicker = "la escena, esta semana" if periodo == "semanal" else "la escena, este mes"
+    rango = _rango_shows(hoy, dias)
+    bloques = _chunks(unicos, _IG_CAROUSEL_MAX - 2)  # 8 flyers por parte
+    partes_n = len(bloques)
+
+    salida: list[dict[str, Any]] = []
+    for k, bloque in enumerate(bloques, start=1):
+        ctx = {"kicker": kicker, "rango": rango, "parte": k, "partes": partes_n}
+        cover = compose_mod.render_card("agenda_cover.html", ctx, prefix="agenda_cover")
+        pngs = [str(cover)]
+        for i, (e, p) in enumerate(bloque, start=1):
+            png = compose_mod.render_card("agenda_flyer.html", {
+                "flyer_url": compose_mod._to_src(str(p)),
+                "pagina": i, "paginas": len(bloque),
+            }, prefix="agenda_flyer")
+            pngs.append(str(png))
+        cta = compose_mod.render_card("agenda_cta.html", {"kicker": kicker}, prefix="agenda_cta")
+        pngs.append(str(cta))
+
+        sufijo = f" (Parte {k}/{partes_n})" if partes_n > 1 else ""
+        caption = _caption_agenda(bloque, periodo, rango, sufijo=sufijo)
+        salida.append({
+            "caption": caption, "pngs": pngs,
+            "evento_ids": [e["id"] for e, _ in bloque],
+            "parte": k, "partes": partes_n,
+        })
+    return salida
 
 
 def build_card(eventos: list[dict[str, Any]], periodo: str, modo: str = "shows",

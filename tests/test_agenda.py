@@ -132,3 +132,105 @@ def test_rango_shows_y_releases() -> None:
     assert _rango_shows(hoy, 7) == "4 al 11 de junio"
     assert _rango_shows(hoy, 30) == "4 de junio al 4 de julio"
     assert _rango_releases(hoy, 7) == "28 de mayo al 4 de junio"
+
+
+def _sembrar_flyers(cx, tmp_path, n: int, hoy):
+    """Crea n eventos-flyer con flyer_path apuntando a PNGs dummy en tmp_path.
+
+    Los PNG solo necesitan existir (Path.exists); _phash se monkeypatchea en el
+    test para devolver un hash único por ruta, así nada se deduplica.
+    """
+    import numpy as np
+    bid = db.insert(cx, "bands", nombre="Banda", ig_handle="banda")
+    ids = []
+    for i in range(n):
+        p = tmp_path / f"flyer_{i}.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + bytes([i]))  # archivo real (solo existe)
+        # banda distinta por evento para que las @menciones varíen
+        b = db.insert(cx, "bands", nombre=f"Banda {i}", ig_handle=f"banda{i}")
+        eid = db.insert(cx, "events", band_id=b, tipo="fecha",
+                        fecha_evento=(hoy + timedelta(days=i + 1)).strftime("%Y-%m-%d"),
+                        lugar=f"Foro {i}", flyer_path=str(p))
+        ids.append(eid)
+    return ids
+
+
+def test_build_agenda_partes_divide(tmp_path, monkeypatch) -> None:
+    """10 flyers únicos → 2 partes (8 + 2), ≤10 pngs c/u, unión de ids = todos."""
+    import numpy as np
+    from src import compose as compose_mod
+    from src import generate_agenda
+
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    hoy = pytz.timezone(config.TIMEZONE).localize(datetime(2026, 6, 4, 12, 0))
+    ids = _sembrar_flyers(cx, tmp_path, 10, hoy)
+    cx.close()
+
+    # _phash devuelve un hash único por ruta → ningún flyer se deduplica.
+    hashes: dict[str, object] = {}
+
+    def fake_phash(path):
+        # Hash único y MUY distinto por ruta (dista >8 bits de cualquier otro)
+        # para que _es_duplicado nunca los colapse → todos los flyers se conservan.
+        s = str(path)
+        if s not in hashes:
+            rng = np.random.RandomState(len(hashes) * 9973 + 17)
+            hashes[s] = rng.rand(64) > 0.5
+        return hashes[s]
+
+    real_connect = db.connect
+    monkeypatch.setattr(generate_agenda, "_phash", fake_phash)
+    # render_card usa Playwright (red/navegador): lo sustituimos por una ruta dummy.
+    monkeypatch.setattr(compose_mod, "render_card",
+                        lambda *a, **k: tmp_path / f"render_{a[0]}.png")
+    # build_agenda_partes abre su propia conexión vía db.connect() (sin args).
+    monkeypatch.setattr(generate_agenda.db, "connect", lambda *a, **k: real_connect(tmp_path / "t.db"))
+
+    partes = generate_agenda.build_agenda_partes("mensual", hoy=hoy)
+    assert len(partes) == 2
+    assert [p["parte"] for p in partes] == [1, 2]
+    assert all(p["partes"] == 2 for p in partes)
+    assert len(partes[0]["evento_ids"]) == 8 and len(partes[1]["evento_ids"]) == 2
+    for p in partes:
+        assert len(p["pngs"]) <= generate_agenda._IG_CAROUSEL_MAX
+        assert "Parte" in p["caption"]
+    union = sorted(eid for p in partes for eid in p["evento_ids"])
+    assert union == sorted(ids)
+
+
+def test_build_agenda_partes_una_parte(tmp_path, monkeypatch) -> None:
+    """≤8 flyers → 1 sola parte con parte=1/partes=1 y sin etiqueta 'Parte'."""
+    import numpy as np
+    from src import compose as compose_mod
+    from src import generate_agenda
+
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    hoy = pytz.timezone(config.TIMEZONE).localize(datetime(2026, 6, 4, 12, 0))
+    ids = _sembrar_flyers(cx, tmp_path, 3, hoy)
+    cx.close()
+
+    hashes: dict[str, object] = {}
+
+    def fake_phash(path):
+        # Hash único y MUY distinto por ruta (dista >8 bits de cualquier otro)
+        # para que _es_duplicado nunca los colapse → todos los flyers se conservan.
+        s = str(path)
+        if s not in hashes:
+            rng = np.random.RandomState(len(hashes) * 9973 + 17)
+            hashes[s] = rng.rand(64) > 0.5
+        return hashes[s]
+
+    real_connect = db.connect
+    monkeypatch.setattr(generate_agenda, "_phash", fake_phash)
+    monkeypatch.setattr(compose_mod, "render_card",
+                        lambda *a, **k: tmp_path / f"render_{a[0]}.png")
+    monkeypatch.setattr(generate_agenda.db, "connect", lambda *a, **k: real_connect(tmp_path / "t.db"))
+
+    partes = generate_agenda.build_agenda_partes("mensual", hoy=hoy)
+    assert len(partes) == 1
+    p = partes[0]
+    assert p["parte"] == 1 and p["partes"] == 1
+    assert "Parte" not in p["caption"]
+    assert sorted(p["evento_ids"]) == sorted(ids)
