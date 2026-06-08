@@ -37,7 +37,12 @@ def pasos(tmp_path, monkeypatch):
                         lambda handles=None, **kw: llamadas.append(("clasificar", handles)) or {})
     monkeypatch.setattr(novedades.detect_releases_ig, "detectar",
                         lambda cx, posts: llamadas.append(("detectar", len(posts))) or
-                        {"revisados": 2, "releases_nuevos": 1, "saltados_dedupe": 0, "fallidos": 0})
+                        {"revisados": 2, "releases_nuevos": 1, "saltados_dedupe": 0,
+                         "fallidos": 0, "nuevos": []})
+    monkeypatch.setattr(novedades.detect_releases_ig, "backfill_eventos",
+                        lambda cx, **kw: llamadas.append("backfill") or
+                        {"revisados": 0, "releases_nuevos": 0, "saltados_dedupe": 0,
+                         "fallidos": 0, "nuevos": []})
     monkeypatch.setattr(novedades.parse_events, "parse_all",
                         lambda *a, **kw: llamadas.append("parse"))
     monkeypatch.setattr(novedades, "avisar_telegram",
@@ -49,7 +54,8 @@ def test_orden_y_handles(pasos) -> None:
     llamadas, _ = pasos
     assert novedades.main([]) == 0
     nombres = [c if isinstance(c, str) else c[0] for c in llamadas]
-    assert nombres == ["ingest", "clasificar", "detectar", "parse", "telegram"]
+    # backfill corre como red de seguridad tras el parseo, antes del aviso
+    assert nombres == ["ingest", "clasificar", "detectar", "parse", "backfill", "telegram"]
     # handles únicos de los posts nuevos, ordenados
     assert dict(c for c in llamadas if isinstance(c, tuple))["clasificar"] == ["kabala", "lefnes"]
     # detectar recibe TODOS los posts nuevos (el dedupe interno es suyo)

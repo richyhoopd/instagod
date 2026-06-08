@@ -229,3 +229,72 @@ def test_release_guarda_flyer_path_servible(cx, monkeypatch):
                            path="data/photos/duckfizz/Z1_0.jpg")])
     ev = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))[0]
     assert ev["flyer_path"] == "data/photos/duckfizz/Z1_0.jpg"  # servible por /flyer/{id}
+
+
+# ---------- shows por caption (independiente de la imagen) ----------
+
+def test_show_por_caption_crea_evento_fecha(cx, monkeypatch):
+    bid = _banda(cx, "Angel")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": False, "es_show": True, "titulo": "La 4T Del Perreo",
+        "fecha": "2026-06-10", "lugar": "Foro X", "ciudad": "Guadalajara"})
+    res = dr.detectar(cx, [_post(bid, shortcode="DZLcf0Rkans",
+                                 caption="Miércoles 10 de junio 7:30pm", path="p/x.jpg")])
+    ev = db.rows(cx, "SELECT * FROM events WHERE band_id=?", (bid,))
+    assert len(ev) == 1
+    assert ev[0]["tipo"] == "fecha"
+    assert ev[0]["fecha_evento"] == "2026-06-10"
+    assert ev[0]["lugar"] == "Foro X" and ev[0]["ciudad"] == "Guadalajara"
+    assert ev[0]["source_post_id"] == "DZLcf0Rkans"
+    assert ev[0]["flyer_path"] == "p/x.jpg"  # servible por /flyer/{id}
+    assert res["releases_nuevos"] == 1  # cuenta como evento detectado
+
+
+def test_show_no_pisa_evento_flyer_existente(cx, monkeypatch):
+    bid = _banda(cx, "Angel")
+    # classify ya hizo el evento flyer de ese post → parse_events lo maneja
+    db.insert(cx, "events", band_id=bid, tipo="flyer", source_post_id="ABC", status="nuevo")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": False, "es_show": True, "fecha": "2026-06-10", "lugar": "X"})
+    dr.detectar(cx, [_post(bid, shortcode="ABC")])
+    ev = db.rows(cx, "SELECT * FROM events WHERE band_id=?", (bid,))
+    assert len(ev) == 1 and ev[0]["tipo"] == "flyer"  # no lo tocó
+
+
+def test_caption_normal_ni_show_ni_release(cx, monkeypatch):
+    bid = _banda(cx)
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": False, "es_show": False})
+    dr.detectar(cx, [_post(bid)])
+    assert _eventos(cx) == []
+
+
+# ---------- backfill: re-analiza posts con fotos pero sin evento ----------
+
+def test_backfill_recupera_post_sin_evento(cx, monkeypatch):
+    from datetime import datetime
+    bid = _banda(cx, "Angel")
+    hoy = datetime(2026, 6, 9)
+    # post ingerido (foto) pero SIN evento
+    db.insert(cx, "photos", band_id=bid, path="data/photos/angel/DZL_0.jpg",
+              source_post_id="DZLcf0Rkans", caption_original="Estreno EP 10 junio",
+              fecha="2026-06-08")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "La 4T", "tipo": "album", "fecha": "2026-06-10"})
+    n = dr.backfill_eventos(cx, dias=30, hoy=hoy)
+    rel = db.rows(cx, "SELECT * FROM events WHERE band_id=? AND tipo='release'", (bid,))
+    assert len(rel) == 1 and rel[0]["titulo"] == "La 4T"
+    assert n["releases_nuevos"] >= 1
+
+
+def test_backfill_ignora_posts_con_evento(cx, monkeypatch):
+    from datetime import datetime
+    bid = _banda(cx, "Angel")
+    hoy = datetime(2026, 6, 9)
+    db.insert(cx, "photos", band_id=bid, path="p/Y_0.jpg", source_post_id="YA",
+              caption_original="algo", fecha="2026-06-08")
+    db.insert(cx, "events", band_id=bid, tipo="flyer", source_post_id="YA", status="nuevo")
+    llamado = []
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: llamado.append(1) or {"es_release": False})
+    dr.backfill_eventos(cx, dias=30, hoy=hoy)
+    assert llamado == []  # no re-analiza el que ya tiene evento

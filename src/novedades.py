@@ -105,6 +105,23 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             errores.append(f"parseo de flyers falló: {exc}")
 
+    # Red de seguridad: posts recientes con fotos pero SIN evento (el flyer no se
+    # detectó por imagen) → se analizan por caption. Cubre el hueco de @angelxcecena.
+    try:
+        cx = db.connect()
+        db.init_db(cx)
+        try:
+            extra = detect_releases_ig.backfill_eventos(cx, dias=7)
+        finally:
+            cx.close()
+        if rel is None:
+            rel = extra
+        else:
+            rel["releases_nuevos"] += extra["releases_nuevos"]
+            rel["nuevos"].extend(extra["nuevos"])
+    except Exception as exc:  # noqa: BLE001
+        errores.append(f"backfill de eventos falló: {exc}")
+
     texto = _resumen_texto(res, rel, errores)
     print(texto)
     hubo_algo = res["fotos_nuevas"] or res.get("fallidas") or errores \

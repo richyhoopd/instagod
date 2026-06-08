@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import config
@@ -27,21 +27,24 @@ _VENTANA_DIAS = 30
 _SUFIJO_TIPO = re.compile(r"\s*\((?:sencillo|álbum|album|ep)\)\s*$", re.IGNORECASE)
 
 SYSTEM_PROMPT = """\
-Decides si el caption de un post de Instagram de una banda ANUNCIA un \
-lanzamiento de música NUEVA Y PROPIA. Respondes ÚNICAMENTE un objeto JSON, sin \
-explicación, con:
-- "es_release": true SOLO si el caption anuncia explícitamente música nueva \
-propia ya publicada o que se estrena: un sencillo, álbum o EP "ya disponible", \
-"fuera ahora", "ya en todas las plataformas", con link de preventa/estreno/escucha. \
-false en cualquier otro caso.
-- "titulo": el nombre del sencillo/álbum/EP tal como aparece, o null.
-- "tipo": "sencillo", "album" o null.
-- "fecha": fecha del lanzamiento en formato YYYY-MM-DD si el caption la da, o null \
-(se usará la fecha del post). Usa la fecha del post como referencia para resolver años.
+Lees el caption de un post de Instagram de una banda y decides si anuncia un \
+LANZAMIENTO de música propia o un EVENTO en vivo. Respondes ÚNICAMENTE un objeto \
+JSON, sin explicación, con:
+- "es_release": true SOLO si anuncia música nueva propia ya publicada o que se \
+estrena (sencillo/álbum/EP "ya disponible", "fuera ahora", "en todas las \
+plataformas", preventa/estreno). false si no.
+- "es_show": true SOLO si anuncia un EVENTO EN VIVO con FECHA (tocada, concierto, \
+fiesta, presentación, estreno presencial) — algo a lo que la gente va. false si no.
+- "titulo": nombre del release (si es_release) o del evento (si es_show), o null.
+- "tipo": "sencillo", "album" o null (solo para release).
+- "fecha": fecha en formato YYYY-MM-DD del lanzamiento o del evento si el caption \
+la da, o null (se usará la del post). Usa la fecha del post para resolver años.
+- "lugar": venue/foro del evento si aparece, o null (solo para show).
+- "ciudad": ciudad del evento si aparece, o null (solo para show).
 
-NO marques es_release para: anuncios de shows/conciertos/fechas, covers o música \
-de OTROS artistas, "muy pronto"/"se viene"/teasers sin fecha de salida, \
-agradecimientos, fotos sin anuncio. Ante la duda, es_release=false."""
+Un post puede ser ambos (un estreno presencial es release + show); marca los dos. \
+NO marques nada para: covers o música de OTROS, "muy pronto"/teasers sin fecha, \
+agradecimientos, fotos sin anuncio. Ante la duda, ambos false."""
 
 
 def _extraer_json(texto: str) -> dict[str, Any] | None:
@@ -160,6 +163,18 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
             print(f"⚠ {shortcode}: el LLM no devolvió JSON válido; se salta")
             resumen["fallidos"] += 1
             continue
+        # SHOW por caption: crea el evento si la imagen no puntuó como flyer
+        # (rellena el hueco). Si ya hay evento del post, lo deja a parse_events.
+        if data.get("es_show") and not data.get("es_release"):
+            if _registrar_show(cx, post, data):
+                resumen["releases_nuevos"] += 1
+                resumen["nuevos"].append({
+                    "banda": _nombre_banda(cx, post["band_id"]),
+                    "titulo": data.get("titulo") or "(show)",
+                    "fecha": (str(data.get("fecha"))[:10] if data.get("fecha")
+                              else post.get("fecha"))})
+            continue
+
         if not data.get("es_release"):
             continue
 
@@ -203,6 +218,61 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
         print(f"✓ {shortcode}: release '{titulo}' ({fecha_evento})")
 
     return resumen
+
+
+def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any]) -> bool:
+    """Crea un evento tipo='fecha' desde el caption si el post NO tiene evento aún.
+
+    Devuelve True si insertó. Si ya existe un evento del post (flyer que hizo
+    classify), no toca nada (lo maneja parse_events).
+    """
+    from src import db
+
+    shortcode = post.get("shortcode")
+    ya = cx.execute(
+        "SELECT 1 FROM events WHERE band_id=? AND source_post_id IN (?, ?)",
+        (post["band_id"], shortcode, f"ig:{shortcode}")).fetchone()
+    if ya:
+        return False
+    fecha = (str(data["fecha"])[:10] if data.get("fecha") else post.get("fecha"))
+    db.insert(cx, "events", band_id=post["band_id"], tipo="fecha",
+              titulo=(data.get("titulo") or None), fecha_evento=fecha,
+              lugar=(data.get("lugar") or None), ciudad=(data.get("ciudad") or None),
+              flyer_path=post.get("path"), cover_url=post.get("path"),
+              source_post_id=shortcode, status="nuevo", parseado_por_llm=1)
+    print(f"✓ {shortcode}: show '{data.get('titulo') or '?'}' ({fecha})")
+    return True
+
+
+def backfill_eventos(cx, dias: int = 30, hoy=None) -> dict[str, int]:
+    """Re-analiza por caption los posts con fotos pero SIN evento (últimos `dias`).
+
+    Rellena el hueco de posts ya ingeridos cuyo flyer no se detectó por imagen y
+    cuyo caption nunca pasó por el detector (corte por post conocido).
+    """
+    from src import db
+
+    hoy = hoy or datetime.now()
+    desde = (hoy - timedelta(days=dias)).strftime("%Y-%m-%d")
+    # Un post (band_id, source_post_id) representado por su foto más informativa,
+    # que tenga caption y NO tenga ya un evento de ese post.
+    filas = db.rows(cx, """
+        SELECT p.band_id, p.source_post_id AS shortcode, p.path,
+               MAX(p.caption_original) AS caption, MAX(p.fecha) AS fecha
+          FROM photos p
+         WHERE p.source_post_id IS NOT NULL AND p.fecha >= ?
+           AND p.caption_original IS NOT NULL AND p.caption_original != ''
+           AND NOT EXISTS (SELECT 1 FROM events e
+                            WHERE e.band_id = p.band_id
+                              AND e.source_post_id IN (p.source_post_id,
+                                                       'ig:' || p.source_post_id))
+         GROUP BY p.band_id, p.source_post_id
+    """, (desde,))
+    posts = [{"band_id": f["band_id"], "shortcode": f["shortcode"],
+              "caption": f["caption"], "path": f["path"], "fecha": f["fecha"]}
+             for f in filas]
+    print(f"Backfill: {len(posts)} post(s) con fotos y sin evento por revisar…")
+    return detectar(cx, posts)
 
 
 def _nombre_banda(cx, band_id: int) -> str:
