@@ -128,5 +128,6 @@ def test_monitor_escapados_cuenta_posts_sin_evento(tmp_path) -> None:
     db.insert(cx, "photos", band_id=bid, path="p/3.jpg", source_post_id="P3",
               caption_original="sencillo disponible", fecha="2026-06-08")
     db.insert(cx, "events", band_id=bid, tipo="release", source_post_id="P3", status="nuevo")
-    assert novedades._monitor_escapados(cx) == 1
+    from datetime import datetime
+    assert novedades._monitor_escapados(cx, hoy=datetime(2026, 6, 9)) == 1
     cx.close()

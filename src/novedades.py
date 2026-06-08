@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src import classify, db, detect_releases_ig, ingest_ig, parse_events
 from src.check_releases import avisar_telegram
@@ -45,19 +45,21 @@ _SENALES_EVENTO = ("junio", "julio", "agosto", " pm", "sencillo", "estreno",
                    "disponible", "en vivo", "toca", "concierto", "ep", "álbum", "album")
 
 
-def _monitor_escapados(cx) -> int:
-    """Cuenta posts con foto + caption de evento/release pero SIN evento (alarma).
-
-    Debería ser 0 tras la detección+backfill. Si no, algo se escapó y el aviso
-    de Telegram lo reporta para revisión manual.
-    """
+def _monitor_escapados(cx, dias: int = 30, hoy=None) -> int:
+    """Posts RECIENTES (últimos `dias`) con caption de evento, SIN evento y SIN
+    analizar. Alarma temprana: tras el backfill debería ser 0 (lo ya analizado
+    como 'nada' no cuenta; lo viejo/pasado tampoco)."""
+    hoy = hoy or datetime.now()
+    desde = (hoy - timedelta(days=dias)).strftime("%Y-%m-%d")
     like = " OR ".join("lower(p.caption_original) LIKE ?" for _ in _SENALES_EVENTO)
-    params = [f"%{s.strip()}%" for s in _SENALES_EVENTO]
+    params = [f"%{s.strip()}%" for s in _SENALES_EVENTO] + [desde]
     rows = cx.execute(f"""
         SELECT COUNT(DISTINCT p.band_id || ':' || p.source_post_id)
           FROM photos p
          WHERE p.source_post_id IS NOT NULL AND p.caption_original IS NOT NULL
+           AND COALESCE(p.evento_analizado, 0) = 0
            AND ({like})
+           AND p.fecha >= ?
            AND NOT EXISTS (SELECT 1 FROM events e
                             WHERE e.band_id = p.band_id
                               AND e.source_post_id IN (p.source_post_id,
