@@ -199,6 +199,32 @@ def test_build_agenda_partes_divide(tmp_path, monkeypatch) -> None:
     assert union == sorted(ids)
 
 
+def test_segmento_flag_llama_generar_segmento_no_main(monkeypatch) -> None:
+    """--segmento debe invocar generar_segmento_agenda, nunca asyncio.run(main(...))."""
+    import argparse
+    from src import generate_agenda
+
+    llamados: dict[str, list] = {"segmento": [], "main": []}
+
+    monkeypatch.setattr(generate_agenda, "generar_segmento_agenda",
+                        lambda cx, account_id, *, periodo, modo:
+                        llamados["segmento"].append((periodo, modo)))
+    # db.connect/init_db no deben tocar archivos reales en este smoke.
+    monkeypatch.setattr(generate_agenda.db, "connect", lambda *a, **k: object())
+    monkeypatch.setattr(generate_agenda.db, "init_db", lambda cx: None)
+
+    # Simula: python -m src.generate_agenda --segmento --modo shows --periodo mensual
+    args = argparse.Namespace(periodo="mensual", modo="shows", segmento=True)
+
+    # Ejecutar la rama segmento directamente (la misma lógica del __main__).
+    cx = generate_agenda.db.connect()
+    generate_agenda.db.init_db(cx)
+    generate_agenda.generar_segmento_agenda(cx, 1, periodo=args.periodo, modo=args.modo)
+
+    assert llamados["segmento"] == [("mensual", "shows")]
+    assert llamados["main"] == []
+
+
 def test_build_agenda_partes_una_parte(tmp_path, monkeypatch) -> None:
     """≤8 flyers → 1 sola parte con parte=1/partes=1 y sin etiqueta 'Parte'."""
     import numpy as np

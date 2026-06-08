@@ -515,12 +515,26 @@ def generar_segmento_agenda(cx, account_id: int, *, periodo: str, modo: str) -> 
     """
     import json
 
-    evento_ids: list[int] = []
     if modo == "shows":
-        caption, pngs = build_agenda_carousel(periodo)
-        if len(pngs) < 2:
+        # Parte la agenda en bloques de ≤8 flyers; cada parte = un carrusel independiente.
+        partes = build_agenda_partes(periodo)
+        if not partes:
             print(f"⚠️ {modo} {periodo}: sin flyers con imagen y fecha en la ventana; no se encola.")
             return
+        ahora = datetime.now(pytz.timezone(config.TIMEZONE))
+        for parte in partes:
+            urls = [host.upload(p, public_id=f"shows_{periodo}_{ahora:%Y%m%d}_pt{parte['parte']}_{i}")
+                    for i, p in enumerate(parte["pngs"])]
+            imagen = urls[0] if len(urls) == 1 else json.dumps(urls)
+            qid = approval.encolar_pendiente(
+                cx, tipo="anuncio", caption=parte["caption"], imagen_url=imagen,
+                tema_semilla=f"shows {periodo} pt{parte['parte']}",
+                evento_ids=json.dumps(parte["evento_ids"]),
+                account_id=account_id)
+            approval.enviar_a_telegram(parte["caption"], imagen, qid)
+            print(f"✅ shows {periodo} parte {parte['parte']}/{parte['partes']}: "
+                  f"encolada (queue_id={qid}) y enviada a Telegram.")
+        return
     else:
         # Frescura: el semanal solo incluye lo NO anunciado; el mensual es recap.
         solo_frescos = (periodo == "semanal")
@@ -648,8 +662,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Agenda/Música nueva semanal o mensual")
     parser.add_argument("--periodo", choices=list(_PERIODOS), default="semanal")
     parser.add_argument("--modo", choices=list(_MODO), default="shows")
+    parser.add_argument("--segmento", action="store_true",
+                        help="modo motor: encola y manda a Telegram (no bloquea, sin poller)")
     args = parser.parse_args()
-    try:
-        asyncio.run(main(args.periodo, args.modo))
-    except KeyboardInterrupt:
-        sys.exit("\nSesión interrumpida.")
+    if args.segmento:
+        # Camino no-bloqueante: encola + envía a Telegram; el daemon de aprobación resuelve.
+        cx = db.connect()
+        db.init_db(cx)
+        try:
+            generar_segmento_agenda(cx, 1, periodo=args.periodo, modo=args.modo)
+        finally:
+            cx.close()
+    else:
+        try:
+            asyncio.run(main(args.periodo, args.modo))
+        except KeyboardInterrupt:
+            sys.exit("\nSesión interrumpida.")

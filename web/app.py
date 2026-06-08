@@ -776,14 +776,14 @@ def eventos_agenda(modo: str, periodo: str) -> HTMLResponse:
     """Genera shows (agenda) o releases (música nueva), semanal o mensual."""
     if periodo not in ("semanal", "mensual") or modo not in ("shows", "releases"):
         raise HTTPException(400, "modo/periodo inválido")
-    bloqueo = _lanzar_sesion("src.generate_agenda", "--modo", modo, "--periodo", periodo)
+    bloqueo = _lanzar_sesion("src.generate_agenda", "--segmento", "--modo", modo, "--periodo", periodo)
     if bloqueo:
         return bloqueo
     if modo == "shows":
-        return HTMLResponse(f'🗓 Agenda {periodo} (shows futuros) en camino a '
-                            '<strong>Telegram</strong>. Al aprobar se publica de inmediato.')
-    return HTMLResponse(f'🎵 Música nueva {periodo} (releases recientes) en camino a '
-                        '<strong>Telegram</strong>. Al aprobar se publica de inmediato.')
+        return HTMLResponse(f'🗓 Agenda {periodo} en camino a <strong>Telegram</strong> '
+                            '(en partes si hay muchos flyers). Al aprobar se publica de inmediato.')
+    return HTMLResponse(f'🎵 Música nueva {periodo} en camino a <strong>Telegram</strong>. '
+                        'Al aprobar se publica de inmediato.')
 
 
 _EVENTOS_ORDER = {
