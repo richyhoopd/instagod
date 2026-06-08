@@ -130,12 +130,19 @@ def resolver_links(cx) -> dict[str, int]:
             res["sin_link"] += 1
             continue
 
-        if sp is None:
-            sp = get_client()
+        # El id (lo valioso) se guarda SIEMPRE; los releases son bonus que el
+        # cron diario / Deezer recogen aparte. Un 429 de Spotify al registrar
+        # releases NO debe abortar el resto del matcheo por link.
         db.update(cx, "bands", band["id"], spotify_id=artist_id, spotify_status="ok")
-        nuevos = _registrar_releases(sp, cx, band["id"], artist_id)
         res["resueltas"] += 1
-        extra = f" · {len(nuevos)} release(s) → events" if nuevos else ""
+        extra = ""
+        try:
+            if sp is None:
+                sp = get_client()
+            nuevos = _registrar_releases(sp, cx, band["id"], artist_id)
+            extra = f" · {len(nuevos)} release(s) → events" if nuevos else ""
+        except Exception as exc:  # noqa: BLE001 — Spotify 429/caído: id ya quedó
+            extra = f" · releases pendientes ({exc})"
         print(f"  ✓ {band['nombre']}: {artist_id}{extra}")
     return res
 
