@@ -27,9 +27,8 @@ from typing import Any
 import pytz
 
 import config
-from src import approval
+from src import approval, covers, db, host, sheets, telegram_bot
 from src import compose as compose_mod
-from src import covers, db, host, sheets, telegram_bot
 from src.generate_anuncios import _MESES
 
 
@@ -99,17 +98,24 @@ def eventos_ventana(cx, dias: int, *, hoy: datetime | None = None) -> list[dict[
     """, (desde, hasta))
 
 
-def releases_ventana(cx, dias: int, *, hoy: datetime | None = None) -> list[dict[str, Any]]:
-    """RELEASES que salieron en los últimos `dias` (de HOY-dias a HOY)."""
+def releases_ventana(cx, dias: int, *, hoy: datetime | None = None,
+                     solo_frescos: bool = False) -> list[dict[str, Any]]:
+    """RELEASES que salieron en los últimos `dias` (de HOY-dias a HOY).
+
+    solo_frescos=True excluye los ya 'anunciado' (criterio de frescura del
+    semanal: nunca repite lo que ya salió en un carrusel aprobado).
+    """
     hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
     desde = (hoy - timedelta(days=dias)).strftime("%Y-%m-%d")
     hasta = hoy.strftime("%Y-%m-%d")
-    return db.rows(cx, """
+    fresco = "AND e.status != 'anunciado'" if solo_frescos else ""
+    return db.rows(cx, f"""
         SELECT e.*, b.nombre AS banda_nombre, b.ig_handle AS banda_handle
           FROM events e JOIN bands b ON b.id = e.band_id
          WHERE e.tipo = 'release'
            AND e.fecha_evento >= ? AND e.fecha_evento <= ?
            AND e.irrelevante = 0
+           {fresco}
          ORDER BY e.fecha_evento DESC, b.nombre
     """, (desde, hasta))
 
@@ -223,22 +229,27 @@ def _caption_releases(eventos: list[dict[str, Any]], periodo: str, *, omitidos: 
     return "\n".join(lineas)
 
 
-def build_releases_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple[str, list[str]]:
+def build_releases_carousel(periodo: str, *, hoy: datetime | None = None,
+                            solo_frescos: bool = False) -> tuple[str, list[str], list[int]]:
     """Carrusel de música nueva: PORTADA (collage+lineup) + grids 2×2 + CTA.
 
     Las portadas se bajan a data/covers/ (covers.asegurar_cover) y se renderizan
     como file:// — inmunes al filtro DNS que bloquea i.scdn.co. Abre su propia
     conexión SQLite (se llama desde un hilo aparte).
+
+    Devuelve (caption, pngs, evento_ids); evento_ids son los events.id de los
+    releases realmente incluidos (la rebanada `visibles`), para marcarlos
+    'anunciado' al aprobar.
     """
     hoy = hoy or datetime.now(pytz.timezone(config.TIMEZONE))
     dias = _PERIODOS[periodo]
     cx = db.connect()
     try:
-        releases = releases_ventana(cx, dias, hoy=hoy)
+        releases = releases_ventana(cx, dias, hoy=hoy, solo_frescos=solo_frescos)
     finally:
         cx.close()
     if not releases:
-        return "", []
+        return "", [], []
 
     kicker = _MODO["releases"]["kicker"][periodo]
     rango = _rango_releases(hoy, dias)
@@ -284,7 +295,8 @@ def build_releases_carousel(periodo: str, *, hoy: datetime | None = None) -> tup
     cta = compose_mod.render_card("release_cta.html", {"kicker": kicker}, prefix="rel_cta")
     pngs.append(str(cta))
 
-    return _caption_releases(visibles, periodo, omitidos=omitidos), pngs
+    evento_ids = [ev["id"] for ev in visibles]
+    return _caption_releases(visibles, periodo, omitidos=omitidos), pngs, evento_ids
 
 
 def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple[str, list[str]]:
@@ -416,15 +428,21 @@ def generar_segmento_agenda(cx, account_id: int, *, periodo: str, modo: str) -> 
     """
     import json
 
+    evento_ids: list[int] = []
     if modo == "shows":
         caption, pngs = build_agenda_carousel(periodo)
         if len(pngs) < 2:
             print(f"⚠️ {modo} {periodo}: sin flyers con imagen y fecha en la ventana; no se encola.")
             return
     else:
-        caption, pngs = build_releases_carousel(periodo)
-        if not pngs:
-            print(f"⚠️ {modo} {periodo}: sin releases en la ventana; no se encola.")
+        # Frescura: el semanal solo incluye lo NO anunciado; el mensual es recap.
+        solo_frescos = (periodo == "semanal")
+        caption, pngs, evento_ids = build_releases_carousel(periodo, solo_frescos=solo_frescos)
+        min_req = (config.SEGMENT_MIN_RELEASES_SEMANAL if periodo == "semanal"
+                   else config.SEGMENT_MIN_RELEASES_MENSUAL)
+        if len(evento_ids) < min_req:
+            print(f"⏭ {modo} {periodo}: solo {len(evento_ids)} release(s) "
+                  f"fresco(s) (< {min_req}); no se genera.")
             return
 
     ahora = datetime.now(pytz.timezone(config.TIMEZONE))
@@ -435,7 +453,8 @@ def generar_segmento_agenda(cx, account_id: int, *, periodo: str, modo: str) -> 
 
     queue_id = approval.encolar_pendiente(
         cx, tipo="anuncio", caption=caption, imagen_url=imagen,
-        tema_semilla=f"{modo} {periodo}", account_id=account_id)
+        tema_semilla=f"{modo} {periodo}", account_id=account_id,
+        evento_ids=json.dumps(evento_ids) if evento_ids else None)
     approval.enviar_a_telegram(caption, imagen, queue_id)
     print(f"✅ {modo} {periodo}: encolado (queue_id={queue_id}) y enviado a Telegram para aprobación.")
 
@@ -458,7 +477,9 @@ async def main(periodo: str, modo: str = "shows") -> None:
                 return
         else:
             # Música nueva = carrusel: portada (collage+lineup) + grids 2×2 + CTA.
-            caption, pngs = await asyncio.to_thread(build_releases_carousel, periodo)
+            # main() = flujo manual: incluye todo (no solo-frescos) y marca
+            # 'anunciado' con su lógica existente (_marcar_anunciados, abajo).
+            caption, pngs, _ids = await asyncio.to_thread(build_releases_carousel, periodo)
             if not pngs:
                 print("No hay releases en la ventana.")
                 return

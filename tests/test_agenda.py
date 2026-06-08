@@ -77,7 +77,8 @@ def test_fila_tarjeta_releases_usa_titulo_y_portada() -> None:
 
 
 def test_releases_ventana_mira_al_pasado() -> None:
-    import sqlite3, tempfile, os
+    import os
+    import tempfile
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     cx = db.connect(path)
     db.init_db(cx)
@@ -91,6 +92,21 @@ def test_releases_ventana_mira_al_pasado() -> None:
     mensual = releases_ventana(cx, 30, hoy=hoy)
     assert len(semanal) == 1 and semanal[0]["titulo"] == "Ecos (álbum)"
     assert len(mensual) == 1   # el de abril queda fuera de 30 días
+    cx.close()
+
+
+def test_releases_ventana_solo_frescos(tmp_path) -> None:
+    """solo_frescos excluye releases ya 'anunciado'; sin filtro entran todos."""
+    cx = _cx(tmp_path)
+    bid = db.insert(cx, "bands", nombre="SilentNoir")
+    hoy = pytz.timezone(config.TIMEZONE).localize(datetime(2026, 6, 5, 12, 0))
+    db.insert(cx, "events", band_id=bid, tipo="release", fecha_evento="2026-06-01",
+              titulo="Fresco")
+    db.insert(cx, "events", band_id=bid, tipo="release", fecha_evento="2026-06-02",
+              titulo="Viejo", status="anunciado")
+    assert len(releases_ventana(cx, 7, hoy=hoy)) == 2
+    frescos = releases_ventana(cx, 7, hoy=hoy, solo_frescos=True)
+    assert len(frescos) == 1 and frescos[0]["titulo"] == "Fresco"
     cx.close()
 
 
