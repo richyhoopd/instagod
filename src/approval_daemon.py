@@ -90,6 +90,38 @@ async def _resolver_msg(query, texto: str) -> None:
             pass
 
 
+def _recomponer_sync(qid: int, accion: str) -> tuple[str, str]:
+    """Regenera caption (🔄) o cicla plantilla (🎨); conexión nace en este hilo."""
+    cx = db.connect()
+    try:
+        if accion == "regenerar":
+            return approval.regenerar_meme(cx, qid)
+        return approval.cambiar_plantilla(cx, qid)
+    finally:
+        cx.close()
+
+
+async def on_recomponer(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callbacks `regenerar:{qid}` / `plantilla:{qid}`: edita la MISMA foto del chat."""
+    import asyncio
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+
+    query = update.callback_query
+    accion, qid = approval.parsear_callback(query.data)
+    await query.answer("🎨 Recomponiendo…" if accion == "plantilla" else "🔄 Regenerando…")
+    try:
+        cap, url = await asyncio.to_thread(_recomponer_sync, qid, accion)
+    except Exception as exc:  # LLM/Cloudinary caídos: avisar sin tumbar el daemon
+        await query.message.reply_text(f"⚠️ No se pudo recomponer queue {qid}: {exc}")
+        return
+    teclado = InlineKeyboardMarkup(
+        [[InlineKeyboardButton(b["text"], callback_data=b["callback_data"]) for b in fila]
+         for fila in approval.construir_botones(qid, regenerable=True)])
+    await query.edit_message_media(
+        media=InputMediaPhoto(media=url, caption=cap[:1024]), reply_markup=teclado)
+
+
 async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Resuelve los callbacks `aprobar:{qid}` / `rechazar:{qid}` del flujo asíncrono."""
     import asyncio
@@ -119,9 +151,10 @@ def main() -> None:
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))
 
-    # Flujo asíncrono (motor): SOLO aprobar/rechazar (patrón estricto para no
-    # tragarse los callbacks del flujo interactivo de bot.py).
+    # Flujo asíncrono (motor): aprobar/rechazar + regenerar/plantilla (patrones
+    # estrictos para no tragarse los callbacks del flujo interactivo de bot.py).
     app.add_handler(CallbackQueryHandler(on_aprobacion, pattern=r"^(aprobar|rechazar):"))
+    app.add_handler(CallbackQueryHandler(on_recomponer, pattern=r"^(regenerar|plantilla):"))
 
     # Flujo interactivo REUSADO de bot.py (foto + approve/reject/regen/tpl +
     # replies 'texto:'/'feedback:' sobre la foto generada).

@@ -55,6 +55,8 @@ TABLES: dict[str, set[str]] = {
         # Motor de frescura (Task X2): ids de events incluidos en el carrusel,
         # para marcarlos 'anunciado' al aprobar.
         "evento_ids",
+        # Historial de captions rechazados con 🔄 (flujo asíncrono).
+        "rechazados",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -143,6 +145,10 @@ _MIGRATIONS = {
         # Motor de frescura (Task X2): JSON list de events.id incluidos en el
         # carrusel, para marcarlos 'anunciado' al aprobar.
         "evento_ids": "TEXT",
+        # Flujo asíncrono: historial JSON de captions rechazados con 🔄, para
+        # que el LLM no los repita (equivalente al `rechazados` en memoria del
+        # flujo interactivo de bot.py).
+        "rechazados": "TEXT",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.

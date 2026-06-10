@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable
 
-from src import db, timing
+from src import db
 
 
 def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
@@ -38,7 +38,8 @@ def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
 def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             ventana_trafico: str = "meme", audiencia: list[dict[str, Any]] | None = None,
             _escribir_sheet: Callable[..., int] | None = None,
-            _publicar: Callable[[], None] | None = None) -> datetime:
+            _publicar: Callable[[], None] | None = None,
+            _slot_meme: Callable[[datetime], datetime] | None = None) -> datetime:
     """Aprueba: elige slot o publica inmediato (anuncios), escribe Sheet, marca en_sheet."""
     # OJO timezone: usar la hora de la cuenta (config.TIMEZONE), NO datetime.now()
     # naive. La máquina puede estar en otro huso (+04) y el "inmediato" saldría
@@ -49,18 +50,25 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
         import config
         ahora = datetime.now(pytz.timezone(config.TIMEZONE))
     fila = db.get(cx, "content_queue", queue_id)
-    # Anuncios/agendas se publican de inmediato; memes se calendarizan en slot de alto tráfico.
+    # Anuncios/agendas se publican de inmediato; memes van a la malla editorial
+    # (POSTING_SLOTS, 4/día contra el Sheet): N aprobaciones seguidas caen en N
+    # huecos DISTINTOS. timing.elegir_slot (un solo horario semanal) haría
+    # chocar todo un batch en el mismo datetime.
     inmediato = fila.get("tipo") == "anuncio"
     if inmediato:
         slot = ahora
     else:
-        slot = timing.elegir_slot(ventana_trafico, ahora, audiencia=audiencia or [])
+        slot = (_slot_meme or _siguiente_hueco)(ahora)
     escribir = _escribir_sheet or _sheet_real
     sheet_id = escribir(caption=fila.get("caption"),
                         imagen=fila.get("imagen_url"),
                         scheduled=slot.isoformat())
     db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
               sheet_row_id=str(sheet_id), scheduled_datetime=slot.isoformat())
+    # La foto del meme queda usada (mismo contrato que el plan mensual): no se
+    # vuelve a sugerir aunque el clasificador la siga viendo usable.
+    if fila.get("photo_id"):
+        db.update(cx, "photos", fila["photo_id"], usada=1)
     # Motor de frescura: los releases incluidos en el carrusel quedan 'anunciado'
     # para que el semanal solo-fresco no los vuelva a publicar.
     if fila.get("evento_ids"):
@@ -70,6 +78,12 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     if inmediato:
         (_publicar or _publicar_ahora)()
     return slot
+
+
+def _siguiente_hueco(ahora: datetime) -> datetime:
+    """Próximo hueco libre de la malla 4/día (lee el Sheet). Import tardío: testeable."""
+    from src import scheduler
+    return scheduler.next_free_slot(ahora)
 
 
 def _publicar_ahora() -> None:
@@ -102,24 +116,98 @@ def _sheet_real(*, caption, imagen, scheduled) -> int:
 
 # --------- Telegram: helpers PUROS + envío (sin poller) ---------
 
-def construir_botones(queue_id: int) -> list[list[dict[str, str]]]:
-    """Payload de teclado inline (Aprobar/Rechazar) como dict puro. PURO/testeable.
+def construir_botones(queue_id: int, *, regenerable: bool = False) -> list[list[dict[str, str]]]:
+    """Payload de teclado inline como dict puro. PURO/testeable.
 
     Devuelve el array `inline_keyboard` listo para reply_markup; el daemon lo
-    parsea de vuelta con `parsear_callback`.
+    parsea de vuelta con `parsear_callback`. Los memes individuales llevan
+    además 🔄/🎨 (regenerable=True); los carruseles/anuncios no (su imagen es
+    determinista, no hay nada que regenerar).
     """
-    return [[
+    filas = [[
         {"text": "✅ Aprobar", "callback_data": f"aprobar:{queue_id}"},
         {"text": "❌ Rechazar", "callback_data": f"rechazar:{queue_id}"},
     ]]
+    if regenerable:
+        filas.append([
+            {"text": "🔄 Regenerar", "callback_data": f"regenerar:{queue_id}"},
+            {"text": "🎨 Plantilla", "callback_data": f"plantilla:{queue_id}"},
+        ])
+    return filas
 
 
 def parsear_callback(data: str) -> tuple[str, int]:
     """'aprobar:123' → ('aprobar', 123). PURO/testeable. Lanza si la acción no es válida."""
     accion, _, qid = data.partition(":")
-    if accion not in ("aprobar", "rechazar"):
+    if accion not in ("aprobar", "rechazar", "regenerar", "plantilla"):
         raise ValueError(f"Acción de callback desconocida: {accion!r}")
     return accion, int(qid)
+
+
+# --------- Regenerar / cambiar plantilla (flujo asíncrono, estado en DB) ---------
+
+def _sin_handle(caption: str, ig_handle: str | None) -> str:
+    """Quita el '\\n\\n@handle' final que se anexa al caption para el Sheet. PURO."""
+    sufijo = f"\n\n@{ig_handle}" if ig_handle else ""
+    if sufijo and caption.endswith(sufijo):
+        return caption[: -len(sufijo)]
+    return caption
+
+
+def _datos_meme(cx, queue_id: int) -> dict[str, Any]:
+    filas = db.rows(cx, """
+        SELECT q.id, q.caption, q.template, q.rechazados, q.photo_id,
+               b.nombre AS banda, b.tipo, b.ig_handle, p.path AS foto_path
+          FROM content_queue q
+          JOIN bands b ON b.id = q.band_id
+          LEFT JOIN photos p ON p.id = q.photo_id
+         WHERE q.id = ?
+    """, (queue_id,))
+    if not filas or not filas[0]["foto_path"]:
+        raise ValueError(f"queue {queue_id} no es un meme regenerable (sin banda o sin foto)")
+    return filas[0]
+
+
+def _recomponer(cx, fila: dict[str, Any], cap: str, template: str) -> tuple[str, str]:
+    """Compone, sube y actualiza la fila. Devuelve (caption_final, url)."""
+    import time
+
+    from src import compose as compose_mod
+    from src import host
+    png = compose_mod.compose(caption=cap, foto_url=fila["foto_path"],
+                              template=template, row_id=f"q{fila['id']}")
+    # public_id ÚNICO por versión: Telegram y Cloudinary cachean por URL — si se
+    # re-subiera con el mismo public_id, el mensaje editado mostraría la imagen vieja.
+    url = host.upload(str(png), public_id=f"q{fila['id']}_v{int(time.time())}")
+    cap_final = cap + (f"\n\n@{fila['ig_handle']}" if fila.get("ig_handle") else "")
+    db.update(cx, "content_queue", fila["id"],
+              caption=cap_final, imagen_url=url, template=template)
+    return cap_final, url
+
+
+def regenerar_meme(cx, queue_id: int) -> tuple[str, str]:
+    """Caption nuevo (LLM, sin repetir los ya rechazados) + recomposición."""
+    import json
+
+    from src import caption as caption_mod
+    fila = _datos_meme(cx, queue_id)
+    rechazados = json.loads(fila["rechazados"] or "[]")
+    actual = _sin_handle(fila["caption"] or "", fila.get("ig_handle"))
+    if actual:
+        rechazados.append(actual)
+    cap = caption_mod.generate_caption(banda=fila["banda"], rechazados=rechazados,
+                                       tipo=fila.get("tipo") or "banda")
+    db.update(cx, "content_queue", queue_id, rechazados=json.dumps(rechazados))
+    return _recomponer(cx, fila, cap, fila["template"] or "clasica")
+
+
+def cambiar_plantilla(cx, queue_id: int) -> tuple[str, str]:
+    """Recompone el MISMO caption con la siguiente plantilla (clasica→verde→onion)."""
+    from src import compose as compose_mod
+    fila = _datos_meme(cx, queue_id)
+    template = compose_mod.siguiente_template(fila["template"] or "clasica")
+    cap = _sin_handle(fila["caption"] or "", fila.get("ig_handle"))
+    return _recomponer(cx, fila, cap, template)
 
 
 def _urls_de_imagen(imagen_url: str) -> list[str]:
@@ -137,8 +225,10 @@ def _urls_de_imagen(imagen_url: str) -> list[str]:
         return [imagen_url]
 
 
-def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
-    """Manda la propuesta a Telegram con botones Aprobar/Rechazar.
+def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
+                      *, regenerable: bool = False) -> None:
+    """Manda la propuesta a Telegram con botones Aprobar/Rechazar (y 🔄/🎨 si
+    es un meme individual regenerable).
 
     - Carrusel (>=2 URLs): sendMediaGroup con las fotos, luego sendMessage con
       caption + botones (Telegram no permite botones en media groups).
@@ -155,7 +245,7 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int) -> None:
 
     base_url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
     chat_id = config.TELEGRAM_CHAT_ID
-    botones = {"inline_keyboard": construir_botones(queue_id)}
+    botones = {"inline_keyboard": construir_botones(queue_id, regenerable=regenerable)}
     urls = _urls_de_imagen(imagen_url)
 
     if len(urls) >= 2:
