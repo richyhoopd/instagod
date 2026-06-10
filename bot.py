@@ -5,6 +5,9 @@ todos opcionales):
 
     banda, integrante, rol[, tema]
 
+ÁLBUM de 2 fotos = principal + circulito: la foto CON descripción es la
+principal y la otra va al inset redondo (foto_inset_url de la plantilla).
+
 El bot: descarga la foto → genera el caption (DeepSeek) → compone el meme → te lo
 manda con botones ✅ Aprobar · ❌ Rechazar · 🔄 Regenerar. Al aprobar: sube el
 meme a Cloudinary, agenda el horario y escribe la fila en el Sheet. Reemplaza el
@@ -36,6 +39,24 @@ from src import db, host, poller_lock, scheduler, sheets
 PENDING: dict[str, dict] = {}
 # message_id de la FOTO que mandó el bot → token (para resolver replies)
 MSG_TO_TOKEN: dict[int, str] = {}
+# media_group_id → {"msgs": [Message], "task": asyncio.Task} (álbumes en vuelo)
+ALBUMS: dict[str, dict] = {}
+# Cuánto esperar a que lleguen todas las fotos del álbum (llegan en mensajes
+# separados, sin marcador de fin).
+ALBUM_DEBOUNCE_S = 1.5
+
+
+def partir_album(fotos: list[dict]) -> tuple[dict, dict | None]:
+    """Álbum → (principal, inset). PURO sobre [{'message_id', 'caption'}, ...].
+
+    La foto CON descripción es la principal (Telegram pone el caption en la foto
+    donde lo escribiste); sin caption, manda el orden de llegada. La siguiente
+    foto es el inset del circulito; fotos extra se ignoran.
+    """
+    orden = sorted(fotos, key=lambda f: f["message_id"])
+    principal = next((f for f in orden if (f.get("caption") or "").strip()), orden[0])
+    resto = [f for f in orden if f["message_id"] != principal["message_id"]]
+    return principal, (resto[0] if resto else None)
 
 
 def parse_reply_command(text: str | None) -> tuple[str, str] | None:
@@ -110,7 +131,9 @@ def _generate(item: dict) -> tuple[str, str]:
         tipo=db.tipo_de_actor(item["banda"]),
     )
     png = compose_mod.compose(
-        caption=cap, foto_url=item["photo_path"], template=item.get("template", "clasica")
+        caption=cap, foto_url=item["photo_path"],
+        foto_inset_url=item.get("inset_path"),
+        template=item.get("template", "clasica"),
     )
     return cap, str(png)
 
@@ -148,21 +171,27 @@ def _pretty(slot_iso: str) -> str:
         return slot_iso
 
 
-async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.message
-    data = parse_caption(msg.caption)
-
-    # descarga la foto de mayor resolución
+async def _descargar_foto(msg, prefijo: str = "in") -> str:
+    """Baja la foto de mayor resolución del mensaje a OUT_DIR y devuelve la ruta."""
     tg_file = await msg.photo[-1].get_file()
     compose_mod.OUT_DIR.mkdir(exist_ok=True)
-    photo_path = compose_mod.OUT_DIR / f"in_{tg_file.file_unique_id}.jpg"
-    await tg_file.download_to_drive(str(photo_path))
+    path = compose_mod.OUT_DIR / f"{prefijo}_{tg_file.file_unique_id}.jpg"
+    await tg_file.download_to_drive(str(path))
+    return str(path)
+
+
+async def _procesar_foto(msg, inset_msg=None) -> None:
+    """Genera el meme de una foto (con inset opcional) y lo manda con botones."""
+    data = parse_caption(msg.caption)
+    photo_path = await _descargar_foto(msg)
+    inset_path = await _descargar_foto(inset_msg, prefijo="inset") if inset_msg else None
 
     quien = " · ".join(v for v in (data["banda"], data["integrante"], data["rol"]) if v) or "(sin datos)"
     tags = f" · etiquetar: {' '.join(data['menciones'])}" if data.get("menciones") else ""
-    await msg.reply_text(f"📥 Recibí la foto [{quien}] · plantilla: {data['template']}{tags}. Generando…")
+    circulo = " · con circulito 🔵" if inset_path else ""
+    await msg.reply_text(f"📥 Recibí la foto [{quien}] · plantilla: {data['template']}{tags}{circulo}. Generando…")
 
-    item = {**data, "photo_path": str(photo_path), "rechazados": []}
+    item = {**data, "photo_path": photo_path, "inset_path": inset_path, "rechazados": []}
     cap, png = await asyncio.to_thread(_generate, item)
     item["caption"], item["image_path"] = cap, png
 
@@ -171,6 +200,32 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     with open(png, "rb") as fh:
         sent = await msg.reply_photo(photo=fh, caption=cap, reply_markup=_keyboard(token))
     MSG_TO_TOKEN[sent.message_id] = token
+
+
+async def _procesar_album(gid: str) -> None:
+    """Espera a que termine de llegar el álbum y lo procesa (principal + inset)."""
+    await asyncio.sleep(ALBUM_DEBOUNCE_S)
+    grupo = ALBUMS.pop(gid, None)
+    if not grupo:
+        return
+    msgs = {m.message_id: m for m in grupo["msgs"]}
+    principal, inset = partir_album(
+        [{"message_id": m.message_id, "caption": m.caption} for m in msgs.values()])
+    await _procesar_foto(msgs[principal["message_id"]],
+                         inset_msg=msgs[inset["message_id"]] if inset else None)
+
+
+async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if msg.media_group_id:
+        # Álbum: las fotos llegan en mensajes separados; se juntan con debounce.
+        grupo = ALBUMS.setdefault(msg.media_group_id, {"msgs": [], "task": None})
+        grupo["msgs"].append(msg)
+        if grupo["task"]:
+            grupo["task"].cancel()
+        grupo["task"] = asyncio.create_task(_procesar_album(msg.media_group_id))
+        return
+    await _procesar_foto(msg)
 
 
 async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -200,7 +255,8 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await query.edit_message_caption(caption=f"🎨 Plantilla → {item['template']}…")
         png = await asyncio.to_thread(
             compose_mod.compose, caption=item["caption"],
-            foto_url=item["photo_path"], template=item["template"])
+            foto_url=item["photo_path"], foto_inset_url=item.get("inset_path"),
+            template=item["template"])
         item["image_path"] = str(png)
         with open(png, "rb") as fh:
             await query.edit_message_media(
@@ -245,7 +301,8 @@ async def on_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         item["caption"] = contenido
         png = await asyncio.to_thread(
             compose_mod.compose, caption=contenido,
-            foto_url=item["photo_path"], template=item.get("template", "clasica"))
+            foto_url=item["photo_path"], foto_inset_url=item.get("inset_path"),
+            template=item.get("template", "clasica"))
     else:
         def _regen_feedback():
             cap = caption_mod.generate_caption(
@@ -253,6 +310,7 @@ async def on_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 tema_semilla=item["tema"], rechazados=item.get("rechazados") or None,
                 tipo=db.tipo_de_actor(item["banda"]), feedback=contenido)
             p = compose_mod.compose(caption=cap, foto_url=item["photo_path"],
+                                    foto_inset_url=item.get("inset_path"),
                                     template=item.get("template", "clasica"))
             return cap, p
         cap, png = await asyncio.to_thread(_regen_feedback)
