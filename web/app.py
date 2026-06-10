@@ -648,8 +648,12 @@ def calendario(request: Request) -> HTMLResponse:
 
     Separada del plan de memes: con flyers NO se hacen memes, solo calendarios.
     """
-    from src.generate_agenda import (agrupar_por_evento, eventos_ventana,
-                                      releases_proximos, releases_ventana)
+    from src.generate_agenda import (
+        agrupar_por_evento,
+        eventos_ventana,
+        releases_proximos,
+        releases_ventana,
+    )
     cx = db.connect()
     try:
         # "Esta semana" (días 0-7) = lo que Ricardo postea miér/jue antes del finde.
@@ -865,6 +869,45 @@ def guardar_evento(request: Request, event_id: int, tipo: str = Form("flyer"),
     finally:
         cx.close()
     return templates.TemplateResponse(request, "_event_row.html", {"e": evento})
+
+
+@app.get("/segmentos", response_class=HTMLResponse)
+def segmentos(request: Request) -> HTMLResponse:
+    """Estado del motor de segmentos + preview del contenido que usaría hoy."""
+    from src import segments_vista
+    from src.catalogo import REGISTRO
+    cx = db.connect()
+    try:
+        vista = segments_vista.vista_segmentos(cx, REGISTRO)
+    finally:
+        cx.close()
+    return templates.TemplateResponse(
+        request, "segmentos.html",
+        {"segmentos": vista, "daemon_activo": _daemon_poller_activo()})
+
+
+@app.get("/cover/{event_id}")
+def servir_cover(event_id: int):
+    """Portada de un release vía caché data/covers (el DNS local mata i.scdn.co)."""
+    from src import covers
+    cx = db.connect()
+    try:
+        evento = db.get(cx, "events", event_id)
+    finally:
+        cx.close()
+    if evento is None or not evento.get("cover_url"):
+        raise HTTPException(404)
+    url = evento["cover_url"]
+    if not url.startswith(("http://", "https://")):  # ruta local (foto del post IG)
+        p = Path(url)
+        p = p if p.is_absolute() else config.BASE_DIR / p
+        if p.exists():
+            return FileResponse(p)
+        raise HTTPException(404)
+    local = covers.asegurar_cover(url)
+    if local:
+        return FileResponse(local)
+    return RedirectResponse(url)  # último recurso: que el browser lo intente
 
 
 @app.get("/flyer/{event_id}")

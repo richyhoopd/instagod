@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2 style="margin-top:0;">⚙️ Segmentos <span class="muted" style="font-weight:400; font-size:14px;">
+  contenido recurrente del motor · dispatcher diario 18:00 · se publica al aprobar en Telegram</span></h2>
+
+{% if not daemon_activo %}
+<p style="background:#fdecea; color:#b3261e; padding:8px 12px; border-radius:6px; font-size:13px;">
+  ⚠️ El daemon de aprobación no está corriendo: lo que generes no se podrá aprobar desde Telegram.
+</p>
+{% endif %}
+<div id="seg-msg" style="margin-bottom:10px;"></div>
+
+{% for s in segmentos %}
+<section style="background:#fff; border-radius:8px; padding:14px 16px; margin-bottom:18px;
+                box-shadow:0 1px 3px rgba(0,0,0,.08);">
+  <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+    <h3 style="margin:0;">{{ "🗓" if s.modo == "shows" else "🎧" }} {{ s.nombre }}</h3>
+    <span class="chip">{{ s.cadencia }}</span>
+    {% if s.ya_corrio %}
+      <span class="chip" style="background:#e6f4ea; color:#1b5e3f;">✅ ya corrió esta ventana ({{ s.ventana }})</span>
+    {% elif s.toca_hoy %}
+      <span class="chip" style="background:#fff3cd; color:#8a6d00;">⏰ toca HOY a las 18:00</span>
+    {% else %}
+      <span class="chip" style="background:#eee; color:#555;">próxima: {{ s.proxima }}</span>
+    {% endif %}
+    {% if s.ultima_corrida %}
+      <span class="muted" style="font-size:12px;">última corrida: {{ s.ultima_corrida }}</span>
+    {% else %}
+      <span class="muted" style="font-size:12px;">nunca ha corrido</span>
+    {% endif %}
+    <span style="flex:1;"></span>
+    <button hx-post="/eventos/agenda/{{ s.modo }}/{{ s.periodo }}" hx-target="#seg-msg" hx-swap="innerHTML"
+            hx-confirm="¿Generar {{ s.nombre }} ahora? Se encola y te llega a Telegram para aprobar."
+            class="secundario" style="font-size:12px;">▶ generar ahora</button>
+  </div>
+
+  {# ---------- pendientes de aprobación ---------- #}
+  {% if s.pendientes %}
+  <div style="margin-top:12px; border-left:3px solid #e0a800; padding-left:10px;">
+    <strong style="font-size:13px;">📨 Esperando tu aprobación en Telegram</strong>
+    {% for p in s.pendientes %}
+    <div style="margin-top:6px;">
+      <div style="display:flex; gap:4px; overflow-x:auto;">
+        {% for u in p.urls %}<img src="{{ u }}" style="height:110px; border-radius:4px;">{% endfor %}
+      </div>
+      <details style="margin-top:4px;"><summary class="muted" style="font-size:12px; cursor:pointer;">caption (queue #{{ p.queue_id }} · {{ p.creado }})</summary>
+        <pre style="white-space:pre-wrap; font-size:12px; background:#fafafa; padding:8px; border-radius:4px;">{{ p.caption }}</pre>
+      </details>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ---------- preview: qué usaría si corriera hoy ---------- #}
+  <div style="margin-top:12px;">
+    <strong style="font-size:13px;">👁 Si corriera hoy ({{ s.preview.rango }}):</strong>
+    {% if s.preview.se_genera %}
+      <span class="chip" style="background:#e6f4ea; color:#1b5e3f;">se genera — {{ s.preview.motivo }}</span>
+    {% else %}
+      <span class="chip" style="background:#fdecea; color:#b3261e;">no se genera — {{ s.preview.motivo }}</span>
+    {% endif %}
+    {% if s.preview.omitidos_dedup %}
+      <span class="muted" style="font-size:12px;">({{ s.preview.omitidos_dedup }} flyer(s) duplicados se omiten)</span>
+    {% endif %}
+
+    {% if s.preview.eventos %}
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:8px;">
+      {% for e in s.preview.eventos %}
+      <div style="width:130px; font-size:12px; {% if s.modo == 'shows' and not e.en_carrusel %}opacity:.45;{% endif %}">
+        {% if s.modo == "shows" %}
+          {% if e.tiene_flyer %}
+            <a href="/flyer/{{ e.id }}" target="_blank"><img src="/flyer/{{ e.id }}" style="width:130px; height:130px; object-fit:cover; border-radius:6px;"></a>
+          {% else %}
+            <div style="width:130px; height:130px; border-radius:6px; background:#f1f1f1; display:flex; align-items:center; justify-content:center;" class="muted">sin flyer</div>
+          {% endif %}
+        {% else %}
+          {% if e.cover_url %}
+            <img src="/cover/{{ e.id }}" style="width:130px; height:130px; object-fit:cover; border-radius:6px;" loading="lazy">
+          {% else %}
+            <div style="width:130px; height:130px; border-radius:6px; background:#f1f1f1; display:flex; align-items:center; justify-content:center;" class="muted">sin portada</div>
+          {% endif %}
+        {% endif %}
+        <div style="margin-top:3px;"><strong>{{ e.fecha[5:] if e.fecha else "¿?" }}</strong> · {{ e.banda }}</div>
+        <div class="muted">{{ e.titulo or e.lugar or "" }}</div>
+        {% if s.modo == "shows" and not e.en_carrusel %}<div class="muted">fuera del carrusel</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if s.preview.caption %}
+    <details style="margin-top:8px;"><summary class="muted" style="font-size:12px; cursor:pointer;">📝 caption que se usaría</summary>
+      <pre style="white-space:pre-wrap; font-size:12px; background:#fafafa; padding:8px; border-radius:4px;">{{ s.preview.caption }}</pre>
+    </details>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}
