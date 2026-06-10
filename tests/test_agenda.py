@@ -140,7 +140,6 @@ def _sembrar_flyers(cx, tmp_path, n: int, hoy):
     Los PNG solo necesitan existir (Path.exists); _phash se monkeypatchea en el
     test para devolver un hash único por ruta, así nada se deduplica.
     """
-    import numpy as np
     bid = db.insert(cx, "bands", nombre="Banda", ig_handle="banda")
     ids = []
     for i in range(n):
@@ -223,6 +222,7 @@ def test_build_agenda_partes_divide(tmp_path, monkeypatch) -> None:
 def test_segmento_flag_llama_generar_segmento_no_main(monkeypatch) -> None:
     """--segmento debe invocar generar_segmento_agenda, nunca asyncio.run(main(...))."""
     import argparse
+
     from src import generate_agenda
 
     llamados: dict[str, list] = {"segmento": [], "main": []}

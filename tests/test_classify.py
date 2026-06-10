@@ -227,6 +227,7 @@ def test_poster_grafico_con_caption_evento_va_a_flyer(tmp_path, monkeypatch):
     """Un póster gráfico cuyo OCR NO lee la fecha pero el CAPTION anuncia evento
     debe registrarse como flyer (no descartarse en silencio)."""
     import numpy as np
+
     from src import classify, db
     cx = db.connect(tmp_path / "c.db"); db.init_db(cx)
     bid = db.insert(cx, "bands", nombre="Angel", tipo="banda")

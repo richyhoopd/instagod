@@ -27,10 +27,7 @@ tests/test_approval.py):
 """
 from __future__ import annotations
 
-import atexit
-import os
 import sys
-from pathlib import Path
 
 from telegram import Update
 from telegram.ext import (
@@ -43,25 +40,7 @@ from telegram.ext import (
 
 import bot  # se REUSAN sus handlers (no se mueve su lógica)
 import config
-from src import approval, audience, db
-
-LOCK_PATH = Path("/tmp/instagod_approval_daemon.lock")
-
-
-def _adquirir_lock() -> None:
-    """Evita dos pollers vivos: si el lock existe y su PID corre, aborta."""
-    if LOCK_PATH.exists():
-        try:
-            pid = int(LOCK_PATH.read_text().strip())
-            os.kill(pid, 0)  # señal 0: solo comprueba que el proceso existe
-        except (ValueError, ProcessLookupError):
-            pass  # lock huérfano: lo pisamos
-        except PermissionError:
-            raise SystemExit("Ya hay un daemon de aprobación corriendo (otro usuario).")
-        else:
-            raise SystemExit(f"Ya hay un daemon de aprobación corriendo (PID {pid}).")
-    LOCK_PATH.write_text(str(os.getpid()))
-    atexit.register(lambda: LOCK_PATH.unlink(missing_ok=True))
+from src import approval, audience, db, poller_lock
 
 
 def _pretty(slot_iso: str) -> str:
@@ -135,7 +114,7 @@ async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     if not config.TELEGRAM_CHAT_ID:
         raise RuntimeError("Falta TELEGRAM_CHAT_ID en el .env")
-    _adquirir_lock()
+    poller_lock.adquirir()
 
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))

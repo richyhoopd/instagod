@@ -30,7 +30,7 @@ from telegram.ext import (
 import config
 from src import caption as caption_mod
 from src import compose as compose_mod
-from src import db, host, scheduler, sheets
+from src import db, host, poller_lock, scheduler, sheets
 
 # token (= message_id del usuario) → item en proceso de aprobación
 PENDING: dict[str, dict] = {}
@@ -222,6 +222,7 @@ async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     if not config.TELEGRAM_CHAT_ID:
         raise RuntimeError("Falta TELEGRAM_CHAT_ID en el .env")
+    poller_lock.exigir_daemon_libre("bot.py")
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))  # ignora a cualquier otro
     app.add_handler(MessageHandler(filters.PHOTO & solo_tu, on_photo))

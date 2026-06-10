@@ -45,6 +45,7 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     # con fecha futura que get_due_rows (que compara en CST) nunca ve vencida.
     if ahora is None:
         import pytz
+
         import config
         ahora = datetime.now(pytz.timezone(config.TIMEZONE))
     fila = db.get(cx, "content_queue", queue_id)

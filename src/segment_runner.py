@@ -10,6 +10,9 @@ import argparse
 import sys
 from datetime import datetime
 
+import pytz
+
+import config
 from src import db, segments
 from src.segments import Segment
 
@@ -22,7 +25,10 @@ def _ya_corrio(cx, seg: Segment, ventana: str, account_id: int) -> bool:
 
 def dispatch(cx, registro: list[Segment], *, ahora: datetime | None = None,
              account_id: int = 1, force: bool = False) -> list[str]:
-    ahora = ahora or datetime.now()
+    # Hora de la ESCENA (CST), no la del reloj de la máquina: si la Mac está en
+    # otro huso, "toca_hoy" (martes/viernes/día 1) debe evaluarse en Mexico_City,
+    # o el segmento se dispararía en la fecha equivocada.
+    ahora = ahora or datetime.now(pytz.timezone(config.TIMEZONE))
     corridos = []
     for seg in registro:
         if not seg.activo or not segments.toca_hoy(seg, ahora):

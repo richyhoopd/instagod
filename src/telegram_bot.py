@@ -27,6 +27,7 @@ from telegram.ext import (
 )
 
 import config
+from src import poller_lock
 
 # item = {"row_id", "caption", "image_path", "meta": {...}}
 Item = dict[str, Any]
@@ -52,6 +53,7 @@ async def request_carousel_approval(caption: str, image_paths: list[str]) -> boo
     Para posts de varias imágenes (agenda/música nueva en carrusel). Determinista:
     no hay 'regenerar' (el contenido sale de la DB).
     """
+    poller_lock.exigir_daemon_libre("la aprobación de carrusel (flujo manual)")
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
@@ -106,6 +108,7 @@ async def run_approval_batch(items: list[Item], regenerate_fn: RegenerateFn,
     if not items:
         return []
 
+    poller_lock.exigir_daemon_libre("run_approval_batch (generate.py/plan/anuncios)")
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     registry: dict[str, Item] = {str(it["row_id"]): it for it in items}
     futures: dict[str, asyncio.Future] = {}

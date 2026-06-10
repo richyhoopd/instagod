@@ -457,6 +457,8 @@ def plan_eliminar(request: Request, queue_id: int) -> HTMLResponse:
 def plan_enviar(mes: str = Form("")) -> HTMLResponse:
     """Marca el plan del mes como 'listo' y lanza el envío masivo a Telegram."""
     ym = _mes_actual_plan(mes or None)
+    if _daemon_poller_activo():
+        return HTMLResponse(_MSG_DAEMON_POLLER)
     if _telegram_busy():
         return HTMLResponse('⚠️ Ya hay una sesión de Telegram activa. Espera a que termine.')
     cx = db.connect()
@@ -533,6 +535,8 @@ def cola_generar() -> HTMLResponse:
     """Lanza una sesión de generate.py (Proceso A) en segundo plano."""
     import subprocess
     import sys
+    if _daemon_poller_activo():
+        return HTMLResponse(_MSG_DAEMON_POLLER)
     if _telegram_busy():
         return HTMLResponse(
             '⚠️ Ya hay una sesión de Telegram activa (bot.py u otra generación). '
@@ -738,6 +742,21 @@ def _telegram_busy() -> bool:
                for p in patrones)
 
 
+# Flujos BLOQUEANTES (abren su propio poller y esperan tu aprobación): chocan con
+# el daemon de aprobación, que es el poller permanente. Si el daemon corre (lo
+# normal), se rechazan con un mensaje claro en vez de lanzar un proceso que muere.
+_MSG_DAEMON_POLLER = (
+    '⚠️ El daemon de aprobación es el único poller de Telegram (corre siempre). '
+    'Este flujo manual abriría un segundo poller y chocaría. '
+    'Para memes: manda la foto directo al bot (el daemon la procesa). '
+    'Para agenda/música nueva: usa los botones de Agenda (flujo del motor).')
+
+
+def _daemon_poller_activo() -> bool:
+    from src import poller_lock
+    return poller_lock.daemon_pid() is not None
+
+
 def _lanzar_sesion(modulo: str, *args: str) -> HTMLResponse | None:
     """Lanza un módulo que usa el bot de Telegram; None si otro ya lo ocupa."""
     import subprocess
@@ -765,6 +784,8 @@ def lanzar_novedades() -> HTMLResponse:
 @app.post("/eventos/anunciar", response_class=HTMLResponse)
 def eventos_anunciar() -> HTMLResponse:
     """Lanza la sesión de anuncios (aprobación por Telegram), como Generar memes."""
+    if _daemon_poller_activo():
+        return HTMLResponse(_MSG_DAEMON_POLLER)
     bloqueo = _lanzar_sesion("src.generate_anuncios")
     return bloqueo or HTMLResponse(
         '🚀 Sesión de anuncios lanzada — las tarjetas de eventos con fecha futura '
