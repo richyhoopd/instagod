@@ -65,8 +65,10 @@ def rerank_cola(items: list[dict[str, Any]], *, pesos_formato: dict[str, float])
     el item de mayor score toma el slot más temprano. PURO.
     """
     slots = sorted(i["scheduled"] for i in items)
-    rank = sorted(items, key=lambda i: -(pesos_formato.get(i["patron"], 1.0) * (i.get("band_score") or 0.0)
-                                         + pesos_formato.get(i["patron"], 1.0)))
+    # multiplicativo puro con piso chico: sin el piso, band_score=0 anularía el
+    # formato; sin multiplicar, el formato taparía a la banda (bug original).
+    rank = sorted(items, key=lambda i: -(pesos_formato.get(i["patron"], 1.0)
+                                         * max(i.get("band_score") or 0.0, 0.01)))
     return [{**it, "scheduled": slot} for it, slot in zip(rank, slots)]
 
 

@@ -97,3 +97,18 @@ def test_rerank_reordena_futuros_por_score() -> None:
     # el ganador (2) toma el slot más temprano (10), el otro el 11
     asignado = {r["queue_id"]: r["scheduled"] for r in nuevo}
     assert asignado[2] == "2026-06-10T20:00" and asignado[1] == "2026-06-11T20:00"
+
+
+def test_rerank_no_ignora_band_score_cuando_es_cero() -> None:
+    # Una banda SIN señal (score 0) no debe ganar el slot temprano solo porque
+    # su formato pese mucho: la banda con engagement real va primero.
+    items = [
+        {"queue_id": 1, "patron": "absurdo_domestico", "band_score": 0.0,
+         "scheduled": "2026-06-10T20:00"},
+        {"queue_id": 2, "patron": "comunicado", "band_score": 0.1,
+         "scheduled": "2026-06-11T20:00"},
+    ]
+    pesos = {"absurdo_domestico": 2.0, "comunicado": 0.5}
+    nuevo = engagement.rerank_cola(items, pesos_formato=pesos)
+    asignado = {r["queue_id"]: r["scheduled"] for r in nuevo}
+    assert asignado[2] == "2026-06-10T20:00" and asignado[1] == "2026-06-11T20:00"

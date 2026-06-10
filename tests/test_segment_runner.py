@@ -23,6 +23,29 @@ def test_dispatch_idempotente(tmp_path) -> None:
     assert corridos == [1]
 
 
+def test_dispatch_default_ahora_es_aware_en_tz_de_la_cuenta(tmp_path, monkeypatch) -> None:
+    """Regresión: sin `ahora`, las cadencias (martes/viernes/día 1) deben
+    evaluarse en config.TIMEZONE, no en la hora naive de la máquina."""
+    import pytz
+
+    import config
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    visto = {}
+
+    def _captura(seg, ahora):
+        visto["ahora"] = ahora
+        return False
+
+    monkeypatch.setattr(segments, "toca_hoy", _captura)
+    seg = segments.Segment("demo", "Demo", lambda cx, acc: None,
+                           cadencia={"tipo": "semanal", "dow": 6}, ventana_trafico="meme")
+    segment_runner.dispatch(cx, [seg], account_id=1)
+    ahora = visto["ahora"]
+    assert ahora.tzinfo is not None
+    assert ahora.utcoffset() == datetime.now(pytz.timezone(config.TIMEZONE)).utcoffset()
+
+
 def test_no_dispara_si_no_toca_hoy(tmp_path) -> None:
     cx = db.connect(tmp_path / "t.db")
     db.init_db(cx)

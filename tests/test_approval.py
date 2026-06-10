@@ -56,6 +56,21 @@ def test_aprobar_inmediato_publica_ahora(tmp_path, monkeypatch):
     assert slot.year == 2026 and slot.hour == 2 and llamado.get("pub")
 
 
+def test_aprobar_default_ahora_es_aware_en_tz_de_la_cuenta(tmp_path) -> None:
+    """Regresión: sin `ahora`, el slot inmediato debe salir en config.TIMEZONE
+    (aware), no en hora-máquina naive — si no, get_due_rows nunca lo ve vencido."""
+    import pytz
+
+    import config
+    cx = _cx(tmp_path)
+    qid = approval.encolar_pendiente(cx, tipo="anuncio", caption="x", imagen_url="u")
+    slot = approval.aprobar(cx, qid, _escribir_sheet=lambda **k: 7,
+                            _publicar=lambda: None)
+    assert slot.tzinfo is not None
+    esperado = datetime.now(pytz.timezone(config.TIMEZONE)).utcoffset()
+    assert slot.utcoffset() == esperado
+
+
 def test_aprobar_marca_eventos_anunciado(tmp_path) -> None:
     """Al aprobar, los events de evento_ids quedan status='anunciado'."""
     import json

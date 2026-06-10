@@ -213,6 +213,32 @@ def test_sync_posts_tolerante_a_fallos(cx, monkeypatch) -> None:
     assert len(db.rows(cx, "SELECT * FROM ig_metrics_snapshots")) == 2
 
 
+def test_sync_posts_etiqueta_formatos_tras_vincular(cx, monkeypatch) -> None:
+    # El sync diario debe correr el backfill de formato_patron (eje formato
+    # del cerebro de engagement) para que score_formatos tenga datos frescos.
+    from src import format_tags
+    monkeypatch.setattr(ig_insights, "_fetch_media", lambda: [])
+    monkeypatch.setattr(ig_insights, "_sheet_rows", lambda: [])
+    monkeypatch.setattr(format_tags, "etiquetar_publicados",
+                        lambda cx: {"etiquetados": 2, "fallados": 0})
+    res = ig_insights.sync_posts(cx)
+    assert res["etiquetados"] == 2
+
+
+def test_sync_posts_llm_caido_no_es_fatal(cx, monkeypatch) -> None:
+    from src import format_tags
+    monkeypatch.setattr(ig_insights, "_fetch_media", lambda: [])
+    monkeypatch.setattr(ig_insights, "_sheet_rows", lambda: [])
+
+    def boom(cx):
+        raise RuntimeError("DeepSeek caído")
+
+    monkeypatch.setattr(format_tags, "etiquetar_publicados", boom)
+    res = ig_insights.sync_posts(cx)
+    assert res["etiquetados"] == 0
+    assert "etiquetado" in (res.get("warning") or "").lower()
+
+
 def test_sync_posts_sheet_caido_no_es_fatal(cx, monkeypatch) -> None:
     monkeypatch.setattr(ig_insights, "_fetch_media", lambda: [_media_item("M1")])
     monkeypatch.setattr(ig_insights, "_fetch_insights",

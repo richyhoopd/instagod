@@ -270,8 +270,18 @@ def sync_posts(cx) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — sin credenciales / Sheet caído
         warning = f"Sheet no disponible, vinculación omitida: {exc}"
 
+    # Eje formato del cerebro: etiquetar formato_patron de lo recién vinculado.
+    etiquetados = 0
+    try:
+        from src import format_tags
+        etiquetados = format_tags.etiquetar_publicados(cx)["etiquetados"]
+    except Exception as exc:  # noqa: BLE001 — LLM caído no tumba el sync
+        aviso = f"etiquetado de formato omitido: {exc}"
+        warning = f"{warning} | {aviso}" if warning else aviso
+
     return {"posts": len(items), "insights_fallidos": fallidos,
-            "vinculados": vinculados, "warning": warning}
+            "vinculados": vinculados, "etiquetados": etiquetados,
+            "warning": warning}
 
 
 # ---------- entrypoint CLI (sync diario para launchd) ----------
@@ -313,7 +323,8 @@ def main(db_path: str | Path | None = None,
     warning = res.get("warning") or "-"
     linea = (f"{ahora} · posts={res['posts']} "
              f"· sin_insights={res['insights_fallidos']} "
-             f"· vinculados={res['vinculados']} · warning={warning}")
+             f"· vinculados={res['vinculados']} "
+             f"· etiquetados={res.get('etiquetados', 0)} · warning={warning}")
     _append_log(log, linea)
     print(linea)
     return 0
