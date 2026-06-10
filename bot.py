@@ -34,6 +34,22 @@ from src import db, host, poller_lock, scheduler, sheets
 
 # token (= message_id del usuario) → item en proceso de aprobación
 PENDING: dict[str, dict] = {}
+# message_id de la FOTO que mandó el bot → token (para resolver replies)
+MSG_TO_TOKEN: dict[int, str] = {}
+
+
+def parse_reply_command(text: str | None) -> tuple[str, str] | None:
+    """'texto: X' / 'feedback: Y' → (comando, contenido). PURO.
+
+    None si no es un comando o viene vacío (un reply normal no dispara nada).
+    """
+    t = (text or "").strip()
+    low = t.lower()
+    for cmd in ("texto", "feedback"):
+        if low.startswith(cmd + ":"):
+            contenido = t.split(":", 1)[1].strip()
+            return (cmd, contenido) if contenido else None
+    return None
 
 
 def _keyboard(token: str) -> InlineKeyboardMarkup:
@@ -153,7 +169,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     token = str(msg.message_id)
     PENDING[token] = item
     with open(png, "rb") as fh:
-        await msg.reply_photo(photo=fh, caption=cap, reply_markup=_keyboard(token))
+        sent = await msg.reply_photo(photo=fh, caption=cap, reply_markup=_keyboard(token))
+    MSG_TO_TOKEN[sent.message_id] = token
 
 
 async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -206,6 +223,49 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     PENDING.pop(token, None)
 
 
+async def on_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Responder la foto del bot con 'texto: …' (caption exacto, sin LLM) o
+    'feedback: …' (regenera siguiendo la guía) y se edita el mismo mensaje."""
+    msg = update.message
+    if msg is None or msg.reply_to_message is None:
+        return
+    cmd = parse_reply_command(msg.text)
+    if cmd is None:
+        return  # reply normal: no es para nosotros
+    token = MSG_TO_TOKEN.get(msg.reply_to_message.message_id)
+    item = PENDING.get(token) if token else None
+    if item is None:
+        await msg.reply_text("(no encuentro ese meme — expiró o no es del flujo de fotos; "
+                             "vuelve a mandar la foto)")
+        return
+
+    tipo, contenido = cmd
+    await msg.reply_text("✍️ Editando…" if tipo == "texto" else "🔄 Regenerando con tu guía…")
+    if tipo == "texto":
+        item["caption"] = contenido
+        png = await asyncio.to_thread(
+            compose_mod.compose, caption=contenido,
+            foto_url=item["photo_path"], template=item.get("template", "clasica"))
+    else:
+        def _regen_feedback():
+            cap = caption_mod.generate_caption(
+                banda=item["banda"], integrante=item["integrante"], rol=item["rol"],
+                tema_semilla=item["tema"], rechazados=item.get("rechazados") or None,
+                tipo=db.tipo_de_actor(item["banda"]), feedback=contenido)
+            p = compose_mod.compose(caption=cap, foto_url=item["photo_path"],
+                                    template=item.get("template", "clasica"))
+            return cap, p
+        cap, png = await asyncio.to_thread(_regen_feedback)
+        item["caption"] = cap
+    item["image_path"] = str(png)
+    with open(png, "rb") as fh:
+        await ctx.bot.edit_message_media(
+            chat_id=msg.chat_id, message_id=msg.reply_to_message.message_id,
+            media=InputMediaPhoto(media=fh, caption=item["caption"]),
+            reply_markup=_keyboard(token),
+        )
+
+
 async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Reporta cualquier error del handler al chat, en vez de fallar en silencio."""
     import traceback
@@ -226,6 +286,7 @@ def main() -> None:
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))  # ignora a cualquier otro
     app.add_handler(MessageHandler(filters.PHOTO & solo_tu, on_photo))
+    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & solo_tu, on_reply))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_error_handler(on_error)
     print("Bot escuchando. Mándale una foto con 'banda, integrante, rol' en la descripción.")

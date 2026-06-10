@@ -123,8 +123,10 @@ def main() -> None:
     # tragarse los callbacks del flujo interactivo de bot.py).
     app.add_handler(CallbackQueryHandler(on_aprobacion, pattern=r"^(aprobar|rechazar):"))
 
-    # Flujo interactivo REUSADO de bot.py (foto + approve/reject/regen/tpl).
+    # Flujo interactivo REUSADO de bot.py (foto + approve/reject/regen/tpl +
+    # replies 'texto:'/'feedback:' sobre la foto generada).
     app.add_handler(MessageHandler(filters.PHOTO & solo_tu, bot.on_photo))
+    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & solo_tu, bot.on_reply))
     app.add_handler(CallbackQueryHandler(bot.on_callback,
                                          pattern=r"^(approve|reject|regen|tpl):"))
     app.add_error_handler(bot.on_error)
