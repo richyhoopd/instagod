@@ -66,6 +66,20 @@ def test_fecha_del_post_si_llm_no_da_fecha(cx, monkeypatch):
     assert _eventos(cx)[0]["fecha_evento"] == "2026-06-02"
 
 
+def test_show_fecha_del_post_se_trunca_a_dia(cx, monkeypatch):
+    # Regresión: photos.fecha es un DATETIME del post de IG; si el LLM no da
+    # fecha, el fallback debe truncarse a YYYY-MM-DD (un datetime en
+    # events.fecha_evento rompió el prerender de thescene-web, 10-jun-2026).
+    bid = _banda(cx)
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": False, "es_show": True, "titulo": "Tocada en el foro",
+        "fecha": None})
+    dr.detectar(cx, [_post(bid, caption="hoy tocamos", fecha="2026-06-10T03:58:55")])
+    evs = _eventos(cx)
+    assert len(evs) == 1 and evs[0]["tipo"] == "fecha"
+    assert evs[0]["fecha_evento"] == "2026-06-10"
+
+
 def test_titulo_null_no_inserta(cx, monkeypatch):
     bid = _banda(cx)
     monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {

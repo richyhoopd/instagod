@@ -179,8 +179,7 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
                 resumen["nuevos"].append({
                     "banda": _nombre_banda(cx, post["band_id"]),
                     "titulo": data.get("titulo") or "(show)",
-                    "fecha": (str(data.get("fecha"))[:10] if data.get("fecha")
-                              else post.get("fecha"))})
+                    "fecha": str(data.get("fecha") or post.get("fecha") or "")[:10] or None})
 
         if not es_r:
             continue
@@ -252,7 +251,8 @@ def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any],
         (post["band_id"], llave, f"ig:{llave}")).fetchone()
     if ya:
         return False
-    fecha = (str(data["fecha"])[:10] if data.get("fecha") else post.get("fecha"))
+    # photos.fecha es DATETIME del post: el fallback también se trunca a día.
+    fecha = str(data.get("fecha") or post.get("fecha") or "")[:10] or None
     db.insert(cx, "events", band_id=post["band_id"], tipo="fecha",
               titulo=(data.get("titulo") or None), fecha_evento=fecha,
               lugar=(data.get("lugar") or None), ciudad=(data.get("ciudad") or None),
