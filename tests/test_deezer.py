@@ -230,6 +230,80 @@ def test_registrar_releases_dedup_vs_spotify(cx, monkeypatch) -> None:
     assert len(db.rows(cx, "SELECT 1 FROM events WHERE band_id=?", (bid,))) == 1
 
 
+# ---------- mejora de covers: foto de IG → artwork oficial ----------
+
+def _release_ig(cx, bid, titulo, fecha, *, shortcode="ABC",
+                path="data/photos/banda/abc_0.jpg") -> int:
+    return db.insert(cx, "events", band_id=bid, tipo="release", titulo=titulo,
+                     fecha_evento=fecha, cover_url=path, flyer_path=path,
+                     source_post_id=shortcode, status="nuevo")
+
+
+def test_mejorar_covers_ig_reemplaza_local(cx, monkeypatch) -> None:
+    bid = db.insert(cx, "bands", nombre="CCÑA", activa=1, deezer_id="111")
+    eid = _release_ig(cx, bid, "La 4T Del Perreo", "2026-06-10")
+    monkeypatch.setattr(deezer, "albums", lambda aid: [
+        {"album_id": "A1", "titulo": "La 4T del Perreo", "record_type": "single",
+         "release_date": "2026-06-10", "cover_url": "https://cdn.dzcdn.net/cov.jpg"}])
+    assert deezer.mejorar_covers_ig(cx) == 1
+    ev = db.get(cx, "events", eid)
+    assert ev["cover_url"] == "https://cdn.dzcdn.net/cov.jpg"
+    # la GUI sigue sirviendo la foto del post y el dedupe de IG conserva su llave
+    assert ev["flyer_path"] == "data/photos/banda/abc_0.jpg"
+    assert ev["source_post_id"] == "ABC"
+
+
+def test_mejorar_covers_ig_sin_match_deja_foto(cx, monkeypatch) -> None:
+    bid = db.insert(cx, "bands", nombre="EMERGENTE", activa=1, deezer_id="111")
+    eid = _release_ig(cx, bid, "Savannah", "2026-06-09")
+    monkeypatch.setattr(deezer, "albums", lambda aid: [
+        {"album_id": "A1", "titulo": "Otra Cosa", "record_type": "single",
+         "release_date": "2026-06-09", "cover_url": "https://c1"},
+        # mismo título pero fecha lejana = release distinto
+        {"album_id": "A2", "titulo": "Savannah", "record_type": "single",
+         "release_date": "2020-01-01", "cover_url": "https://c2"},
+        # título y fecha bien pero sin cover: no hay nada que poner
+        {"album_id": "A3", "titulo": "Savannah", "record_type": "single",
+         "release_date": "2026-06-09", "cover_url": ""}])
+    assert deezer.mejorar_covers_ig(cx) == 0
+    assert db.get(cx, "events", eid)["cover_url"] == "data/photos/banda/abc_0.jpg"
+
+
+def test_mejorar_covers_ig_no_toca_http_ni_bandas_sin_deezer(cx, monkeypatch) -> None:
+    b1 = db.insert(cx, "bands", nombre="A", activa=1, deezer_id="111")
+    db.insert(cx, "events", band_id=b1, tipo="release", titulo="X",
+              fecha_evento="2026-06-05", cover_url="https://ya.oficial/c.jpg",
+              source_post_id="dz:A1", status="nuevo")
+    b2 = db.insert(cx, "bands", nombre="B", activa=1)  # sin deezer_id
+    _release_ig(cx, b2, "Y", "2026-06-05")
+
+    def boom(aid):
+        raise AssertionError("sin pendientes con deezer_id no debe llamar a Deezer")
+    monkeypatch.setattr(deezer, "albums", boom)
+    assert deezer.mejorar_covers_ig(cx) == 0
+
+
+def test_mejorar_covers_ig_una_llamada_por_banda_y_error_no_tumba(cx, monkeypatch) -> None:
+    b1 = db.insert(cx, "bands", nombre="Rota", activa=1, deezer_id="666")
+    _release_ig(cx, b1, "Algo", "2026-06-05", shortcode="P1")
+    b2 = db.insert(cx, "bands", nombre="Sana", activa=1, deezer_id="111")
+    _release_ig(cx, b2, "Uno", "2026-06-05", shortcode="P2", path="data/p/1.jpg")
+    _release_ig(cx, b2, "Dos", "2026-06-06", shortcode="P3", path="data/p/2.jpg")
+    llamadas = []
+
+    def fake_albums(aid):
+        llamadas.append(aid)
+        if aid == "666":
+            raise deezer.DeezerError("HTTP 500")
+        return [{"album_id": "A1", "titulo": "Uno", "record_type": "single",
+                 "release_date": "2026-06-05", "cover_url": "https://c1"},
+                {"album_id": "A2", "titulo": "Dos", "record_type": "single",
+                 "release_date": "2026-06-06", "cover_url": "https://c2"}]
+    monkeypatch.setattr(deezer, "albums", fake_albums)
+    assert deezer.mejorar_covers_ig(cx) == 2  # la banda rota no tumba la corrida
+    assert sorted(llamadas) == ["111", "666"]  # una llamada por banda (cache)
+
+
 def test_registrar_releases_lejano_si_inserta(cx, monkeypatch) -> None:
     bid = db.insert(cx, "bands", nombre="Kabala", activa=1, deezer_id="111")
     hoy = datetime(2026, 6, 8)

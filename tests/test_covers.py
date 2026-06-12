@@ -65,3 +65,31 @@ def test_falla_no_deja_archivo(tmp_path, monkeypatch) -> None:
     url = "https://i.scdn.co/image/abc"
     assert covers.asegurar_cover(url, base=tmp_path) is None
     assert not covers._ruta_cache(url, base=tmp_path).exists()
+
+
+# ---------- rutas locales (releases detectados de IG: cover_url = foto del post) ----------
+
+def test_ruta_local_absoluta_se_usa_directo(tmp_path, monkeypatch) -> None:
+    foto = tmp_path / "post.jpg"
+    foto.write_bytes(b"\xff\xd8FOTOIG")
+
+    def boom(*a, **k):
+        raise AssertionError("ruta local no debe tocar la red")
+    monkeypatch.setattr(covers, "_descargar", boom)
+    assert covers.asegurar_cover(str(foto), base=tmp_path) == foto
+
+
+def test_ruta_local_relativa_resuelve_contra_base_dir(tmp_path, monkeypatch) -> None:
+    import config
+    (tmp_path / "data" / "photos" / "banda").mkdir(parents=True)
+    foto = tmp_path / "data" / "photos" / "banda" / "abc_0.jpg"
+    foto.write_bytes(b"\xff\xd8FOTOIG")
+    monkeypatch.setattr(config, "BASE_DIR", tmp_path)
+    p = covers.asegurar_cover("data/photos/banda/abc_0.jpg", base=tmp_path)
+    assert p == foto
+
+
+def test_ruta_local_inexistente_regresa_none(tmp_path, monkeypatch) -> None:
+    import config
+    monkeypatch.setattr(config, "BASE_DIR", tmp_path)
+    assert covers.asegurar_cover("data/photos/banda/no_existe.jpg", base=tmp_path) is None

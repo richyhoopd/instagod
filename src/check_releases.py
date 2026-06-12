@@ -103,6 +103,12 @@ def check(dry_run: bool = False) -> list[dict]:
         db.init_db(cx)
         # Deezer es la fuente primaria (sin auth ni cap); dedup compartido en events.
         nuevos.extend(_check_deezer(cx))
+        # Releases detectados de IG traen la foto del post como cover; si Deezer
+        # ya tiene el artwork oficial, se sube de calidad aquí (1×/día).
+        from src import deezer
+        mejoradas = deezer.mejorar_covers_ig(cx)
+        if mejoradas:
+            print(f"🖼 {mejoradas} portada(s) de IG mejoradas con artwork de Deezer.")
         # Spotify queda como fuente secundaria para las que tengan id.
         bandas = [b for b in db.list_bands(cx)
                   if b.get("spotify_id") and db.es_musical(b)]

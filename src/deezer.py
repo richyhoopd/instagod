@@ -17,7 +17,13 @@ import requests
 
 import config
 from src import db
-from src.detect_releases_ig import _es_dupe
+from src.detect_releases_ig import (
+    _VENTANA_DIAS,
+    _es_dupe,
+    _normaliza_titulo,
+    _parse_fecha,
+    _titulos_similares,
+)
 
 _TIMEOUT = 20
 
@@ -102,6 +108,54 @@ def registrar_releases(cx, band_id: int, deezer_id: str,
                   source_post_id=spid, status="nuevo")
         nuevos.append(al)
     return nuevos
+
+
+def _album_para(titulo: str | None, fecha_evento: str | None,
+                discografia: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Álbum con cover cuyo título coincide (normalizado) y fecha cae cerca."""
+    norm = _normaliza_titulo(titulo)
+    f_ev = _parse_fecha(fecha_evento)
+    for al in discografia:
+        if not al.get("cover_url"):
+            continue
+        if not _titulos_similares(norm, _normaliza_titulo(al.get("titulo"))):
+            continue
+        f_al = _parse_fecha(al.get("release_date"))
+        # Mismo criterio que _es_dupe: sin fechas comparables, el título manda.
+        if f_ev is None or f_al is None or abs((f_ev - f_al).days) <= _VENTANA_DIAS:
+            return al
+    return None
+
+
+def mejorar_covers_ig(cx) -> int:
+    """Releases con cover local (foto del post de IG) → artwork oficial de Deezer.
+
+    detect_releases_ig guarda la foto del post como cover_url; aquí se reemplaza
+    por la portada real cuando la discografía trae el mismo título con fecha
+    cercana. Sin match no se toca nada (la foto de IG queda de fallback);
+    flyer_path y source_post_id no cambian (GUI y dedupe siguen igual).
+    """
+    pend = db.rows(cx, """
+        SELECT e.id, e.titulo, e.fecha_evento, b.deezer_id
+          FROM events e JOIN bands b ON b.id = e.band_id
+         WHERE e.tipo='release' AND b.deezer_id IS NOT NULL
+           AND e.cover_url IS NOT NULL AND e.cover_url NOT LIKE 'http%'
+    """)
+    cache: dict[str, list[dict[str, Any]]] = {}
+    n = 0
+    for p in pend:
+        did = p["deezer_id"]
+        if did not in cache:
+            try:
+                cache[did] = albums(did)
+            except DeezerError as exc:
+                print(f"⚠ covers IG: Deezer falló para artista {did} ({exc})")
+                cache[did] = []
+        al = _album_para(p["titulo"], p["fecha_evento"], cache[did])
+        if al:
+            db.update(cx, "events", p["id"], cover_url=al["cover_url"])
+            n += 1
+    return n
 
 
 def _reciente(fecha: str | None, hoy: datetime) -> bool:

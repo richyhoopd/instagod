@@ -82,6 +82,13 @@ def asegurar_cover(url: str | None, *, base: Path | None = None) -> Path | None:
     """Devuelve la ruta local de la portada (cacheada o recién bajada), o None."""
     if not url:
         return None
+    if not url.startswith(("http://", "https://")):
+        # Releases detectados de IG: cover_url es la foto local del post
+        # (relativa a BASE_DIR). No hay nada que descargar ni cachear.
+        p = Path(url)
+        if not p.is_absolute():
+            p = config.BASE_DIR / p
+        return p if p.exists() else None
     destino = _ruta_cache(url, base=base)
     if destino.exists():
         return destino

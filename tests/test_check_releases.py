@@ -36,6 +36,27 @@ def test_registrar_releases_devuelve_detalle_y_dedupea(tmp_path) -> None:
     assert _registrar_releases(sp, cx, bid, "spotify-id-x") == []
 
 
+def test_check_mejora_covers_ig(tmp_path, monkeypatch) -> None:
+    """El cron diario sube las portadas IG a artwork oficial vía Deezer."""
+    from src import check_releases, deezer
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    bid = db.insert(cx, "bands", nombre="CCÑA", activa=1, deezer_id="111")
+    eid = db.insert(cx, "events", band_id=bid, tipo="release",
+                    titulo="La 4T Del Perreo", fecha_evento="2026-06-10",
+                    cover_url="data/photos/b/a_0.jpg", flyer_path="data/photos/b/a_0.jpg",
+                    source_post_id="ABC", status="nuevo")
+    monkeypatch.setattr(deezer, "albums", lambda aid: [
+        {"album_id": "A1", "titulo": "La 4T Del Perreo", "record_type": "single",
+         "release_date": "2026-06-10", "cover_url": "https://cdn/c.jpg"}])
+    conectar = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: conectar(tmp_path / "t.db"))
+
+    check_releases.check(dry_run=True)
+    assert db.get(cx, "events", eid)["cover_url"] == "https://cdn/c.jpg"
+    cx.close()
+
+
 def test_formato_mensaje() -> None:
     from src.check_releases import formato_mensaje
     nuevos = [
