@@ -212,6 +212,63 @@ def _parse_titulo(titulo: str | None) -> tuple[str, str]:
     return t, "Estreno"
 
 
+def _fusionar_duplicados(releases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Una tarjeta por release: colapsa copias de OTRAS bandas (post colab =
+    mismo shortcode, o flyer re-subido = pHash ≤ umbral en covers locales).
+
+    Red de seguridad sobre lo que ya está en la BD (la detección fusiona en
+    origen): conserva la primera copia y le anexa como créditos el band_id y
+    los créditos de las descartadas. Solo muta en memoria, no toca la BD.
+    """
+    import json
+    from pathlib import Path
+
+    unicos: list[dict[str, Any]] = []
+    por_shortcode: dict[str, dict[str, Any]] = {}
+    hashes: list[tuple[Any, dict[str, Any]]] = []
+    for ev in releases:
+        dueno = por_shortcode.get(ev.get("source_post_id") or "")
+        h = None
+        if dueno is None:
+            local = ev.get("flyer_path") or ev.get("cover_url") or ""
+            if local and not local.startswith("http"):
+                p = Path(local)
+                p = p if p.is_absolute() else config.BASE_DIR / p
+                h = _phash(p) if p.exists() else None
+            if h is not None:
+                dueno = next((e for hv, e in hashes if _es_duplicado(h, [hv])), None)
+        if dueno is None:
+            if ev.get("source_post_id"):
+                por_shortcode[ev["source_post_id"]] = ev
+            if h is not None:
+                hashes.append((h, ev))
+            unicos.append(ev)
+            continue
+        creditos = json.loads(dueno.get("creditos") or "[]")
+        for b in [ev["band_id"], *json.loads(ev.get("creditos") or "[]")]:
+            if b != dueno["band_id"] and b not in creditos:
+                creditos.append(b)
+        dueno["creditos"] = json.dumps(creditos)
+    return unicos
+
+
+def _handles_creditos(cx, eventos: list[dict[str, Any]]) -> None:
+    """Anota ev['creditos_handles'] resolviendo los band_ids de `creditos`."""
+    import json
+
+    listas = {ev["id"]: json.loads(ev.get("creditos") or "[]") for ev in eventos}
+    ids = {b for lst in listas.values() for b in lst}
+    handles: dict[int, str] = {}
+    if ids:
+        marca = ",".join("?" * len(ids))
+        for r in db.rows(cx, f"SELECT id, ig_handle FROM bands WHERE id IN ({marca})",
+                         tuple(ids)):
+            if r["ig_handle"]:
+                handles[r["id"]] = r["ig_handle"]
+    for ev in eventos:
+        ev["creditos_handles"] = [handles[b] for b in listas[ev["id"]] if b in handles]
+
+
 def _caption_releases(eventos: list[dict[str, Any]], periodo: str, *, omitidos: int = 0) -> str:
     """Caption del carrusel: línea por release + bloque de tags únicos al final."""
     lineas = [_MODO["releases"]["caption_head"][periodo]]
@@ -222,10 +279,14 @@ def _caption_releases(eventos: list[dict[str, Any]], periodo: str, *, omitidos: 
         linea = f"• {d.day} {_MES_ABREV[d.month - 1]} — {ev['banda_nombre']}"
         if obra:
             linea += f": {obra}"
+        # Cuentas fusionadas por el dedupe de flyer: una tarjeta, crédito a todas.
+        extra = ev.get("creditos_handles") or []
+        if extra:
+            linea += f" (con {' '.join(f'@{h}' for h in extra)})"
         lineas.append(linea)
-        h = ev.get("banda_handle")
-        if h and h not in handles:
-            handles.append(h)
+        for h in [ev.get("banda_handle"), *extra]:
+            if h and h not in handles:
+                handles.append(h)
     if omitidos:
         lineas.append(f"…y +{omitidos} lanzamientos más.")
     lineas += ["", "🔖 Guarda el post y comparte tu favorita."]
@@ -251,6 +312,8 @@ def build_releases_carousel(periodo: str, *, hoy: datetime | None = None,
     cx = db.connect()
     try:
         releases = releases_ventana(cx, dias, hoy=hoy, solo_frescos=solo_frescos)
+        releases = _fusionar_duplicados(releases)
+        _handles_creditos(cx, releases)
     finally:
         cx.close()
     if not releases:
