@@ -785,6 +785,24 @@ def lanzar_novedades() -> HTMLResponse:
         '<strong>Telegram</strong> en cuanto estén.')
 
 
+@app.post("/followees/sync", response_class=HTMLResponse)
+def sync_followees() -> HTMLResponse:
+    """Importa las cuentas que sigue @gdlscene como bandas candidatas (activa=0)."""
+    from src import import_followees
+    from src.ingest_ig import IngestRateLimited
+    try:
+        r = import_followees.importar()
+    except IngestRateLimited as exc:
+        return HTMLResponse(f"⚠️ IG limitó la sesión ({exc}) — reintenta en unas horas.")
+    except Exception as exc:  # noqa: BLE001 — mostrar el error en el panel, no tirar la GUI
+        return HTMLResponse(f"❌ {exc}")
+    if r["nuevas"]:
+        return HTMLResponse(
+            f'✅ <strong>{r["nuevas"]}</strong> candidatas nuevas (de {r["total"]} seguidas) · '
+            f'<a href="/bandas?todas=1">revisarlas</a>')
+    return HTMLResponse(f"✅ Sin cuentas nuevas — las {r['total']} seguidas ya están en la DB.")
+
+
 @app.post("/eventos/anunciar", response_class=HTMLResponse)
 def eventos_anunciar() -> HTMLResponse:
     """Lanza la sesión de anuncios (aprobación por Telegram), como Generar memes."""

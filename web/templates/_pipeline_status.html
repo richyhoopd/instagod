@@ -13,7 +13,15 @@
       🔄 Novedades
     </button>
   </form>
+  <form hx-post="/followees/sync" hx-target="#followees-msg" hx-swap="innerHTML"
+        hx-disabled-elt="find button" style="display:inline;">
+    <button type="submit"
+            title="Importa las cuentas que sigue @gdlscene como candidatas nuevas (tarda ~30s)">
+      📥 Sincronizar seguidas
+    </button>
+  </form>
   <span id="novedades-msg" style="margin-left:8px; font-size:13px;"></span>
+  <span id="followees-msg" style="margin-left:8px; font-size:13px;"></span>
 
   {% if corriendo or not vacio %}
   <div style="margin-top:10px; background:#0f1410; color:#cfe8d4; border-radius:8px; padding:12px 14px; font-size:13px;">
