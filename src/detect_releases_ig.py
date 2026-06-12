@@ -126,6 +126,57 @@ def _es_dupe(cx, band_id: int, source_post_id: str, titulo: str,
     return False
 
 
+def _dupe_cross_banda(cx, band_id: int, source_post_id: str, path: str | None,
+                      fecha_evento: str | None) -> dict[str, Any] | None:
+    """Release equivalente de OTRA banda: post colab (mismo shortcode) o el
+    mismo flyer re-subido (pHash ≤ umbral) con fecha cercana."""
+    from src import db
+
+    candidatos = db.rows(cx, """
+        SELECT id, band_id, source_post_id, fecha_evento, flyer_path, cover_url, creditos
+          FROM events WHERE tipo = 'release' AND band_id != ?
+    """, (band_id,))
+    for ev in candidatos:
+        if ev["source_post_id"] == source_post_id:
+            return ev
+    if not path:
+        return None
+    from pathlib import Path
+
+    from src.imghash import es_duplicado, phash
+
+    p = Path(path)
+    h = phash(p if p.is_absolute() else config.BASE_DIR / p)
+    if h is None:
+        return None
+    f_nuevo = _parse_fecha(fecha_evento)
+    for ev in candidatos:
+        f_viejo = _parse_fecha(ev.get("fecha_evento"))
+        if f_nuevo and f_viejo and abs((f_nuevo - f_viejo).days) > _VENTANA_DIAS:
+            continue
+        local = ev.get("flyer_path") or ev.get("cover_url") or ""
+        if not local or local.startswith("http"):
+            continue
+        q = Path(local)
+        q = q if q.is_absolute() else config.BASE_DIR / q
+        if not q.exists():
+            continue
+        hv = phash(q)
+        if hv is not None and es_duplicado(h, [hv]):
+            return ev
+    return None
+
+
+def _agregar_credito(cx, ev: dict[str, Any], band_id: int) -> None:
+    """Anexa band_id a creditos del event (sin duplicar ni acreditar al dueño)."""
+    from src import db
+
+    actuales = json.loads(ev.get("creditos") or "[]")
+    if band_id != ev["band_id"] and band_id not in actuales:
+        actuales.append(band_id)
+        db.update(cx, "events", ev["id"], creditos=json.dumps(actuales))
+
+
 def db_rows_releases(cx, band_id: int) -> list[dict[str, Any]]:
     """Releases existentes de la banda (para el dedupe)."""
     from src import db
@@ -145,7 +196,7 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
     from src import db
 
     resumen = {"revisados": 0, "releases_nuevos": 0, "saltados_dedupe": 0,
-               "fallidos": 0, "nuevos": []}
+               "fusionados": 0, "fallidos": 0, "nuevos": []}
     for post in posts:
         resumen["revisados"] += 1
         caption = (post.get("caption") or "").strip()
@@ -201,6 +252,18 @@ def detectar(cx, posts: list[dict[str, Any]]) -> dict[str, int]:
         existente = cx.execute(
             "SELECT id, tipo FROM events WHERE band_id=? AND source_post_id IN (?, ?)",
             (post["band_id"], shortcode, f"ig:{shortcode}")).fetchone()
+
+        # Post colab o flyer re-subido: el release ya existe a nombre de OTRA
+        # banda → una sola tarjeta; esta cuenta queda como crédito del caption.
+        if existente is None:
+            cross = _dupe_cross_banda(cx, post["band_id"], source_post_id,
+                                      post.get("path"), fecha_evento)
+            if cross is not None:
+                _agregar_credito(cx, cross, post["band_id"])
+                print(f"↷ {shortcode}: '{titulo}' ya existe de otra banda "
+                      f"(event {cross['id']}); crédito fusionado")
+                resumen["fusionados"] += 1
+                continue
 
         # Dedup vs Spotify/Deezer (otra fuente con el mismo título+fecha cercanos).
         if existente is None and _es_dupe(cx, post["band_id"], source_post_id,

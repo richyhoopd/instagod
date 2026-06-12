@@ -359,3 +359,74 @@ def test_backfill_ignora_analizados(cx, monkeypatch):
     monkeypatch.setattr(dr, "_llm_release", lambda cap, f: llamado.append(1) or {"es_release": False})
     dr.backfill_eventos(cx, dias=30, hoy=hoy)
     assert llamado == []  # no re-LLM lo ya analizado
+
+
+# ---------- dedupe cross-banda: post colab / mismo flyer re-subido ----------
+
+def test_post_colab_fusiona_credito(cx, monkeypatch):
+    """Mismo shortcode publicado por 2 bandas = 1 event con crédito, sin fila nueva."""
+    import json
+    a = _banda(cx, "CCÑA")
+    b = _banda(cx, "STADITCHE")
+    db.insert(cx, "events", band_id=a, tipo="release", titulo="La 4T Del Perreo",
+              fecha_evento="2026-06-10", source_post_id="COLAB1",
+              cover_url="data/photos/a/COLAB1_0.jpg", status="nuevo")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "La 4T Del Perreo", "fecha": "2026-06-10"})
+    res = dr.detectar(cx, [_post(b, shortcode="COLAB1",
+                                 path="data/photos/b/COLAB1_2.jpg",
+                                 fecha="2026-06-10")])
+    evs = _eventos(cx)
+    assert len(evs) == 1
+    assert res["fusionados"] == 1 and res["releases_nuevos"] == 0
+    assert json.loads(evs[0]["creditos"]) == [b]
+    # idempotente: el mismo post otra vez no duplica el crédito
+    dr.detectar(cx, [_post(b, shortcode="COLAB1",
+                           path="data/photos/b/COLAB1_2.jpg", fecha="2026-06-10")])
+    assert json.loads(_eventos(cx)[0]["creditos"]) == [b]
+
+
+def _flyer(tmp_path, nombre, seed):
+    import cv2
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    p = tmp_path / "data" / nombre
+    p.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(p), rng.integers(0, 255, (64, 64, 3), dtype=np.uint8))
+    return f"data/{nombre}"
+
+
+def test_mismo_flyer_otro_post_fusiona(cx, monkeypatch, tmp_path):
+    """Banda B re-sube el flyer de A como post propio (shortcode distinto)."""
+    import config as cfg
+    monkeypatch.setattr(cfg, "BASE_DIR", tmp_path)
+    f1 = _flyer(tmp_path, "f1.jpg", seed=7)
+    f2 = _flyer(tmp_path, "f2.jpg", seed=7)  # misma imagen, otro archivo
+    a = _banda(cx, "Banda A")
+    b = _banda(cx, "Banda B")
+    db.insert(cx, "events", band_id=a, tipo="release", titulo="EP Nuevo",
+              fecha_evento="2026-06-10", source_post_id="POST_A",
+              flyer_path=f1, cover_url=f1, status="nuevo")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "EP Nuevo", "fecha": "2026-06-11"})
+    res = dr.detectar(cx, [_post(b, shortcode="POST_B", path=f2, fecha="2026-06-11")])
+    assert res["fusionados"] == 1
+    assert len(_eventos(cx)) == 1
+
+
+def test_flyer_distinto_si_inserta(cx, monkeypatch, tmp_path):
+    """Imagen distinta = release distinto: se inserta normal."""
+    import config as cfg
+    monkeypatch.setattr(cfg, "BASE_DIR", tmp_path)
+    f1 = _flyer(tmp_path, "f1.jpg", seed=7)
+    f2 = _flyer(tmp_path, "f2.jpg", seed=8)
+    a = _banda(cx, "Banda A")
+    b = _banda(cx, "Banda B")
+    db.insert(cx, "events", band_id=a, tipo="release", titulo="EP Nuevo",
+              fecha_evento="2026-06-10", source_post_id="POST_A",
+              flyer_path=f1, cover_url=f1, status="nuevo")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": True, "titulo": "Otro EP", "fecha": "2026-06-11"})
+    res = dr.detectar(cx, [_post(b, shortcode="POST_B", path=f2, fecha="2026-06-11")])
+    assert res["fusionados"] == 0 and res["releases_nuevos"] == 1
+    assert len(_eventos(cx)) == 2
