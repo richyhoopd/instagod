@@ -106,3 +106,9 @@ def test_config_generos() -> None:
     import config
     assert isinstance(config.GENEROS, list) and len(config.GENEROS) >= 12
     assert "punk" in config.GENEROS and "rock" in config.GENEROS
+
+
+def test_migracion_creditos_releases(cx) -> None:
+    """Columna events.creditos (JSON de band_ids fusionados por dedupe de flyer)."""
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(events)")}
+    assert "creditos" in cols and "creditos" in db.TABLES["events"]

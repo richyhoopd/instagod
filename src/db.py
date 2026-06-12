@@ -44,7 +44,7 @@ TABLES: dict[str, set[str]] = {
     "events": {
         "band_id", "tipo", "fecha_evento", "titulo", "cover_url", "lugar", "ciudad",
         "flyer_path", "source_post_id", "parseado_por_llm", "status", "al_final",
-        "irrelevante",
+        "irrelevante", "creditos",
     },
     "content_queue": {
         "tipo", "band_id", "member_id", "photo_id", "event_id",
@@ -130,6 +130,9 @@ _MIGRATIONS = {
         # lista negra manual: fechas pasadas o fotos que no son flyers; la
         # clasificación recrearía el evento si se borrara, por eso es una marca.
         "irrelevante": "INTEGER NOT NULL DEFAULT 0",
+        # Dedupe cross-banda de releases: JSON list de band_ids que publicaron
+        # el mismo flyer (post colab); el caption los acredita con (con @handles).
+        "creditos": "TEXT",
     },
     "content_queue": {
         "meme_url": "TEXT",
