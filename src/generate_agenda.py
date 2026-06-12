@@ -187,19 +187,9 @@ def _chunks(items: list, n: int) -> list[list]:
     return [items[i:i + n] for i in range(0, len(items), n)] or [[]]
 
 
-def _phash(path) -> "Any | None":
-    """Hash perceptual (dHash 8x8) para detectar flyers visualmente iguales."""
-    import cv2
-    img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        return None
-    img = cv2.resize(img, (9, 8))
-    return (img[:, 1:] > img[:, :-1]).flatten()
-
-
-def _es_duplicado(h, vistos, umbral: int = 8) -> bool:
-    import numpy as np
-    return any(int(np.count_nonzero(h != v)) <= umbral for v in vistos)
+# Alias de módulo (no import directo en los call sites) para que los tests
+# puedan monkeypatchear generate_agenda._phash como siempre.
+from src.imghash import es_duplicado as _es_duplicado, phash as _phash  # noqa: E402, I001
 
 
 _IG_CAROUSEL_MAX = 10  # IG topa el carrusel en 10 (portada + 9 flyers)
