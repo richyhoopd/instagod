@@ -300,9 +300,14 @@ def plan_month(year: int, month: int, *, replan: bool = False) -> dict[str, int]
                   "Usa --replan para rehacerlo.")
             return {"existentes": len(existentes)}
         if existentes and replan:
-            cx.execute("""DELETE FROM content_queue WHERE status = ?
-                          AND substr(scheduled_datetime,1,7) = ?""",
-                       (db.QUEUE_BORRADOR, ini))
+            # Regenerar NO borra: marca el borrador previo como DESCARTADO. Así
+            # seleccionar() (que excluye TODA foto ya vista en la cola) trae fotos
+            # DISTINTAS, igual que quitar/eliminar ("lo que quitas no regresa").
+            # Borrarlas las sacaba de la cola y, como el ranking es determinista
+            # (nitidez DESC), el replan volvía a elegir EXACTAMENTE las mismas.
+            cx.execute("""UPDATE content_queue SET status = ?
+                          WHERE status = ? AND substr(scheduled_datetime,1,7) = ?""",
+                       (db.QUEUE_DESCARTADO, db.QUEUE_BORRADOR, ini))
             cx.commit()
 
         seleccion = seleccionar(cx, len(slots))

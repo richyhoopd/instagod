@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from src import db
-from src.planner import pick_replacement, reemplazar
+from src.planner import pick_replacement, plan_month, reemplazar
 
 
 def _band_con_foto(cx, nombre, prioridad=3, followers=100, n=1):
@@ -137,3 +137,46 @@ def test_lo_quitado_no_regresa(tmp_path, monkeypatch):
     assert r2["banda_nombre"] == "B"
     r3 = reemplazar(r2["id"])      # quito B → ya no hay nuevas → None (no revive A/C)
     assert r3 is None
+
+
+def test_replan_no_repite_las_mismas_fotos(tmp_path, monkeypatch):
+    """El bug reportado: regenerar el plan del mismo mes daba fotos IDÉNTICAS.
+
+    Cada banda tiene 2 fotos usables (nitidez distinta). El 1er plan toma la más
+    nítida de cada banda; regenerar debe traer la OTRA (no repetir), porque el
+    borrador previo queda DESCARTADO y seleccionar() lo excluye. Con el bug (DELETE
+    + ranking determinista por nitidez) el 2º plan salía igual al 1º.
+    """
+    import config
+    monkeypatch.setattr(config, "MONTHLY_CAP", {1: 5, 2: 2, 3: 1, 4: 1, 5: 1})
+    db_path = tmp_path / "t.db"
+    cx = db.connect(db_path)
+    db.init_db(cx)
+    for nombre in ("A", "B", "C"):                       # 3 bandas P3 (tope 1 c/u)
+        bid = db.insert(cx, "bands", nombre=nombre, prioridad=3,
+                        followers_ig=100, activa=1)
+        for i in range(2):                               # 2 fotos, nitidez distinta
+            db.insert(cx, "photos", band_id=bid, path=f"{nombre}_{i}.jpg",
+                      usable_meme=1, usada=0, descartada=0, nitidez=100 - i)
+    cx.close()
+
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+
+    def fotos_del_plan():
+        c = orig(db_path)
+        try:
+            return {r["photo_id"] for r in db.rows(
+                c, "SELECT photo_id FROM content_queue WHERE status = ?",
+                (db.QUEUE_BORRADOR,))}
+        finally:
+            c.close()
+
+    plan_month(2026, 8, replan=False)                    # 1er plan
+    primera = fotos_del_plan()
+    assert len(primera) == 3                             # 1 foto por banda
+
+    plan_month(2026, 8, replan=True)                     # regenerar
+    segunda = fotos_del_plan()
+    assert len(segunda) == 3
+    assert primera.isdisjoint(segunda)                   # NINGUNA foto se repite
