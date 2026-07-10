@@ -367,14 +367,41 @@ def build_releases_carousel(periodo: str, *, hoy: datetime | None = None,
     return _caption_releases(visibles, periodo, omitidos=omitidos), pngs, evento_ids
 
 
+def _fusionar_en(dst: dict[str, Any], src: dict[str, Any]) -> None:
+    """Funde src (grupo/evento descartado por flyer duplicado) en dst.
+
+    Mismo cartel subido por otra cuenta ⇒ UN solo slide, pero acreditando a
+    TODAS las bandas y @handles (regla de negocio: no perder a ningún uploader).
+    Tolera src sin listas de agrupado (cae a banda_nombre/banda_handle/id).
+    """
+    dst.setdefault("bandas", [dst["banda_nombre"]] if dst.get("banda_nombre") else [])
+    dst.setdefault("handles", [dst["banda_handle"]] if dst.get("banda_handle") else [])
+    dst.setdefault("ids", [dst["id"]])
+    src_bandas = src.get("bandas") or ([src["banda_nombre"]] if src.get("banda_nombre") else [])
+    src_handles = src.get("handles") or ([src["banda_handle"]] if src.get("banda_handle") else [])
+    src_ids = src.get("ids") or [src["id"]]
+    for b in src_bandas:
+        if b and b not in dst["bandas"]:
+            dst["bandas"].append(b)
+    for h in src_handles:
+        if h and h not in dst["handles"]:
+            dst["handles"].append(h)
+    for i in src_ids:
+        if i not in dst["ids"]:
+            dst["ids"].append(i)
+    dst["banda_nombre"] = " · ".join(dst["bandas"])
+
+
 def _unicos_flyers(eventos: list[dict[str, Any]]) -> tuple[list[tuple[dict, "Any"]], int]:
     """Dedup visual de flyers: devuelve [(evento, ruta_abs)] únicos + nº omitidos.
 
-    Solo entran eventos con flyer_path existente; descarta los visualmente
-    iguales (dos artistas subiendo el mismo cartel) vía _phash.
+    Solo entran eventos con flyer_path existente; los visualmente iguales (dos
+    artistas subiendo el mismo cartel) NO se pierden: se funden en el primero
+    (una sola tarjeta) acreditando a todas las bandas/@handles vía _fusionar_en.
     """
     from pathlib import Path
-    unicos, vistos = [], []
+    unicos: list[tuple[dict, "Any"]] = []
+    vistos: list[tuple["Any", dict]] = []  # (hash, grupo superviviente)
     for e in eventos:
         if not e.get("flyer_path"):
             continue
@@ -383,9 +410,13 @@ def _unicos_flyers(eventos: list[dict[str, Any]]) -> tuple[list[tuple[dict, "Any
         if not p.exists():
             continue
         h = _phash(p)
-        if h is None or _es_duplicado(h, vistos):
+        if h is None:
             continue
-        vistos.append(h)
+        dup = next((g for hv, g in vistos if _es_duplicado(h, [hv])), None)
+        if dup is not None:
+            _fusionar_en(dup, e)  # mismo flyer, otra cuenta: 1 slide, todos los tags
+            continue
+        vistos.append((h, e))
         unicos.append((e, p))
     omitidos = max(0, len([e for e in eventos if e.get("flyer_path")]) - len(unicos))
     return unicos, omitidos
@@ -397,7 +428,10 @@ def _caption_agenda(unicos: list[tuple[dict, "Any"]], periodo: str, rango: str,
 
     sufijo se añade al encabezado (p. ej. " (Parte 1/2)") cuando hay partes.
     """
-    grupos = agrupar_por_evento([e for e, _ in unicos])
+    # Los eventos ya vienen agrupados+fusionados (agrupar_por_evento +
+    # _unicos_flyers): NO re-agrupar aquí, o se pierden los @handles fusionados
+    # (agrupar_por_evento solo lee banda_handle, el primero). Usamos g['handles'].
+    grupos = [e for e, _ in unicos]
     lema = "semana" if periodo == "semanal" else "mes"
     lineas = [f"La agenda de la {lema} ({rango}){sufijo}:"]
     handles: list[str] = []
@@ -407,7 +441,8 @@ def _caption_agenda(unicos: list[tuple[dict, "Any"]], periodo: str, rango: str,
         if g.get("lugar"):
             linea += f" en {g['lugar']}"
         lineas.append(linea)
-        for h in g.get("handles", []):
+        gh = g.get("handles") or ([g["banda_handle"]] if g.get("banda_handle") else [])
+        for h in gh:
             if h and h not in handles:
                 handles.append(h)
     lineas += ["", "↗ Comparte y comenta a quién vas a ver."]

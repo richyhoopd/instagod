@@ -219,6 +219,65 @@ def test_build_agenda_partes_divide(tmp_path, monkeypatch) -> None:
     assert union == sorted(ids)
 
 
+def test_caption_agenda_etiqueta_todos_los_handles_fusionados() -> None:
+    """Un evento fusionado (varias cuentas mismo foro+fecha) tagea a TODOS.
+
+    Regresión: _caption_agenda re-agrupaba y solo leía banda_handle (el primero),
+    perdiendo a las bandas fusionadas por agrupar_por_evento.
+    """
+    from src.generate_agenda import _caption_agenda, agrupar_por_evento
+
+    evs = [
+        {"id": 1, "fecha_evento": "2026-07-12", "lugar": "Anexo Independencia",
+         "banda_nombre": "DSPlusMx", "banda_handle": "dsplusmx", "flyer_path": "a.jpg"},
+        {"id": 2, "fecha_evento": "2026-07-12", "lugar": "ANEXO INDEPENDENCIA",
+         "banda_nombre": "the greacks", "banda_handle": "the_greacks", "flyer_path": "b.jpg"},
+    ]
+    grupos = agrupar_por_evento(evs)
+    assert len(grupos) == 1  # mismo foro+fecha → un evento
+    cap = _caption_agenda([(grupos[0], "b.jpg")], "semanal", "12 al 18 de julio")
+    # AMBOS handles etiquetados (antes solo salía @dsplusmx).
+    assert "@dsplusmx" in cap
+    assert "@the_greacks" in cap
+
+
+def test_unicos_flyers_funde_dup_pero_conserva_todos_los_handles(tmp_path, monkeypatch) -> None:
+    """Dos eventos distintos que comparten el MISMO flyer (pHash) → 1 slide,
+    pero el evento superviviente acredita a las DOS bandas/@handles.
+
+    Regresión: _unicos_flyers descartaba el duplicado SIN fusionar sus handles.
+    """
+    from src import generate_agenda
+
+    p1 = tmp_path / "flyer_a.png"; p1.write_bytes(b"\x89PNG\r\n\x1a\n\x01")
+    p2 = tmp_path / "flyer_b.png"; p2.write_bytes(b"\x89PNG\r\n\x1a\n\x02")
+
+    # Mismo hash para ambas rutas → _es_duplicado los colapsa.
+    import numpy as np
+    same = np.zeros(64, dtype=bool)
+    monkeypatch.setattr(generate_agenda, "_phash", lambda path: same)
+
+    # Foros con texto distinto → agrupar_por_evento NO los fusionó; solo el pHash.
+    grupos = [
+        {"id": 10, "fecha_evento": "2026-07-12", "lugar": "Anexo Independencia",
+         "banda_nombre": "DSPlusMx", "banda_handle": "dsplusmx",
+         "bandas": ["DSPlusMx"], "handles": ["dsplusmx"], "ids": [10],
+         "flyer_path": str(p1)},
+        {"id": 20, "fecha_evento": "2026-07-12", "lugar": "Foro Anexo Independencia",
+         "banda_nombre": "the greacks", "banda_handle": "the_greacks",
+         "bandas": ["the greacks"], "handles": ["the_greacks"], "ids": [20],
+         "flyer_path": str(p2)},
+    ]
+    unicos, omitidos = generate_agenda._unicos_flyers(grupos)
+    assert len(unicos) == 1 and omitidos == 1      # un solo slide
+    superviviente = unicos[0][0]
+    assert set(superviviente["handles"]) == {"dsplusmx", "the_greacks"}
+    assert set(superviviente["ids"]) == {10, 20}
+    # el caption resultante etiqueta a los dos
+    cap = generate_agenda._caption_agenda(unicos, "semanal", "12 al 18 de julio")
+    assert "@dsplusmx" in cap and "@the_greacks" in cap
+
+
 def test_segmento_flag_llama_generar_segmento_no_main(monkeypatch) -> None:
     """--segmento debe invocar generar_segmento_agenda, nunca asyncio.run(main(...))."""
     import argparse
