@@ -10,6 +10,23 @@ def test_norm_venue_tolera_acentos_y_typos() -> None:
     assert _norm_venue(None) == ""
 
 
+def test_norm_venue_quita_prefijos_de_tipo_de_local() -> None:
+    """El mismo venue con o sin prefijo genérico colapsa en la misma clave."""
+    base = _norm_venue("Anexo Independencia")
+    assert base == "anexo independencia"
+    assert _norm_venue("Foro Anexo Independencia") == base
+    assert _norm_venue("FORO ANEXO INDEPENDENCIA") == base
+    assert _norm_venue("**Foro** Anexo Independencia") == base   # puntuación → espacio
+    assert _norm_venue("El Foro Anexo Independencia") == base
+    assert _norm_venue("Foro: Anexo Independencia") == base
+    assert _norm_venue("Salón Anexo Independencia") == base
+    assert _norm_venue("Centro Cultural Anexo Independencia") == base
+    # Conservador: solo quita UN prefijo al inicio; no toca nombres sin prefijo.
+    assert _norm_venue("C3 Stage") == "c3 stage"
+    # No fusiona lugares realmente distintos (el sufijo diferencia).
+    assert _norm_venue("Foro X") != _norm_venue("Foro Y")
+
+
 def _ev(i, fecha, banda, lugar, handle=None):
     return {"id": i, "fecha_evento": fecha, "banda_nombre": banda,
             "lugar": lugar, "banda_handle": handle}

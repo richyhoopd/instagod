@@ -174,9 +174,9 @@ def _fake_phash_unico():
 
 
 def test_build_agenda_partes_divide(tmp_path, monkeypatch) -> None:
-    """12 flyers agrupados → 2 partes: portada+9 (10 pngs) y 3 flyers (3 pngs).
+    """12 flyers agrupados → 2 partes: portada+9 (10 pngs) y 3 flyers+CTA (4 pngs).
 
-    Layout nuevo: portada SOLO en la parte 1, SIN slide de CTA en ninguna parte.
+    Layout: portada SOLO en la parte 1, slide de CTA cerrando la ÚLTIMA parte.
     """
     from src import compose as compose_mod
     from src import generate_agenda
@@ -205,16 +205,18 @@ def test_build_agenda_partes_divide(tmp_path, monkeypatch) -> None:
     assert len(partes) == 2
     assert [p["parte"] for p in partes] == [1, 2]
     assert all(p["partes"] == 2 for p in partes)
-    # Parte 1: portada + 9 flyers = 10 pngs; Parte 2: 3 flyers = 3 pngs (sin portada ni CTA).
+    # Parte 1: portada + 9 flyers = 10 pngs; Parte 2: 3 flyers + CTA = 4 pngs.
     assert len(partes[0]["pngs"]) == 10
-    assert len(partes[1]["pngs"]) == 3
+    assert len(partes[1]["pngs"]) == 4
     for p in partes:
         assert len(p["pngs"]) <= generate_agenda._IG_CAROUSEL_MAX
         assert "Parte" in p["caption"]
-    # 12 flyers + 1 portada (solo en parte 1) = 13 renders; CERO slides de CTA.
+    # 12 flyers + 1 portada (parte 1) + 1 CTA (última parte) = 14 renders.
     assert renders.count("agenda_flyer.html") == 12
     assert renders.count("agenda_cover.html") == 1
-    assert "agenda_cta.html" not in renders
+    assert renders.count("agenda_cta.html") == 1
+    # El CTA cierra el carrusel: última imagen de la última parte.
+    assert renders[-1] == "agenda_cta.html"
     union = sorted(eid for p in partes for eid in p["evento_ids"])
     assert union == sorted(ids)
 
@@ -278,6 +280,61 @@ def test_unicos_flyers_funde_dup_pero_conserva_todos_los_handles(tmp_path, monke
     assert "@dsplusmx" in cap and "@the_greacks" in cap
 
 
+def test_anexo_independencia_un_solo_slide_flyer_imagen1(tmp_path, monkeypatch) -> None:
+    """Las 5 filas del mismo show (incl. la variante 'foro …') → UN solo grupo,
+    UN flyer (el representativo DZs_DvOBMTB) y AMBOS @handles.
+
+    Regresión BUG 1: _norm_venue no quitaba el prefijo 'foro ' → la fila 614
+    ('foro anexo independencia') caía en un grupo aparte y producía un 2º slide.
+    """
+    from src import generate_agenda
+
+    # Cinco filas reales (mismo evento, cada cuenta subió su flyer). El flyer_path
+    # apunta a archivos dummy en tmp (solo deben existir para _unicos_flyers).
+    def flyer(nombre: str) -> str:
+        p = tmp_path / nombre
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + nombre.encode())
+        return str(p)
+
+    filas = [
+        {"id": 543, "fecha_evento": "2026-07-12", "lugar": "anexo independencia",
+         "banda_nombre": "DSPlusMx", "banda_handle": "dsplusmx",
+         "source_post_id": "DZs_DvOBMTB", "flyer_path": flyer("DZs_DvOBMTB_0.jpg")},
+        {"id": 614, "fecha_evento": "2026-07-12", "lugar": "foro anexo independencia",
+         "banda_nombre": "the greacks", "banda_handle": "the_greacks",
+         "source_post_id": "DZs-VeTBIa2", "flyer_path": flyer("DZs-VeTBIa2_0.jpg")},
+        {"id": 616, "fecha_evento": "2026-07-12", "lugar": "ANEXO INDEPENDENCIA",
+         "banda_nombre": "the greacks", "banda_handle": "the_greacks",
+         "source_post_id": "DZ9TSqqusaj", "flyer_path": flyer("DZ9TSqqusaj_0.jpg")},
+        {"id": 617, "fecha_evento": "2026-07-12", "lugar": "ANEXO INDEPENDENCIA",
+         "banda_nombre": "the greacks", "banda_handle": "the_greacks",
+         "source_post_id": "DZ6zLEbFYNH", "flyer_path": flyer("DZ6zLEbFYNH_0.jpg")},
+        {"id": 618, "fecha_evento": "2026-07-12", "lugar": "Anexo Independencia",
+         "banda_nombre": "the greacks", "banda_handle": "the_greacks",
+         "source_post_id": "DZs_DvOBMTB", "flyer_path": flyer("DZs_DvOBMTB_b.jpg")},
+    ]
+
+    grupos = generate_agenda.agrupar_por_evento(filas)
+    assert len(grupos) == 1  # las 5 filas caen en UN solo evento
+    g = grupos[0]
+    # Representativo = el PRIMER flyer del grupo (543 = DZs_DvOBMTB, "imagen 1").
+    assert g["source_post_id"] == "DZs_DvOBMTB"
+    assert set(g["handles"]) == {"dsplusmx", "the_greacks"}
+    assert set(g["ids"]) == {543, 614, 616, 617, 618}
+
+    # _phash único por ruta → si por alguna razón hubiera 2 grupos, NO se colapsarían
+    # por pHash (imágenes distintas); así el test valida el AGRUPADO, no el dedup visual.
+    monkeypatch.setattr(generate_agenda, "_phash", _fake_phash_unico())
+    unicos, _omit = generate_agenda._unicos_flyers(grupos)
+    assert len(unicos) == 1  # UN solo slide
+    ev, ruta = unicos[0]
+    assert ev["source_post_id"] == "DZs_DvOBMTB"  # se conserva la imagen 1
+    assert "DZs_DvOBMTB_0.jpg" in str(ruta)
+
+    cap = generate_agenda._caption_agenda(unicos, "semanal", "10 al 17 de julio")
+    assert "@dsplusmx" in cap and "@the_greacks" in cap
+
+
 def test_segmento_flag_llama_generar_segmento_no_main(monkeypatch) -> None:
     """--segmento debe invocar generar_segmento_agenda, nunca asyncio.run(main(...))."""
     import argparse
@@ -306,7 +363,7 @@ def test_segmento_flag_llama_generar_segmento_no_main(monkeypatch) -> None:
 
 
 def test_build_agenda_partes_una_parte(tmp_path, monkeypatch) -> None:
-    """3 flyers → 1 sola parte: portada + 3 flyers = 4 pngs, sin 'Parte' ni CTA."""
+    """3 flyers → 1 sola parte: portada + 3 flyers + CTA = 5 pngs, sin 'Parte'."""
     from src import compose as compose_mod
     from src import generate_agenda
 
@@ -332,8 +389,11 @@ def test_build_agenda_partes_una_parte(tmp_path, monkeypatch) -> None:
     p = partes[0]
     assert p["parte"] == 1 and p["partes"] == 1
     assert "Parte" not in p["caption"]
-    assert len(p["pngs"]) == 4  # portada + 3 flyers, sin CTA
-    assert "agenda_cta.html" not in renders
+    assert len(p["pngs"]) == 5  # portada + 3 flyers + CTA
+    # Orden: portada primero, CTA como cierre.
+    assert renders[0] == "agenda_cover.html"
+    assert renders[-1] == "agenda_cta.html"
+    assert renders.count("agenda_cta.html") == 1
     assert sorted(p["evento_ids"]) == sorted(ids)
 
 

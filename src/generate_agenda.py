@@ -32,12 +32,32 @@ from src import compose as compose_mod
 from src.generate_anuncios import _MESES
 
 
+# Prefijos genéricos de "tipo de local" que NO identifican el venue: el mismo
+# lugar se anuncia con o sin ellos ("Foro Anexo Independencia" == "Anexo
+# Independencia"). Se listan normalizados (sin acentos, minúsculas). Conservador
+# a propósito: solo genéricos inequívocos y solo si están AL INICIO, para no
+# fusionar lugares realmente distintos. Orden: los de más palabras primero.
+_PREFIJOS_VENUE = (
+    "centro cultural", "el foro", "foro", "salon", "sala", "bar",
+)
+
+
 def _norm_venue(s: str | None) -> str:
-    """Normaliza un lugar para comparar: sin acentos, minúsculas, solo alfanum."""
+    """Normaliza un lugar para comparar: sin acentos, minúsculas, solo alfanum.
+
+    Colapsa además variantes del mismo venue quitando prefijos genéricos de tipo
+    de local (ver _PREFIJOS_VENUE): "Foro Anexo" y "Anexo" caen en el mismo grupo.
+    """
     if not s:
         return ""
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", s.lower())).strip()
+    # Puntuación → espacio (colapsa "foro:", "**foro**" contra "foro ").
+    s = re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+    for pref in _PREFIJOS_VENUE:  # quita UN prefijo genérico al inicio
+        if s.startswith(pref + " "):
+            s = s[len(pref) + 1:].strip()
+            break
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def agrupar_por_evento(eventos: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -493,12 +513,17 @@ def build_agenda_carousel(periodo: str, *, hoy: datetime | None = None) -> tuple
     return caption, pngs
 
 
+_COVER = object()  # sentinela de slot de portada (solo en la parte 1)
+_CTA = object()    # sentinela de slot de CTA (solo al final de la última parte)
+
+
 def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[dict[str, Any]]:
     """Reparte TODOS los flyers en partes que llenan el carrusel (≤10 slides).
 
-    Layout: la PORTADA va SOLO en la parte 1 (ocupa 1 slot), y NINGUNA parte
-    lleva slide de CTA (el CTA vive en el CAPTION, que _caption_agenda ya pone).
-    Así Parte 1 = portada + ≤9 flyers (10 slides) y Partes 2+ = ≤10 flyers.
+    Layout: la PORTADA va SOLO en la parte 1 (ocupa 1 slot) y el slide de CTA
+    (agenda_cta.html) cierra la ÚLTIMA parte (ocupa 1 slot). El CTA sigue TAMBIÉN
+    en el caption (_caption_agenda), pero el usuario quiere la imagen de cierre.
+    Orden por parte: [portada, flyers…] la 1ª y […flyers, CTA] la última.
     Un evento (fecha+foro) = un solo flyer (agrupamos antes del dedup visual),
     igual que la GUI y el caption. Devuelve dicts {caption, pngs, evento_ids,
     parte, partes}; [] si no hay flyers con imagen y fecha en la ventana.
@@ -521,10 +546,14 @@ def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[di
     kicker = "la escena, esta semana" if periodo == "semanal" else "la escena, este mes"
     rango = _rango_shows(hoy, dias)
 
-    # Parte 1 cede 1 slot a la portada → hasta 9 flyers; partes 2+ hasta 10.
-    primero = unicos[:_IG_CAROUSEL_MAX - 1]
-    resto = _chunks(unicos[_IG_CAROUSEL_MAX - 1:], _IG_CAROUSEL_MAX)
-    bloques = [primero] + [b for b in resto if b]
+    # Empaquetado con slots: portada al frente + flyers + CTA al final, cortado
+    # en bloques de ≤10. La portada cae en la parte 1 y el CTA en la última.
+    tokens: list[Any] = [_COVER, *unicos, _CTA]
+    bloques = _chunks(tokens, _IG_CAROUSEL_MAX)
+    # Evita una última parte con SOLO el CTA (pasa si flyers+portada llenan justo
+    # el bloque): baja un flyer del bloque anterior para que comparta parte.
+    if len(bloques) > 1 and bloques[-1] == [_CTA]:
+        bloques[-1] = [bloques[-2].pop(), _CTA]
     partes_n = len(bloques)
     total = len(unicos)
 
@@ -532,24 +561,31 @@ def build_agenda_partes(periodo: str, *, hoy: datetime | None = None) -> list[di
     pagina = 0  # índice corrido del flyer sobre el total
     for k, bloque in enumerate(bloques, start=1):
         pngs: list[str] = []
-        if k == 1:  # la portada solo en la primera parte
-            ctx = {"kicker": kicker, "rango": rango, "parte": 1, "partes": partes_n}
-            cover = compose_mod.render_card("agenda_cover.html", ctx, prefix="agenda_cover")
-            pngs.append(str(cover))
-        for e, p in bloque:
-            pagina += 1
-            png = compose_mod.render_card("agenda_flyer.html", {
-                "flyer_url": compose_mod._to_src(str(p)),
-                "pagina": pagina, "paginas": total,
-            }, prefix="agenda_flyer")
-            pngs.append(str(png))
-        # Sin slide de CTA: el CTA va en el caption (_caption_agenda lo agrega).
+        flyers: list[tuple[dict, Any]] = []
+        for tok in bloque:
+            if tok is _COVER:
+                ctx = {"kicker": kicker, "rango": rango, "parte": 1, "partes": partes_n}
+                cover = compose_mod.render_card("agenda_cover.html", ctx, prefix="agenda_cover")
+                pngs.append(str(cover))
+            elif tok is _CTA:
+                cta = compose_mod.render_card("agenda_cta.html", {"kicker": kicker},
+                                              prefix="agenda_cta")
+                pngs.append(str(cta))
+            else:
+                e, p = tok
+                pagina += 1
+                png = compose_mod.render_card("agenda_flyer.html", {
+                    "flyer_url": compose_mod._to_src(str(p)),
+                    "pagina": pagina, "paginas": total,
+                }, prefix="agenda_flyer")
+                pngs.append(str(png))
+                flyers.append((e, p))
 
         sufijo = f" (Parte {k}/{partes_n})" if partes_n > 1 else ""
-        caption = _caption_agenda(bloque, periodo, rango, sufijo=sufijo)
+        caption = _caption_agenda(flyers, periodo, rango, sufijo=sufijo)
         salida.append({
             "caption": caption, "pngs": pngs,
-            "evento_ids": [e["id"] for e, _ in bloque],
+            "evento_ids": [e["id"] for e, _ in flyers],
             "parte": k, "partes": partes_n,
         })
     return salida
