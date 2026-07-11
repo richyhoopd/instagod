@@ -370,7 +370,8 @@ def plan(request: Request, mes: str | None = None) -> HTMLResponse:
             SELECT q.id, q.tema_semilla, q.scheduled_datetime, q.photo_id,
                    b.nombre AS banda_nombre, b.tipo, b.prioridad, b.followers_ig
               FROM content_queue q JOIN bands b ON b.id = q.band_id
-             WHERE q.status = ? AND substr(q.scheduled_datetime,1,7) = ?
+             WHERE q.status = ? AND q.aprobacion IS NULL
+               AND substr(q.scheduled_datetime,1,7) = ?
              ORDER BY q.scheduled_datetime
         """, (db.QUEUE_BORRADOR, ym))
         bandas = len({p["banda_nombre"] for p in posts})
@@ -455,31 +456,29 @@ def plan_eliminar(request: Request, queue_id: int) -> HTMLResponse:
 
 @app.post("/plan/enviar", response_class=HTMLResponse)
 def plan_enviar(mes: str = Form("")) -> HTMLResponse:
-    """Marca el plan del mes como 'listo' y lanza el envío masivo a Telegram."""
+    """Lanza el envío ASÍNCRONO del plan a Telegram (compatible con el daemon).
+
+    Ya NO abre un poller propio (viejo generate_plan): usa src.send_plan, que
+    encola cada meme a 'pendiente' y lo manda con botones. El approval-daemon
+    (único poller) resuelve las aprobaciones — de hecho lo REQUIERE vivo.
+    """
     ym = _mes_actual_plan(mes or None)
-    if _daemon_poller_activo():
-        return HTMLResponse(_MSG_DAEMON_POLLER)
-    if _telegram_busy():
-        return HTMLResponse('⚠️ Ya hay una sesión de Telegram activa. Espera a que termine.')
     cx = db.connect()
     try:
-        cx.execute("""UPDATE content_queue SET status = ?
-                       WHERE status = ? AND substr(scheduled_datetime,1,7) = ?""",
-                   (db.QUEUE_LISTO, db.QUEUE_BORRADOR, ym))
-        cx.commit()
-        n = db.rows(cx, "SELECT COUNT(*) c FROM content_queue WHERE status=? AND substr(scheduled_datetime,1,7)=?",
-                    (db.QUEUE_LISTO, ym))[0]["c"]
+        n = db.rows(cx, "SELECT COUNT(*) c FROM content_queue "
+                    "WHERE status=? AND aprobacion IS NULL AND tipo='meme' "
+                    "AND substr(scheduled_datetime,1,7)=?",
+                    (db.QUEUE_BORRADOR, ym))[0]["c"]
     finally:
         cx.close()
-    import subprocess
-    import sys
-    log = open(config.BASE_DIR / "data" / "generate_plan.log", "w")  # noqa: SIM115
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-    subprocess.Popen([sys.executable, "-u", "-m", "src.generate_plan", "--mes", ym],
-                     cwd=config.BASE_DIR, stdout=log, stderr=subprocess.STDOUT, env=env)
-    return HTMLResponse(f'🚀 Enviando {n} post(s) de {ym} a <strong>Telegram</strong>. '
-                        'Se componen y llegan UNO POR UNO (el primero en ~30s). '
-                        'Aprueba/regenera cada uno conforme lleguen.')
+    if not n:
+        return HTMLResponse(f'No hay borradores por mandar en {ym} '
+                            '(¿ya los enviaste todos?).')
+    bloqueo = _lanzar_sesion("src.send_plan", "--mes", ym)
+    return bloqueo or HTMLResponse(
+        f'🚀 Enviando {n} post(s) de {ym} a <strong>Telegram</strong>. '
+        'Se componen y llegan UNO POR UNO (el primero en ~30s). '
+        'Aprueba/regenera cada uno conforme lleguen (los procesa el daemon).')
 
 
 # ---------- Cola: qué está por sincronizar al Sheet ----------

@@ -149,3 +149,73 @@ def test_pick_replacement_sin_candidatas_devuelve_none(tmp_path) -> None:
     db.insert(cx, "bands", nombre="Vacia", activa=1)   # sin fotos usables
     assert pick_replacement(cx, "2026-07") is None
     cx.close()
+
+
+# ---------- FIX A: plan_month solo agenda slots FUTUROS ----------
+
+def test_plan_month_salta_slots_pasados(tmp_path, monkeypatch) -> None:
+    """Estando a 10-jul, plan_month(2026,7) NO crea posts de los días 1..10 pasados."""
+    from datetime import datetime as _dt
+
+    from src import planner
+    db_path = tmp_path / "t.db"
+    cx = db.connect(db_path)
+    db.init_db(cx)
+    for i in range(60):                 # pool amplio para llenar todos los slots
+        _seed(cx, f"B{i}", 1, 1000, 5)
+    cx.close()
+
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+
+    class _FakeDT(_dt):                  # ahora = 2026-07-10 15:00 CDMX
+        @classmethod
+        def now(cls, tz=None):
+            base = _dt(2026, 7, 10, 15, 0)
+            return tz.localize(base) if tz else base
+    monkeypatch.setattr(planner, "datetime", _FakeDT)
+
+    res = planner.plan_month(2026, 7, replan=True)
+    assert res["posts"] > 0
+
+    cx = orig(db_path)
+    fechas = [f["scheduled_datetime"] for f in db.rows(
+        cx, "SELECT scheduled_datetime FROM content_queue "
+            "WHERE status='borrador' AND substr(scheduled_datetime,1,7)='2026-07'")]
+    cx.close()
+    assert fechas, "debió crear borradores del resto del mes"
+    assert all(f[8:10] >= "10" for f in fechas)          # nada de los días 1..9
+    assert min(fechas) >= "2026-07-10T15:00"             # nada antes de ahora
+    dia10 = [f for f in fechas if f[8:10] == "10"]        # día de hoy: solo > 15:00
+    assert dia10 and all(f[11:16] > "15:00" for f in dia10)
+
+
+def test_plan_month_mes_futuro_sigue_completo(tmp_path, monkeypatch) -> None:
+    """Un mes futuro (agosto) NO se filtra: mantiene el día 1."""
+    from datetime import datetime as _dt
+
+    from src import planner
+    db_path = tmp_path / "t.db"
+    cx = db.connect(db_path)
+    db.init_db(cx)
+    for i in range(60):
+        _seed(cx, f"B{i}", 1, 1000, 5)
+    cx.close()
+
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+
+    class _FakeDT(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            base = _dt(2026, 7, 10, 15, 0)
+            return tz.localize(base) if tz else base
+    monkeypatch.setattr(planner, "datetime", _FakeDT)
+
+    planner.plan_month(2026, 8, replan=True)
+    cx = orig(db_path)
+    fechas = [f["scheduled_datetime"] for f in db.rows(
+        cx, "SELECT scheduled_datetime FROM content_queue "
+            "WHERE status='borrador' AND substr(scheduled_datetime,1,7)='2026-08'")]
+    cx.close()
+    assert any(f[8:10] == "01" for f in fechas)          # agosto arranca el día 1

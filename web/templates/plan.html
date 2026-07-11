@@ -18,7 +18,8 @@
     <button type="submit" title="Crea/rehace el plan de {{ mes }} con las prioridades actuales">⚙️ Generar plan de este mes</button>
   </form>
   <button hx-post="/plan/enviar" hx-vals='{"mes": "{{ mes }}"}' hx-target="#plan-msg" hx-swap="innerHTML"
-          hx-confirm="¿Mandar los {{ posts|length }} posts a Telegram para aprobar?">📤 Mandar todo a Telegram</button>
+          title="Manda cada meme a Telegram con botones ✅/❌/🔄/🎨. Los procesa el daemon de aprobación (déjalo corriendo)."
+          hx-confirm="¿Mandar los {{ posts|length }} posts a Telegram para aprobar? (los procesa el daemon de aprobación)">📤 Mandar todo a Telegram</button>
   <span class="muted" style="font-size:13px;">Topes: P1=5/mes · P2=2/mes · P3-P5=1/mes. Sube prioridad en Bandas para más posts.</span>
   <span id="plan-msg" class="muted"></span>
 </div>

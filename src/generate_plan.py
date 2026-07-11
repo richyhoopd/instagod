@@ -1,5 +1,11 @@
 """Envío masivo del plan mensual a Telegram (badges → aprobación).
 
+DEPRECADO (flujo BLOQUEANTE): abre su PROPIO poller vía
+telegram_bot.run_approval_batch y por eso CHOCA con el approval-daemon (único
+poller permitido). El botón "Mandar todo a Telegram" de /plan ya NO lo usa; ahora
+lanza `src.send_plan` (async, compatible con el daemon). Se conserva solo como
+camino manual para cuando el daemon NO está corriendo.
+
 Lee las filas `content_queue` (status='listo') del mes, genera caption + imagen
 de cada una y las manda TODAS a Telegram en un solo lote. Por cada post puedes:
   ✅ Aprobar · ❌ Rechazar · 🔄 Regenerar, o responder con 'texto:'/'feedback:'.

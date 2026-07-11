@@ -288,7 +288,13 @@ def plan_month(year: int, month: int, *, replan: bool = False) -> dict[str, int]
     try:
         db.init_db(cx)
         slots = _slots_del_mes(year, month)
-        ini = slots[0].isoformat()[:7]  # 'YYYY-MM'
+        # FIX A: no revivir slots ya pasados. plan_month(mes_en_curso) solo agenda
+        # de HOY en adelante (para meses futuros no filtra nada: todos los slots
+        # son > ahora). Referencia timezone-aware (config.TIMEZONE), igual que el
+        # resto del motor (approval/segment_runner).
+        ahora = datetime.now(pytz.timezone(config.TIMEZONE))
+        slots = [s for s in slots if s > ahora]
+        ini = f"{year:04d}-{month:02d}"  # 'YYYY-MM' (no dependas de slots[0])
 
         # Idempotencia: si ya hay borrador para ese mes, no dupliques (o rehaz).
         existentes = db.rows(cx, """
@@ -309,6 +315,10 @@ def plan_month(year: int, month: int, *, replan: bool = False) -> dict[str, int]
                           WHERE status = ? AND substr(scheduled_datetime,1,7) = ?""",
                        (db.QUEUE_DESCARTADO, db.QUEUE_BORRADOR, ini))
             cx.commit()
+
+        if not slots:
+            print(f"No quedan slots futuros en {ini} (el mes ya transcurrió).")
+            return {"posts": 0, "bandas": 0, "slots": 0}
 
         seleccion = seleccionar(cx, len(slots))
         if not seleccion:
