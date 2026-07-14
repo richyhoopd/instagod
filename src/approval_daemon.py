@@ -27,6 +27,7 @@ tests/test_approval.py):
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 
 from telegram import Update
@@ -40,7 +41,7 @@ from telegram.ext import (
 
 import bot  # se REUSAN sus handlers (no se mueve su lógica)
 import config
-from src import approval, audience, db, poller_lock
+from src import approval, audience, daemon_health, db, poller_lock
 
 
 def _pretty(slot_iso: str) -> str:
@@ -143,12 +144,40 @@ async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await _resolver_msg(query, "❌ Rechazado")
 
 
+async def _latido_loop(app: Application) -> None:
+    """Escribe el latido cada N segundos SÓLO si el updater está corriendo.
+
+    Si el loop se congela, esta corrutina deja de correr → latido viejo. Si el
+    updater muere pero el loop vive, el guard `updater.running` omite la escritura
+    → latido viejo. En ambos casos el watchdog externo reinicia el daemon.
+    """
+    # Latido inicial inmediato: cubre la ventana de arranque (antes de que el
+    # updater levante) para que el watchdog no reinicie un daemon sano recién
+    # nacido. Si el updater NUNCA levanta (bootstrap atascado), este latido
+    # envejece y el watchdog reinicia — correcto.
+    daemon_health.escribir_latido()
+    while True:
+        try:
+            if app.updater is not None and app.updater.running:
+                daemon_health.escribir_latido()
+        except Exception as e:  # el latido jamás debe tumbar el daemon
+            print(f"WARNING latido: {e}", file=sys.stderr)
+        await asyncio.sleep(daemon_health.LATIDO_INTERVALO_SEG)
+
+
+async def _post_init(app: Application) -> None:
+    app.create_task(_latido_loop(app))
+
+
 def main() -> None:
     if not config.TELEGRAM_CHAT_ID:
         raise RuntimeError("Falta TELEGRAM_CHAT_ID en el .env")
     poller_lock.adquirir()
 
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    app = (Application.builder()
+           .token(config.TELEGRAM_BOT_TOKEN)
+           .post_init(_post_init)
+           .build())
     solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))
 
     # Flujo asíncrono (motor): aprobar/rechazar + regenerar/plantilla (patrones
@@ -165,7 +194,10 @@ def main() -> None:
     app.add_error_handler(bot.on_error)
 
     print("Daemon de aprobación (único poller) escuchando. Ctrl+C para salir.")
-    app.run_polling(drop_pending_updates=True)
+    # bootstrap_retries=-1: un parpadeo de red al ARRANCAR reintenta indefinido
+    # en vez de tumbar el poller (fue el gatillo del incidente 14/jul). El
+    # watchdog (com.gdlscene.daemon-watchdog) cubre las caídas ya en marcha.
+    app.run_polling(drop_pending_updates=True, bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
