@@ -135,8 +135,14 @@ FACE_DET_SCORE_MIN = float(_get("FACE_DET_SCORE_MIN", "0.6") or "0.6")
 # corpus son CHICAS — con 0.05 solo 4 de 120 fotos conservaban alguna cara, y
 # el propio fixture de esta tarea perdía una de sus dos. Con 0.01 quedan 34.
 FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.01") or "0.01")
-# Similitud coseno de SFace para "misma persona" (valor del sample de OpenCV).
-FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.363") or "0.363")
+# Similitud coseno de SFace para "misma persona". El sample de OpenCV usa
+# 0.363, calibrado para verificación 1-a-1 en LFW; sobre ESTE acervo (90 pares
+# de caras distintas en la misma foto, 75 pares de la misma cara) 0.363 fundía
+# a dos personas distintas el 7.8% de las veces contra 3.3% en 0.45. Los dos
+# errores no cuestan igual: fundir integrantes deja a uno sin cobertura (el
+# objetivo del banco), mientras que partir a uno en dos grupos solo produce
+# personas de más, que la GUI fusiona con un botón.
+FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.45") or "0.45")
 MODELS_DIR = _get("MODELS_DIR", "./data/models")
 
 # ---------- Base de datos local (SQLite) ----------

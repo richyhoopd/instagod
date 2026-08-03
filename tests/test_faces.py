@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
+import config
 from src import faces
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "caras" / "dos_personas.jpg"
@@ -81,7 +82,11 @@ def test_dos_personas_distintas_no_se_agrupan() -> None:
     img = cv2.imread(str(_FIXTURE))
     caras = faces.detectar(img)
     firmas = [faces.firma(img, c) for c in caras]
-    assert len(faces.agrupar(firmas, umbral=0.363)) == 2
+    # Umbral desde config, no literal: este test sigue la calibración.
+    # Medido: estas dos caras dan similitud 0.388 — con el 0.363 del sample de
+    # OpenCV se fundirían en una sola persona, que es justo el fallo que el
+    # banco no puede permitirse.
+    assert len(faces.agrupar(firmas, config.FACE_COS_MISMA_PERSONA)) == 2
 
 
 def test_detectar_imagen_sin_caras() -> None:
