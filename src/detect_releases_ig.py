@@ -316,11 +316,19 @@ def _registrar_show(cx, post: dict[str, Any], data: dict[str, Any],
         return False
     # photos.fecha es DATETIME del post: el fallback también se trunca a día.
     fecha = str(data.get("fecha") or post.get("fecha") or "")[:10] or None
-    db.insert(cx, "events", band_id=post["band_id"], tipo="fecha",
-              titulo=(data.get("titulo") or None), fecha_evento=fecha,
-              lugar=(data.get("lugar") or None), ciudad=(data.get("ciudad") or None),
-              flyer_path=post.get("path"), cover_url=post.get("path"),
-              source_post_id=llave, status="nuevo", parseado_por_llm=1)
+    lugar = (data.get("lugar") or None)
+    eid = db.insert(cx, "events", band_id=post["band_id"], tipo="fecha",
+                    titulo=(data.get("titulo") or None), fecha_evento=fecha,
+                    lugar=lugar, ciudad=(data.get("ciudad") or None),
+                    flyer_path=post.get("path"), cover_url=post.get("path"),
+                    source_post_id=llave, status="nuevo", parseado_por_llm=1)
+    if lugar:
+        from src import venues
+        vid = venues.resolver(cx, lugar)
+        if vid is not None:
+            db.update(cx, "events", eid, venue_id=vid)
+        else:
+            venues.registrar_desconocido(cx, lugar)
     print(f"✓ {llave}: show '{data.get('titulo') or '?'}' ({fecha})")
     return True
 

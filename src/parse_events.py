@@ -110,6 +110,14 @@ def parse_event(cx, evento: dict[str, Any]) -> str:
         cambios["tipo"] = data["tipo"]
     db.update(cx, "events", evento["id"], **cambios)
 
+    if cambios.get("lugar"):
+        from src import venues
+        vid = venues.resolver(cx, cambios["lugar"])
+        if vid is not None:
+            db.update(cx, "events", evento["id"], venue_id=vid)
+        else:
+            venues.registrar_desconocido(cx, cambios["lugar"])
+
     detalle = {k: v for k, v in cambios.items() if k != "parseado_por_llm"}
     return f"→ {detalle}" if detalle else "parseado: sin datos nuevos"
 

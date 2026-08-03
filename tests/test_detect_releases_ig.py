@@ -10,6 +10,7 @@ import pytest
 
 from src import db
 from src import detect_releases_ig as dr
+from src import venues
 
 
 @pytest.fixture()
@@ -262,6 +263,32 @@ def test_show_por_caption_crea_evento_fecha(cx, monkeypatch):
     assert ev[0]["source_post_id"] == "DZLcf0Rkans"
     assert ev[0]["flyer_path"] == "p/x.jpg"  # servible por /flyer/{id}
     assert res["releases_nuevos"] == 1  # cuenta como evento detectado
+
+
+def test_show_resuelve_venue_id(cx, monkeypatch):
+    """Si el lugar del caption ya está en el catálogo, el show sale ligado."""
+    bid = _banda(cx, "Angel")
+    vid = db.insert(cx, "venues", nombre="Foro X")
+    venues.asignar_alias(cx, vid, "Foro X")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": False, "es_show": True, "titulo": "La 4T Del Perreo",
+        "fecha": "2026-06-10", "lugar": "Foro X", "ciudad": "Guadalajara"})
+    dr.detectar(cx, [_post(bid, shortcode="DZLcf0Rkans",
+                           caption="Miércoles 10 de junio 7:30pm", path="p/x.jpg")])
+    ev = db.rows(cx, "SELECT * FROM events WHERE band_id=?", (bid,))[0]
+    assert ev["venue_id"] == vid
+
+
+def test_show_deja_huerfano_lo_no_resuelto(cx, monkeypatch):
+    bid = _banda(cx, "Angel")
+    monkeypatch.setattr(dr, "_llm_release", lambda cap, f: {
+        "es_release": False, "es_show": True, "titulo": "La 4T Del Perreo",
+        "fecha": "2026-06-10", "lugar": "Foro Jamás Visto", "ciudad": None})
+    dr.detectar(cx, [_post(bid, shortcode="DZLcf0Rkans",
+                           caption="Miércoles 10 de junio 7:30pm", path="p/x.jpg")])
+    ev = db.rows(cx, "SELECT * FROM events WHERE band_id=?", (bid,))[0]
+    assert ev["venue_id"] is None
+    assert [h["alias_visto"] for h in venues.huerfanos(cx)] == ["Foro Jamás Visto"]
 
 
 def test_show_no_pisa_evento_flyer_existente(cx, monkeypatch):

@@ -197,3 +197,62 @@ def test_sembrar_ignora_eventos_sin_lugar(cx) -> None:
     _evento(cx, bid, "")
     res = venues_seed.sembrar(cx, _llm=lambda pendientes: [])
     assert res["huerfanos"] == 0
+
+
+def test_backfill_llena_venue_id(cx) -> None:
+    vid = db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.asignar_alias(cx, vid, "Hake al Rey")
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    con = _evento(cx, bid, "HAKE AL REY")
+    sin = _evento(cx, bid, "Foro Desconocido")
+    assert venues_seed.backfill_eventos(cx) == 1
+    assert db.get(cx, "events", con)["venue_id"] == vid
+    assert db.get(cx, "events", sin)["venue_id"] is None
+
+
+def test_backfill_es_idempotente(cx) -> None:
+    vid = db.insert(cx, "venues", nombre="Cuerda")
+    venues.asignar_alias(cx, vid, "Cuerda Cultura")
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "cuerda cultura")
+    venues_seed.backfill_eventos(cx)
+    assert venues_seed.backfill_eventos(cx) == 1
+
+
+def test_backfill_deja_huerfano_lo_no_resuelto(cx) -> None:
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "Foro Nunca Visto")
+    venues_seed.backfill_eventos(cx)
+    assert [h["alias_visto"] for h in venues.huerfanos(cx)] == ["Foro Nunca Visto"]
+
+
+def test_parse_event_resuelve_venue_id(cx, monkeypatch) -> None:
+    """Al guardar el lugar, el evento queda ligado al foro si ya se conoce."""
+    from src import parse_events
+    vid = db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.asignar_alias(cx, vid, "Hake al Rey")
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    eid = db.insert(cx, "events", band_id=bid, tipo="flyer", source_post_id="X")
+    # `parse_event` arma el prompt de OCR + caption; sin flyer en disco y sin
+    # foto en `photos` no habría texto, así que sembramos el caption.
+    db.insert(cx, "photos", band_id=bid, path="p.jpg", source_post_id="X",
+              caption_original="tocada el sabado")
+    monkeypatch.setattr(parse_events, "_llm_extraer",
+                        lambda prompt: {"tipo": "fecha", "fecha": "2026-08-23",
+                                        "lugar": "HAKE AL REY", "ciudad": None})
+    parse_events.parse_event(cx, db.get(cx, "events", eid))
+    assert db.get(cx, "events", eid)["venue_id"] == vid
+
+
+def test_parse_event_deja_huerfano_lo_no_resuelto(cx, monkeypatch) -> None:
+    from src import parse_events
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    eid = db.insert(cx, "events", band_id=bid, tipo="flyer", source_post_id="Y")
+    db.insert(cx, "photos", band_id=bid, path="p.jpg", source_post_id="Y",
+              caption_original="tocada el sabado")
+    monkeypatch.setattr(parse_events, "_llm_extraer",
+                        lambda prompt: {"tipo": "fecha", "fecha": "2026-08-23",
+                                        "lugar": "Foro Jamás Visto", "ciudad": None})
+    parse_events.parse_event(cx, db.get(cx, "events", eid))
+    assert db.get(cx, "events", eid)["venue_id"] is None
+    assert [h["alias_visto"] for h in venues.huerfanos(cx)] == ["Foro Jamás Visto"]

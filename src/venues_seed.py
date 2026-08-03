@@ -205,3 +205,48 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
             "huerfanos": len(venues.huerfanos(cx)),
             "pendientes_llm": len(pendientes),
             "grupos_invalidos": grupos_invalidos}
+
+
+def backfill_eventos(cx) -> int:
+    """Resuelve `venue_id` de todos los eventos con lugar. Devuelve cuántos.
+
+    Lo que no resuelve entra a la cola de curación: así el catálogo crece con
+    lo que de verdad aparece en los carteles, no con lo que alguien imagine.
+    """
+    resueltos = 0
+    for e in db.rows(cx, """
+        SELECT id, lugar FROM events
+         WHERE lugar IS NOT NULL AND trim(lugar) != ''
+    """):
+        vid = venues.resolver(cx, e["lugar"])
+        if vid is None:
+            venues.registrar_desconocido(cx, e["lugar"])
+            continue
+        db.update(cx, "events", e["id"], venue_id=vid)
+        resueltos += 1
+    cx.commit()
+    return resueltos
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Siembra del catálogo de foros")
+    parser.add_argument("--solo-backfill", action="store_true",
+                        help="no siembra: solo resuelve venue_id de los eventos")
+    args = parser.parse_args()
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        if not args.solo_backfill:
+            res = sembrar(cx)
+            print(f"Siembra: {res['venues']} foro(s), {res['alias']} alias, "
+                  f"{res['pendientes_llm']} al LLM")
+        n = backfill_eventos(cx)
+        print(f"Backfill: {n} evento(s) con foro resuelto · "
+              f"{len(venues.huerfanos(cx))} alias por curar en /venues")
+    except KeyboardInterrupt:
+        sys.exit("\nInterrumpido.")
+    finally:
+        cx.close()
