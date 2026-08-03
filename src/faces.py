@@ -11,7 +11,93 @@ de agrupamiento se puede probar con vectores sintéticos.
 """
 from __future__ import annotations
 
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
 import numpy as np
+import requests
+
+import config
+
+_ZOO = "https://github.com/opencv/opencv_zoo/raw/main/models"
+_YUNET = ("face_detection_yunet_2023mar.onnx",
+          f"{_ZOO}/face_detection_yunet/face_detection_yunet_2023mar.onnx")
+_SFACE = ("face_recognition_sface_2021dec.onnx",
+          f"{_ZOO}/face_recognition_sface/face_recognition_sface_2021dec.onnx")
+_TIMEOUT = 120
+
+_detector = None
+_reconocedor = None
+
+
+@dataclass(frozen=True)
+class Cara:
+    bbox: tuple[int, int, int, int]      # x, y, w, h
+    det_score: float
+    landmarks: "np.ndarray"              # 5 puntos (10 valores) que pide SFace
+    frac_area: float                     # área de la cara / área de la imagen
+
+
+def _bajar(nombre: str, url: str) -> Path:
+    """Descarga el modelo a data/models/ con escritura atómica. Falla ruidosa."""
+    destino = config.resolve_models_dir() / nombre
+    if destino.exists() and destino.stat().st_size > 0:
+        return destino
+    print(f"⬇️  bajando modelo {nombre}…", file=sys.stderr)
+    resp = requests.get(url, timeout=_TIMEOUT)
+    resp.raise_for_status()
+    tmp = destino.with_suffix(destino.suffix + ".part")
+    tmp.write_bytes(resp.content)
+    tmp.replace(destino)
+    return destino
+
+
+def asegurar_modelos() -> tuple[Path, Path]:
+    """Rutas locales de (YuNet, SFace), bajándolos la primera vez."""
+    return _bajar(*_YUNET), _bajar(*_SFACE)
+
+
+def _motores():
+    """Detector y reconocedor, creados una vez por proceso."""
+    global _detector, _reconocedor
+    if _detector is None or _reconocedor is None:
+        import cv2
+        yunet, sface = asegurar_modelos()
+        _detector = cv2.FaceDetectorYN_create(
+            str(yunet), "", (320, 320), config.FACE_DET_SCORE_MIN)
+        _reconocedor = cv2.FaceRecognizerSF_create(str(sface), "")
+    return _detector, _reconocedor
+
+
+def detectar(img: "np.ndarray") -> list[Cara]:
+    """Caras de la imagen que superan score y tamaño mínimos."""
+    det, _ = _motores()
+    alto, ancho = img.shape[:2]
+    det.setInputSize((ancho, alto))
+    _, crudas = det.detect(img)
+    if crudas is None:
+        return []
+    area_img = float(alto * ancho)
+    salida: list[Cara] = []
+    for fila in crudas:
+        x, y, w, h = (int(v) for v in fila[:4])
+        score = float(fila[-1])
+        frac = (w * h) / area_img
+        if score < config.FACE_DET_SCORE_MIN or frac < config.FACE_CARA_MIN_FRAC:
+            continue
+        salida.append(Cara(bbox=(x, y, w, h), det_score=score,
+                           landmarks=fila[:-1].astype(np.float32), frac_area=frac))
+    return salida
+
+
+def firma(img: "np.ndarray", cara: Cara) -> "np.ndarray":
+    """Vector de 128 float32 L2-normalizado que identifica a la persona."""
+    _, rec = _motores()
+    alineada = rec.alignCrop(img, cara.landmarks.reshape(1, -1))
+    vec = rec.feature(alineada).flatten().astype(np.float32)
+    norma = float(np.linalg.norm(vec))
+    return vec / norma if norma else vec
 
 
 def similitud(a: "np.ndarray", b: "np.ndarray") -> float:

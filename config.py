@@ -129,6 +129,16 @@ CLASSIFY_MSER_FLYER = int(_get("CLASSIFY_MSER_FLYER", "1700") or "1500")
 # Tamaño mínimo de una cara "clara": fracción del lado menor de la imagen.
 CLASSIFY_CARA_MIN_FRAC = float(_get("CLASSIFY_CARA_MIN_FRAC", "0.08") or "0.08")
 
+# ---------- Reconocimiento facial (banco por persona) ----------
+FACE_DET_SCORE_MIN = float(_get("FACE_DET_SCORE_MIN", "0.6") or "0.6")
+# Medido sobre el acervo real (3-ago, 120 fotos de bandas): las caras de este
+# corpus son CHICAS — con 0.05 solo 4 de 120 fotos conservaban alguna cara, y
+# el propio fixture de esta tarea perdía una de sus dos. Con 0.01 quedan 34.
+FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.01") or "0.01")
+# Similitud coseno de SFace para "misma persona" (valor del sample de OpenCV).
+FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.363") or "0.363")
+MODELS_DIR = _get("MODELS_DIR", "./data/models")
+
 # ---------- Base de datos local (SQLite) ----------
 # Fuente de verdad de bandas/fotos/eventos; el Sheet queda como UI de aprobación.
 DB_PATH = _get("DB_PATH", "./data/gdlscene.db")
@@ -230,6 +240,13 @@ def resolve_ig_accounts_path() -> Path:
 def resolve_photos_dir() -> Path:
     """Ruta absoluta a la carpeta de fotos descargadas (la crea si no existe)."""
     p = _resolve(PHOTOS_DIR)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def resolve_models_dir() -> Path:
+    """Ruta absoluta a la carpeta de modelos ONNX (la crea si no existe)."""
+    p = _resolve(MODELS_DIR)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
