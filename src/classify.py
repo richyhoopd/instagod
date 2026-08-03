@@ -1,8 +1,8 @@
 """Clasificación de fotos (Fase 3): caras + nitidez + detección de flyers.
 
 Por cada foto sin clasificar calcula:
-- `faces_count` / `es_grupal`: caras Haar de OpenCV (frontales; suficiente para
-  decidir "hay alguien claro en la foto" sin modelos pesados).
+- `faces_count` / `es_grupal`: caras detectadas por YuNet (src.faces), que ya
+  filtra por score y tamaño mínimos.
 - `nitidez`: varianza del Laplaciano sobre la imagen normalizada a 1200px de
   ancho (mismo denominador para todas → el umbral del .env es comparable).
 - `usable_meme`: ≥1 cara clara (tamaño mínimo relativo) + nitidez sobre umbral
@@ -31,7 +31,7 @@ import cv2
 import numpy as np
 
 import config
-from src import db
+from src import db, faces
 
 _ANCHO_NORM = 1200  # las métricas se calculan a este ancho
 
@@ -42,14 +42,8 @@ _KEYWORDS_EVENTO = {
     "album", "out now", "ya disponible", "sold out", "cover", "entrada",
 }
 
-# Cascadas para caras: frontal (2 variantes) + perfil. El perfil se corre también
-# sobre la imagen espejeada para cubrir el otro lado. Así se detectan caras de
-# perfil y en ángulo, no solo de frente.
-_HAAR = cv2.data.haarcascades
-_FRONTAL = [cv2.CascadeClassifier(_HAAR + n) for n in
-            ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml")]
-_PERFIL = cv2.CascadeClassifier(_HAAR + "haarcascade_profileface.xml")
 # Cuerpos: para fotos de espaldas / sin cara visible (siguen siendo de la banda).
+_HAAR = cv2.data.haarcascades
 _UPPER = cv2.CascadeClassifier(_HAAR + "haarcascade_upperbody.xml")
 _hog = cv2.HOGDescriptor()
 _hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
@@ -89,42 +83,28 @@ def cargar_normalizada(path: Path) -> "np.ndarray | None":
     return img
 
 
+def cargar_color(path: Path) -> "np.ndarray | None":
+    """Imagen BGR normalizada a _ANCHO_NORM. YuNet necesita color, no gris."""
+    img = cv2.imread(str(path))
+    if img is None or img.size == 0:
+        return None
+    alto, ancho = img.shape[:2]
+    esc = _ANCHO_NORM / float(ancho)
+    return cv2.resize(img, (_ANCHO_NORM, max(1, int(alto * esc))))
+
+
 def medir_nitidez(gris: "np.ndarray") -> float:
     """Varianza del Laplaciano: bajo = borrosa, alto = nítida."""
     return float(cv2.Laplacian(gris, cv2.CV_64F).var())
 
 
-def _solapan(a, b, umbral: float = 0.4) -> bool:
-    ax, ay, aw, ah = a
-    bx, by, bw, bh = b
-    ix = max(0, min(ax + aw, bx + bw) - max(ax, bx))
-    iy = max(0, min(ay + ah, by + bh) - max(ay, by))
-    inter = ix * iy
-    return inter / min(aw * ah, bw * bh) > umbral if inter else False
+def contar_caras(img_color: "np.ndarray") -> int:
+    """Cuántas caras usables tiene la imagen, según YuNet.
 
-
-def contar_caras(gris: "np.ndarray") -> tuple[int, int]:
-    """(caras_total, caras_claras) usando frontal + perfil + perfil espejeado.
-
-    Detecta caras de frente, de perfil y en ángulo (no solo frontales). Deduplica
-    detecciones solapadas. "Clara" = lado ≥ fracción del lado menor de la imagen.
+    `faces.detectar` ya filtra por score y tamaño mínimos, así que no hay
+    distinción entre detecciones "totales" y "claras" como en la época de Haar.
     """
-    cajas: list[tuple] = []
-    espejo = cv2.flip(gris, 1)
-    ancho = gris.shape[1]
-    detectores = [(c, False) for c in _FRONTAL] + [(_PERFIL, False), (_PERFIL, True)]
-    for det, en_espejo in detectores:
-        img = espejo if en_espejo else gris
-        for (x, y, w, h) in det.detectMultiScale(img, scaleFactor=1.1,
-                                                  minNeighbors=5, minSize=(36, 36)):
-            if en_espejo:
-                x = ancho - x - w  # coordenada de vuelta a la imagen original
-            caja = (int(x), int(y), int(w), int(h))
-            if not any(_solapan(caja, c) for c in cajas):
-                cajas.append(caja)
-    min_lado = min(gris.shape) * config.CLASSIFY_CARA_MIN_FRAC
-    claras = sum(1 for (_, _, w, h) in cajas if min(w, h) >= min_lado)
-    return len(cajas), claras
+    return len(faces.detectar(img_color))
 
 
 _mser = cv2.MSER_create()
@@ -267,12 +247,13 @@ def clasificar_foto(cx, foto: dict[str, Any]) -> str:
     if not path.is_absolute():
         path = config.BASE_DIR / path
     gris = cargar_normalizada(path)
-    if gris is None:
+    color = cargar_color(path)
+    if gris is None or color is None:
         db.update(cx, "photos", foto["id"], usable_meme=0, faces_count=0, nitidez=0.0)
         return "ilegible"
 
     nitidez = medir_nitidez(gris)
-    total, claras = contar_caras(gris)
+    caras = contar_caras(color)
 
     # OCR SIEMPRE: los flyers también traen caras, así que el texto manda.
     texto = texto_ocr(path)
@@ -285,15 +266,15 @@ def clasificar_foto(cx, foto: dict[str, Any]) -> str:
     # Solo gastamos el detector de personas si hace falta para decidir usable.
     tipo = foto.get("tipo", "banda")
     gente = False
-    if not flyer and not grafico and tipo not in _TIPOS_SIN_CARA and claras == 0:
+    if not flyer and not grafico and tipo not in _TIPOS_SIN_CARA and caras == 0:
         gente = hay_persona(gris)
 
-    usable = decidir_usable(claras, nitidez, flyer, tipo, gente, grafico)
+    usable = decidir_usable(caras, nitidez, flyer, tipo, gente, grafico)
     if foto.get("descartada"):
         usable = False  # lista negra manual: jamás usable, pase lo que pase
     db.update(cx, "photos", foto["id"],
-              faces_count=total,
-              es_grupal=1 if claras >= 2 else 0,
+              faces_count=caras,
+              es_grupal=1 if caras >= 2 else 0,
               nitidez=round(nitidez, 1),
               usable_meme=1 if usable else 0)
 
@@ -309,7 +290,7 @@ def clasificar_foto(cx, foto: dict[str, Any]) -> str:
             return f"flyer dibujado→events (mser {n_mser})"
         return f"gráfico/póster descartado (mser {n_mser})"
     if usable:
-        quien = f"{claras} cara(s)" if claras else ("persona" if gente else "lugar")
+        quien = f"{caras} cara(s)" if caras else ("persona" if gente else "lugar")
         return f"usable ({quien}, nitidez {nitidez:.0f})"
     if nitidez < config.CLASSIFY_NITIDEZ_MIN:
         return f"borrosa (nitidez {nitidez:.0f})"

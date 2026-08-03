@@ -10,9 +10,8 @@ import cv2
 import numpy as np
 
 import config
-from src import classify, db
+from src import classify, db, faces
 from src.classify import (
-    _solapan,
     caption_sugiere_evento,
     clasificar_foto,
     contar_caras,
@@ -39,10 +38,10 @@ def test_nitidez_distingue_borrosa_de_nitida() -> None:
 
 
 def test_imagen_plana_no_tiene_caras_ni_nitidez() -> None:
-    plana = np.full((900, 1200), 128, dtype=np.uint8)
-    total, claras = contar_caras(plana)
-    assert (total, claras) == (0, 0)
-    assert medir_nitidez(plana) == 0.0
+    plana_gris = np.full((900, 1200), 128, dtype=np.uint8)
+    plana_color = np.full((900, 1200, 3), 128, dtype=np.uint8)
+    assert contar_caras(plana_color) == 0
+    assert medir_nitidez(plana_gris) == 0.0
 
 
 def test_decidir_usable() -> None:
@@ -109,18 +108,44 @@ def test_flyer_crea_evento_idempotente(tmp_path) -> None:
     cx.close()
 
 
-# ---------- _solapan: deduplicación geométrica de cajas de cara ----------
+# ---------- contar_caras / cargar_color: YuNet reemplaza los cascades Haar ----------
 
-def test_solapan_detecta_cajas_encimadas() -> None:
-    a = (0, 0, 100, 100)
-    b = (10, 10, 100, 100)        # gran solape
-    assert _solapan(a, b) is True
+def test_contar_caras_usa_yunet(monkeypatch) -> None:
+    """contar_caras delega en faces.detectar, no en cascades."""
+    llamado = {}
+
+    def fake_detectar(img):
+        llamado["si"] = True
+        return [
+            faces.Cara(bbox=(0, 0, 50, 50), det_score=0.9,
+                       landmarks=np.zeros(14, dtype=np.float32), frac_area=0.2),
+            faces.Cara(bbox=(60, 0, 40, 40), det_score=0.8,
+                       landmarks=np.zeros(14, dtype=np.float32), frac_area=0.1),
+        ]
+
+    monkeypatch.setattr(classify.faces, "detectar", fake_detectar)
+    assert classify.contar_caras(np.zeros((300, 300, 3), dtype=np.uint8)) == 2
+    assert llamado.get("si") is True
 
 
-def test_no_solapan_cajas_separadas() -> None:
-    a = (0, 0, 50, 50)
-    b = (500, 500, 50, 50)        # sin intersección
-    assert _solapan(a, b) is False
+def test_contar_caras_sin_caras(monkeypatch) -> None:
+    monkeypatch.setattr(classify.faces, "detectar", lambda img: [])
+    assert classify.contar_caras(np.zeros((300, 300, 3), dtype=np.uint8)) == 0
+
+
+def test_cargar_color_normaliza_ancho(tmp_path) -> None:
+    p = tmp_path / "grande.jpg"
+    cv2.imwrite(str(p), np.full((2000, 3000, 3), 128, dtype=np.uint8))
+    img = classify.cargar_color(p)
+    assert img is not None
+    assert img.shape[1] == classify._ANCHO_NORM
+    assert img.ndim == 3
+
+
+def test_cargar_color_ilegible(tmp_path) -> None:
+    p = tmp_path / "no_es_imagen.jpg"
+    p.write_bytes(b"basura")
+    assert classify.cargar_color(p) is None
 
 
 # ---------- decidir_usable: gráfico/póster nunca usable ----------
@@ -235,8 +260,9 @@ def test_poster_grafico_con_caption_evento_va_a_flyer(tmp_path, monkeypatch):
                     caption_original="Estreno mi EP el 10 de junio 7:30 PM")
     # Simula: imagen legible, sin caras, póster gráfico (MSER alto), OCR SIN fecha.
     monkeypatch.setattr(classify, "cargar_normalizada", lambda p: np.zeros((10, 10), "uint8"))
+    monkeypatch.setattr(classify, "cargar_color", lambda p: np.zeros((10, 10, 3), "uint8"))
     monkeypatch.setattr(classify, "medir_nitidez", lambda g: 1042.0)
-    monkeypatch.setattr(classify, "contar_caras", lambda g: (0, 0))
+    monkeypatch.setattr(classify, "contar_caras", lambda g: 0)
     monkeypatch.setattr(classify, "texto_ocr", lambda p: "RESISTENCIA CULTURA PERREO")  # sin fecha
     monkeypatch.setattr(classify, "score_flyer", lambda t, ce: (False, ""))
     monkeypatch.setattr(classify, "es_grafico", lambda g: (True, 2000))
