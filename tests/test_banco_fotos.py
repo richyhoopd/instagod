@@ -255,6 +255,35 @@ def test_foto_descartada_con_persona_id_previo_no_queda_colgando(
     assert fila_a2["persona_id"] is None or fila_a2["persona_id"] in ids_persona_banda
 
 
+def test_procesar_banda_limite_solo_analiza_las_mejores(cx, tmp_path, monkeypatch) -> None:
+    """El límite es perezoso: ordena por nitidez ya guardada en DB y solo
+    analiza las N mejores, sin tocar el resto."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    pid_baja = db.insert(cx, "photos", band_id=bid, path="baja.jpg",
+                         source_post_id="1", nitidez=10.0)
+    pid_alta = db.insert(cx, "photos", band_id=bid, path="alta.jpg",
+                         source_post_id="2", nitidez=50.0)
+    pid_media = db.insert(cx, "photos", band_id=bid, path="media.jpg",
+                          source_post_id="3", nitidez=30.0)
+
+    llamadas: list[str] = []
+
+    def analizar(path):
+        llamadas.append(Path(path).name)
+        return _hash("1" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))]
+
+    res = banco.procesar_banda(cx, bid, limite=1, _analizador=analizar)
+
+    assert llamadas == ["alta.jpg"]  # solo la de mayor nitidez se analizó
+    assert res["fotos_dentro"] + res["fotos_fuera"] == 1
+
+    fila_baja = db.rows(cx, "SELECT * FROM photos WHERE id = ?", (pid_baja,))[0]
+    fila_media = db.rows(cx, "SELECT * FROM photos WHERE id = ?", (pid_media,))[0]
+    assert fila_baja["persona_id"] is None and fila_baja["nitidez"] == 10.0
+    assert fila_media["persona_id"] is None and fila_media["nitidez"] == 30.0
+
+
 def test_banda_sin_fotos_activas_no_deja_firmas_huerfanas(cx, tmp_path, monkeypatch) -> None:
     """Sin fotos activas (early-return), el limpiado corre igual: cero firmas
     huérfanas en la tabla y el nombre capturado a mano sigue existiendo."""
@@ -275,3 +304,35 @@ def test_banda_sin_fotos_activas_no_deja_firmas_huerfanas(cx, tmp_path, monkeypa
     assert len(db.rows(cx, "SELECT * FROM face_signatures")) == 0
     personas = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))
     assert len(personas) == 1 and personas[0]["member_id"] == mid
+
+
+def test_procesar_recorre_bandas_activas(cx, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    b1 = db.insert(cx, "bands", nombre="A", ig_handle="a", tipo="banda", activa=1)
+    b2 = db.insert(cx, "bands", nombre="B", ig_handle="b", tipo="banda", activa=0)
+    db.insert(cx, "photos", band_id=b1, path="a.jpg", source_post_id="a")
+    db.insert(cx, "photos", band_id=b2, path="b.jpg", source_post_id="b")
+    mapa = {
+        "a.jpg": (_hash("1" * 64), 90.0, [((0, 0, 5, 5), 0.9, 0.2, _vec(1, 0))]),
+        "b.jpg": (_hash("0" * 64), 90.0, [((0, 0, 5, 5), 0.9, 0.2, _vec(0, 1))]),
+    }
+    res = banco.procesar(_cx=cx, _analizador=_analizador_falso(mapa))
+    assert res["bandas"] == 1  # solo la activa
+    assert res["personas"] == 1
+
+
+def test_procesar_banda_caida_no_tumba_el_lote(cx, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    b1 = db.insert(cx, "bands", nombre="A", ig_handle="a", tipo="banda", activa=1)
+    b2 = db.insert(cx, "bands", nombre="B", ig_handle="b", tipo="banda", activa=1)
+    db.insert(cx, "photos", band_id=b1, path="rota.jpg", source_post_id="r")
+    db.insert(cx, "photos", band_id=b2, path="b.jpg", source_post_id="b")
+
+    def analizar(path):
+        if "rota" in str(path):
+            raise OSError("imagen corrupta")
+        return _hash("0" * 64), 90.0, [((0, 0, 5, 5), 0.9, 0.2, _vec(0, 1))]
+
+    res = banco.procesar(_cx=cx, _analizador=analizar)
+    assert res["fallidas"] == ["a"]
+    assert res["bandas"] == 1  # la sana sí se procesó

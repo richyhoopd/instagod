@@ -142,7 +142,7 @@ def _analizar_real(path: Path):
     return imghash.phash(path), nitidez, detectadas
 
 
-def procesar_banda(cx, band_id: int, *, _analizador=None) -> dict:
+def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> dict:
     """Deduplica, agrupa caras, aplica cupo y persiste. Idempotente.
 
     El batch nunca pisa un nombre capturado a mano (misma regla que
@@ -152,10 +152,18 @@ def procesar_banda(cx, band_id: int, *, _analizador=None) -> dict:
     la cara desapareció por dedup o la foto se marcó `descartada` — la
     persona nombrada se vuelve a crear igual, sin firmas ni fotos, para que
     el nombre sobreviva y pueda volver a casar en el siguiente reproceso.
+
+    `limite` es el perezoso a propósito: solo se analizan las `limite`
+    fotos con mejor `nitidez` ya guardada en DB. Analizar el acervo completo
+    es gastar CPU en fotos que de todos modos van a perder el cupo.
     """
     analizar = _analizador or _analizar_real
-    filas = db.rows(cx, "SELECT id, path FROM photos WHERE band_id = ? AND descartada = 0",
-                    (band_id,))
+    filas = db.rows(cx, """
+        SELECT id, path FROM photos
+         WHERE band_id = ? AND descartada = 0
+         ORDER BY nitidez DESC
+         LIMIT ?
+    """, (band_id, limite))
 
     # Limpieza + preservación de lo manual ANTES de cualquier early-return: el
     # estado en DB debe ser el mismo invariante con fotos o sin ellas (nunca
@@ -259,3 +267,58 @@ def procesar_banda(cx, band_id: int, *, _analizador=None) -> dict:
     cx.commit()
     return {"personas": len(grupos_persona), "fotos_dentro": len(dentro),
             "fotos_fuera": len(analizadas) - len(dentro), "duplicadas": duplicadas}
+
+
+def procesar(handles: list[str] | None = None, *, limite_por_banda: int = 40,
+             _cx=None, _analizador=None) -> dict:
+    """Corre el banco sobre las bandas activas. Una caída aislada no tumba el lote."""
+    propia = _cx is None
+    cx = _cx or db.connect()
+    resumen = {"bandas": 0, "personas": 0, "fotos_dentro": 0,
+               "duplicadas": 0, "fallidas": []}
+    try:
+        if propia:
+            db.init_db(cx)
+        q = "SELECT id, nombre, ig_handle FROM bands WHERE activa = 1"
+        params: tuple = ()
+        if handles:
+            marcas = ",".join("?" * len(handles))
+            q += f" AND lower(ig_handle) IN ({marcas})"
+            params = tuple(h.lstrip("@").lower() for h in handles)
+        for banda in db.rows(cx, q + " ORDER BY prioridad, id", params):
+            print(f"▶ @{banda['ig_handle']} ({banda['nombre']})")
+            try:
+                r = procesar_banda(cx, banda["id"], limite=limite_por_banda,
+                                   _analizador=_analizador)
+            except Exception as exc:  # noqa: BLE001 — banda rota no tumba la corrida
+                print(f"   ❌ {exc}")
+                resumen["fallidas"].append(banda["ig_handle"])
+                continue
+            resumen["bandas"] += 1
+            resumen["personas"] += r["personas"]
+            resumen["fotos_dentro"] += r["fotos_dentro"]
+            resumen["duplicadas"] += r["duplicadas"]
+            print(f"   ✅ {r['personas']} persona(s) · {r['fotos_dentro']} al banco "
+                  f"· {r['duplicadas']} duplicada(s)")
+        return resumen
+    finally:
+        if propia:
+            cx.close()
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Banco de fotos por persona")
+    parser.add_argument("handles", nargs="*", help="handles específicos (vacío = todas)")
+    parser.add_argument("--limite", type=int, default=40,
+                        help="fotos por banda a analizar (default 40)")
+    args = parser.parse_args()
+    try:
+        res = procesar(args.handles or None, limite_por_banda=args.limite)
+    except KeyboardInterrupt:
+        sys.exit("\nInterrumpido.")
+    print(f"\nResumen: {res['bandas']} banda(s) · {res['personas']} persona(s) · "
+          f"{res['fotos_dentro']} foto(s) al banco · {res['duplicadas']} duplicada(s)"
+          + (f" · fallidas: {', '.join(res['fallidas'])}" if res["fallidas"] else ""))
