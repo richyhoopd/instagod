@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src import db
+
+
+@pytest.fixture()
+def cliente(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    import importlib
+
+    import config
+    importlib.reload(config)
+    from web import app as app_mod
+    importlib.reload(app_mod)
+    conn = db.connect(tmp_path / "test.db")
+    db.init_db(conn)
+    yield TestClient(app_mod.app), conn
+    conn.close()
+
+
+def test_vista_caras_lista_personas(cliente) -> None:
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    pid = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    fid = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a",
+                    persona_id=pid, usable_meme=1)
+    db.insert(cx, "face_signatures", photo_id=fid, persona_id=pid,
+              bbox="[0,0,10,10]", det_score=0.9, embedding=b"\x00" * 512)
+    r = cli.get(f"/banda/{bid}/caras")
+    assert r.status_code == 200
+    assert "persona A" in r.text
+
+
+def test_nombrar_persona_crea_member(cliente) -> None:
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    pid = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    r = cli.post(f"/personas/{pid}/nombrar",
+                 data={"nombre": "Fercho", "rol": "baterista"})
+    assert r.status_code in (200, 303)
+    miembros = db.rows(cx, "SELECT * FROM members WHERE band_id = ?", (bid,))
+    assert len(miembros) == 1
+    assert miembros[0]["nombre"] == "Fercho" and miembros[0]["rol"] == "baterista"
+    assert db.get(cx, "personas", pid)["member_id"] == miembros[0]["id"]
+
+
+def test_nombrar_dos_veces_actualiza_sin_duplicar(cliente) -> None:
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    pid = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    cli.post(f"/personas/{pid}/nombrar", data={"nombre": "Fercho", "rol": "bat"})
+    cli.post(f"/personas/{pid}/nombrar", data={"nombre": "Fernando", "rol": "batería"})
+    miembros = db.rows(cx, "SELECT * FROM members WHERE band_id = ?", (bid,))
+    assert len(miembros) == 1 and miembros[0]["nombre"] == "Fernando"
+
+
+def test_fusionar_personas(cliente) -> None:
+    """Dos grupos que son la misma persona: se fusionan sin perder firmas."""
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    p1 = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    p2 = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona B")
+    f1 = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a",
+                   persona_id=p2)
+    db.insert(cx, "face_signatures", photo_id=f1, persona_id=p2,
+              bbox="[0,0,1,1]", det_score=0.9, embedding=b"\x00" * 512)
+    r = cli.post(f"/personas/{p1}/fusionar", data={"otra_id": str(p2)})
+    assert r.status_code in (200, 303)
+    assert db.get(cx, "personas", p2) is None
+    assert db.rows(cx, "SELECT persona_id FROM face_signatures")[0]["persona_id"] == p1
+    assert db.get(cx, "photos", f1)["persona_id"] == p1
+
+
+def test_descartar_persona_saca_sus_fotos_del_banco(cliente) -> None:
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    pid = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    fid = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a",
+                    persona_id=pid, usable_meme=1)
+    r = cli.post(f"/personas/{pid}/descartar")
+    assert r.status_code in (200, 303)
+    assert db.get(cx, "photos", fid)["usable_meme"] == 0
+    assert db.get(cx, "personas", pid) is None

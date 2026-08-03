@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -331,6 +331,84 @@ def foto_a_cola(photo_id: int, tema_semilla: str = Form("")) -> HTMLResponse:
     finally:
         cx.close()
     return HTMLResponse('<span class="chip">en cola ✓</span>')
+
+
+# ---------- Banco de caras por persona: corrección de agrupamiento ----------
+
+@app.get("/banda/{band_id}/caras", response_class=HTMLResponse)
+def caras(request: Request, band_id: int) -> HTMLResponse:
+    cx = db.connect()
+    try:
+        banda = db.get(cx, "bands", band_id)
+        if not banda:
+            raise HTTPException(status_code=404, detail="banda no encontrada")
+        personas = db.rows(cx, """
+            SELECT p.id, p.etiqueta_auto, m.nombre, m.rol,
+                   (SELECT count(*) FROM face_signatures f WHERE f.persona_id = p.id) AS n_fotos
+              FROM personas p LEFT JOIN members m ON m.id = p.member_id
+             WHERE p.band_id = ? ORDER BY n_fotos DESC
+        """, (band_id,))
+        for p in personas:
+            p["fotos"] = db.rows(cx, """
+                SELECT id FROM photos WHERE persona_id = ? ORDER BY nitidez DESC LIMIT 6
+            """, (p["id"],))
+        return templates.TemplateResponse(
+            request, "caras.html", {"banda": banda, "personas": personas})
+    finally:
+        cx.close()
+
+
+@app.post("/personas/{persona_id}/nombrar")
+def persona_nombrar(persona_id: int, nombre: str = Form(...), rol: str = Form("")) -> Response:
+    cx = db.connect()
+    try:
+        persona = db.get(cx, "personas", persona_id)
+        if not persona:
+            raise HTTPException(status_code=404, detail="persona no encontrada")
+        if persona["member_id"]:
+            db.update(cx, "members", persona["member_id"], nombre=nombre, rol=rol or None)
+        else:
+            mid = db.insert(cx, "members", band_id=persona["band_id"],
+                            nombre=nombre, rol=rol or None)
+            db.update(cx, "personas", persona_id, member_id=mid)
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
+@app.post("/personas/{persona_id}/fusionar")
+def persona_fusionar(persona_id: int, otra_id: int = Form(...)) -> Response:
+    """Absorbe `otra_id` en `persona_id`: mismo humano mal separado por el clustering."""
+    cx = db.connect()
+    try:
+        if not db.get(cx, "personas", persona_id) or not db.get(cx, "personas", otra_id):
+            raise HTTPException(status_code=404, detail="persona no encontrada")
+        cx.execute("UPDATE face_signatures SET persona_id = ? WHERE persona_id = ?",
+                   (persona_id, otra_id))
+        cx.execute("UPDATE photos SET persona_id = ? WHERE persona_id = ?",
+                   (persona_id, otra_id))
+        cx.execute("DELETE FROM personas WHERE id = ?", (otra_id,))
+        cx.commit()
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
+@app.post("/personas/{persona_id}/descartar")
+def persona_descartar(persona_id: int) -> Response:
+    """Grupo mal armado: sus fotos salen del banco (no se borran del disco)."""
+    cx = db.connect()
+    try:
+        if not db.get(cx, "personas", persona_id):
+            raise HTTPException(status_code=404, detail="persona no encontrada")
+        cx.execute("UPDATE photos SET usable_meme = 0, persona_id = NULL "
+                   "WHERE persona_id = ?", (persona_id,))
+        cx.execute("DELETE FROM face_signatures WHERE persona_id = ?", (persona_id,))
+        cx.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
+        cx.commit()
+        return Response(status_code=200)
+    finally:
+        cx.close()
 
 
 # ---------- Plan mensual de contenido (pantalla de badges) ----------
