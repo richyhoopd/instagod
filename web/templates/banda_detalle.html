@@ -27,7 +27,10 @@
 <h3 style="margin-top:28px;">Fotos <span class="muted">({{ fotos|length }})</span>
   <form method="post" action="/bandas/{{ b.id }}/clasificar" style="display:inline; margin-left:12px;">
     <button type="submit" class="secundario" title="Caras + nitidez + flyers→eventos">🔎 Clasificar</button>
-    <label style="font-size:12px;" class="muted"><input type="checkbox" name="redo" value="1" style="width:auto;"> re-hacer todas</label>
+    <label style="font-size:12px;" class="muted"
+           title="Reclasifica TODAS las fotos y sobrescribe usable_meme: la decisión de cupo del banco se pierde."><input type="checkbox" name="redo" value="1" style="width:auto;"> re-hacer todas</label>
+    <span class="muted" style="font-size:12px;">⚠️ “re-hacer todas” borra la decisión de cupo del banco
+      — después corre <code>python -m src.banco {{ b.ig_handle or "" }}</code>.</span>
   </form>
   <a href="/banda/{{ b.id }}/caras" style="margin-left:12px; font-size:14px;">Caras y nombres →</a>
 </h3>

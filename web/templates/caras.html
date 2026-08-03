@@ -17,6 +17,9 @@
     <input name="rol" placeholder="rol" value="{{ p.rol or '' }}">
     <button type="submit">Guardar</button>
   </form>
+  {# Con una sola persona no hay con quién fusionar: el <select> quedaría vacío,
+     el POST no mandaría `otra_id` y el servidor respondería 422. #}
+  {% if personas|length > 1 %}
   <form hx-post="/personas/{{ p.id }}/fusionar" hx-swap="none">
     <select name="otra_id">
       {% for otra in personas if otra.id != p.id %}
@@ -25,10 +28,53 @@
     </select>
     <button type="submit">Fusionar con…</button>
   </form>
+  {% endif %}
   <button hx-post="/personas/{{ p.id }}/descartar" hx-confirm="¿Sacar del banco todas sus fotos?">Descartar</button>
 </section>
 {% else %}
 <p>Esta banda no tiene caras agrupadas todavía. Corre
    <code>python -m src.banco {{ banda.ig_handle }}</code>.</p>
 {% endfor %}
+
+<p id="caras-msg" class="muted" style="margin-top:12px;"></p>
+<script>
+  // Feedback de las acciones sobre personas. Mismo patrón que calendario.html:
+  // el control que dispara se deshabilita y muestra su estado; solo se
+  // re-habilita si la petición FALLÓ (sin esto los tres formularios usan
+  // hx-swap="none" y el clic no produce NINGÚN cambio visible, ni en error).
+  const _boton = (el) => el.tagName === 'FORM' ? el.querySelector('button') : el;
+  const _esAccionPersona = (el) => el.matches?.('[hx-post^="/personas/"]');
+
+  document.body.addEventListener('htmx:beforeRequest', (e) => {
+    const el = e.detail.elt;
+    if (!_esAccionPersona(el)) return;
+    const b = _boton(el);
+    if (!b) return;
+    b.disabled = true;
+    b.dataset.label = b.textContent;
+    b.textContent = '⏳…';
+  });
+
+  document.body.addEventListener('htmx:afterRequest', (e) => {
+    const el = e.detail.elt;
+    if (!_esAccionPersona(el)) return;
+    const b = _boton(el);
+    const msg = document.getElementById('caras-msg');
+    if (e.detail.successful) {
+      // Fusionar/descartar cambian la LISTA de personas: recargar es la única
+      // forma honesta de mostrar el resultado.
+      if (/\/(fusionar|descartar)$/.test(el.getAttribute('hx-post'))) {
+        msg.textContent = '✅ listo — recargando…';
+        location.reload();
+        return;
+      }
+      msg.textContent = '';
+      if (b) b.textContent = '✅ guardado';
+    } else {
+      msg.textContent = '❌ falló (HTTP ' + (e.detail.xhr ? e.detail.xhr.status : '?')
+                      + ') — no se guardó nada.';
+      if (b) { b.textContent = b.dataset.label; b.disabled = false; }
+    }
+  });
+</script>
 {% endblock %}

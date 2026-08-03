@@ -36,6 +36,38 @@ def test_vista_caras_lista_personas(cliente) -> None:
     assert "persona A" in r.text
 
 
+def test_una_sola_persona_no_muestra_el_form_de_fusionar(cliente) -> None:
+    """Con una sola persona el <select name="otra_id"> quedaba VACÍO: el POST no
+    mandaba el campo y el servidor respondía 422 sin ningún feedback."""
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    r = cli.get(f"/banda/{bid}/caras")
+    assert r.status_code == 200
+    assert "/fusionar" not in r.text
+    assert 'name="otra_id"' not in r.text
+
+
+def test_dos_personas_si_muestran_el_form_de_fusionar(cliente) -> None:
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona B")
+    r = cli.get(f"/banda/{bid}/caras")
+    assert "/fusionar" in r.text and 'name="otra_id"' in r.text
+
+
+def test_vista_caras_da_feedback_visible(cliente) -> None:
+    """Los tres formularios usan hx-swap="none": sin el zócalo de mensajes y el
+    script de estado, el clic no produce NINGÚN cambio visible ni en error."""
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    r = cli.get(f"/banda/{bid}/caras")
+    assert 'id="caras-msg"' in r.text
+    assert "htmx:afterRequest" in r.text and "htmx:beforeRequest" in r.text
+
+
 def test_nombrar_persona_crea_member(cliente) -> None:
     cli, cx = cliente
     bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
