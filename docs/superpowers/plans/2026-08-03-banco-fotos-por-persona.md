@@ -16,7 +16,7 @@
 - Umbrales de configuración (valores de arranque, calibrables):
   ```
   FACE_DET_SCORE_MIN        0.6
-  FACE_CARA_MIN_FRAC        0.05
+  FACE_CARA_MIN_FRAC        0.01
   FACE_COS_MISMA_PERSONA    0.363
   FOTOS_POR_PERSONA         5
   FOTOS_GRUPALES            3
@@ -318,24 +318,16 @@ git commit -m "feat(faces): agrupamiento de firmas por enlace simple"
 
 - [ ] **Step 1: Write the failing test**
 
-Preparar el fixture primero (una vez, a mano):
+**El fixture ya existe, verificado por el controlador:** `tests/fixtures/caras/dos_personas.jpg` (640×639, 127 KB), recortado de una foto real de @sgtpapers con dos integrantes de frente y bien iluminados. No lo regeneres ni lo sustituyas.
 
-```bash
-mkdir -p tests/fixtures/caras
-# Copiar una foto REAL del banco con exactamente dos personas visibles y
-# reducirla para que pese poco. Elegir una donde las dos caras se vean de frente.
-.venv/bin/python -c "
-import cv2
-img = cv2.imread('data/photos/kabala_oficial/DbZG9knGpXW_0.jpg')
-h, w = img.shape[:2]
-esc = 640 / max(h, w)
-cv2.imwrite('tests/fixtures/caras/dos_personas.jpg',
-            cv2.resize(img, (int(w*esc), int(h*esc))),
-            [cv2.IMWRITE_JPEG_QUALITY, 85])
-"
-```
+Valores medidos sobre ese archivo, que los tests deben reproducir:
 
-Verificar a ojo que la imagen resultante tiene dos caras claras; si no, elegir otra foto del banco. Ajustar el número esperado en el test al número real de caras del fixture elegido.
+| cara | bbox | det_score | frac_area |
+|---|---|---|---|
+| 1 | `[333, 49, 152, 192]` | 0.93 | 0.0715 |
+| 2 | `[74, 227, 108, 143]` | 0.93 | 0.0379 |
+
+Nota de por qué `FACE_CARA_MIN_FRAC` vale 0.01 y no más: la segunda cara del fixture ocupa apenas 3.8% del área. Con un umbral de 0.05 se perdería y el test de dos caras fallaría. Ese dato es lo que fijó el default.
 
 ```python
 # tests/test_faces.py — agregar
@@ -393,7 +385,10 @@ En `config.py`, junto a los `CLASSIFY_*` (línea ~130):
 ```python
 # ---------- Reconocimiento facial (banco por persona) ----------
 FACE_DET_SCORE_MIN = float(_get("FACE_DET_SCORE_MIN", "0.6") or "0.6")
-FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.05") or "0.05")
+# Medido sobre el acervo real (3-ago, 120 fotos de bandas): las caras de este
+# corpus son CHICAS — con 0.05 solo 4 de 120 fotos conservaban alguna cara, y
+# el propio fixture de esta tarea perdía una de sus dos. Con 0.01 quedan 34.
+FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.01") or "0.01")
 # Similitud coseno de SFace para "misma persona" (valor del sample de OpenCV).
 FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.363") or "0.363")
 MODELS_DIR = _get("MODELS_DIR", "./data/models")
@@ -506,7 +501,7 @@ Nota: `detect()` de YuNet devuelve filas de 15 valores — bbox (4), 5 landmarks
 Run: `.venv/bin/python -m pytest tests/test_faces.py -v`
 Expected: PASS (10 tests). La primera corrida baja 37 MB de modelos; las siguientes usan el caché.
 
-Si `test_detectar_encuentra_las_caras` falla por número de caras, ajustar el fixture o el número esperado — no relajar `FACE_DET_SCORE_MIN`.
+Si `test_detectar_encuentra_las_caras` falla por número de caras, **no toques el fixture ni relajes los umbrales**: el fixture y sus valores están verificados y en la tabla de arriba. Un fallo ahí significa que `detectar()` no está aplicando bien los filtros de score o de área; arregla la función.
 
 - [ ] **Step 5: Commit**
 
