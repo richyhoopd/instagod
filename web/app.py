@@ -381,8 +381,16 @@ def persona_fusionar(persona_id: int, otra_id: int = Form(...)) -> Response:
     """Absorbe `otra_id` en `persona_id`: mismo humano mal separado por el clustering."""
     cx = db.connect()
     try:
-        if not db.get(cx, "personas", persona_id) or not db.get(cx, "personas", otra_id):
+        if otra_id == persona_id:
+            raise HTTPException(status_code=400,
+                                detail="una persona no se fusiona consigo misma")
+        persona = db.get(cx, "personas", persona_id)
+        otra = db.get(cx, "personas", otra_id)
+        if not persona or not otra:
             raise HTTPException(status_code=404, detail="persona no encontrada")
+        if persona["band_id"] != otra["band_id"]:
+            raise HTTPException(status_code=400,
+                                detail="las dos personas deben ser de la misma banda")
         cx.execute("UPDATE face_signatures SET persona_id = ? WHERE persona_id = ?",
                    (persona_id, otra_id))
         cx.execute("UPDATE photos SET persona_id = ? WHERE persona_id = ?",

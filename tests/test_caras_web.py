@@ -76,6 +76,35 @@ def test_fusionar_personas(cliente) -> None:
     assert db.get(cx, "photos", f1)["persona_id"] == p1
 
 
+def test_fusionar_persona_consigo_misma_falla(cliente) -> None:
+    """Guard: otra_id == persona_id no debe borrar la persona activa (bug de la Task 6)."""
+    cli, cx = cliente
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    pid = db.insert(cx, "personas", band_id=bid, etiqueta_auto="persona A")
+    fid = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a",
+                    persona_id=pid)
+    db.insert(cx, "face_signatures", photo_id=fid, persona_id=pid,
+              bbox="[0,0,1,1]", det_score=0.9, embedding=b"\x00" * 512)
+    r = cli.post(f"/personas/{pid}/fusionar", data={"otra_id": str(pid)})
+    assert r.status_code == 400
+    assert db.get(cx, "personas", pid) is not None
+    assert db.rows(cx, "SELECT * FROM face_signatures WHERE persona_id = ?", (pid,))
+    assert db.get(cx, "photos", fid)["persona_id"] == pid
+
+
+def test_fusionar_bandas_distintas_falla(cliente) -> None:
+    """Guard: no se fusionan personas de bandas distintas (la API no debe permitirlo)."""
+    cli, cx = cliente
+    b1 = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    b2 = db.insert(cx, "bands", nombre="Otra Banda", ig_handle="otra_banda")
+    p1 = db.insert(cx, "personas", band_id=b1, etiqueta_auto="persona A")
+    p2 = db.insert(cx, "personas", band_id=b2, etiqueta_auto="persona B")
+    r = cli.post(f"/personas/{p1}/fusionar", data={"otra_id": str(p2)})
+    assert r.status_code == 400
+    assert db.get(cx, "personas", p1) is not None
+    assert db.get(cx, "personas", p2) is not None
+
+
 def test_descartar_persona_saca_sus_fotos_del_banco(cliente) -> None:
     cli, cx = cliente
     bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
