@@ -145,6 +145,13 @@ FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.01") or "0.01")
 FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.45") or "0.45")
 MODELS_DIR = _get("MODELS_DIR", "./data/models")
 
+# ---------- Banco de fotos por persona ----------
+FOTOS_POR_PERSONA = int(_get("FOTOS_POR_PERSONA", "5") or "5")
+FOTOS_GRUPALES = int(_get("FOTOS_GRUPALES", "3") or "3")
+FOTOS_MINIMO_SIN_CARAS = int(_get("FOTOS_MINIMO_SIN_CARAS", "4") or "4")
+DEDUP_HAMMING_MAX = int(_get("DEDUP_HAMMING_MAX", "8") or "8")
+ANTI_REPETICION_DIAS = int(_get("ANTI_REPETICION_DIAS", "45") or "45")
+
 # ---------- Base de datos local (SQLite) ----------
 # Fuente de verdad de bandas/fotos/eventos; el Sheet queda como UI de aprobación.
 DB_PATH = _get("DB_PATH", "./data/gdlscene.db")
