@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import calendar
 import sys
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import pytz
@@ -56,13 +56,30 @@ def proximo_mes(hoy: date | None = None) -> tuple[int, int]:
     return (hoy.year + 1, 1) if hoy.month == 12 else (hoy.year, hoy.month + 1)
 
 
-def seleccionar(cx, max_posts: int) -> list[dict[str, Any]]:
+def personas_recientes(cx, dias: int, ahora: "datetime | None" = None) -> set[int]:
+    """Personas que ya salieron en un post dentro de la ventana de `dias`.
+
+    Mira `content_queue` (no `photos.usada`) porque ahí vive la fecha del post.
+    """
+    ahora = ahora or datetime.now()
+    corte = (ahora - timedelta(days=dias)).isoformat()
+    filas = db.rows(cx, """
+        SELECT DISTINCT p.persona_id
+          FROM content_queue q JOIN photos p ON p.id = q.photo_id
+         WHERE p.persona_id IS NOT NULL
+           AND q.status IN ('en_sheet', 'publicado')
+           AND q.scheduled_datetime >= ?
+    """, (corte,))
+    return {f["persona_id"] for f in filas}
+
+
+def seleccionar(cx, max_posts: int, ahora: "datetime | None" = None) -> list[dict[str, Any]]:
     """Elige (banda, foto) hasta `max_posts`, por impacto y con topes. Función testeable.
 
     Devuelve filas en orden de publicación (round-robin por impacto).
     """
     fotos = db.rows(cx, """
-        SELECT p.id AS photo_id, p.band_id, p.nitidez, p.caption_original,
+        SELECT p.id AS photo_id, p.band_id, p.nitidez, p.caption_original, p.persona_id,
                b.nombre AS banda_nombre, b.tipo, b.prioridad, b.followers_ig
           FROM photos p JOIN bands b ON b.id = p.band_id
          WHERE p.usable_meme = 1 AND p.usada = 0 AND p.descartada = 0 AND b.activa = 1
@@ -75,6 +92,16 @@ def seleccionar(cx, max_posts: int) -> list[dict[str, Any]]:
            AND p.id NOT IN (SELECT photo_id FROM content_queue WHERE photo_id IS NOT NULL)
          ORDER BY p.nitidez DESC
     """)
+    # Anti-repetición POR CARA, no por archivo: lo que el ojo nota es que
+    # vuelva a salir la misma persona, no que se repita el mismo jpg.
+    recientes = personas_recientes(cx, config.ANTI_REPETICION_DIAS, ahora)
+    if recientes:
+        frescas = [f for f in fotos if f["persona_id"] not in recientes]
+        # Si una banda se queda sin material fresco, mejor repetir cara que
+        # dejarla fuera del plan: el filtro es preferencia, no prohibición.
+        bandas_frescas = {f["band_id"] for f in frescas}
+        fotos = frescas + [f for f in fotos if f["band_id"] not in bandas_frescas]
+
     # Agrupar por banda, respetando el tope (mejores fotos por nitidez).
     por_banda: dict[int, list[dict]] = {}
     meta: dict[int, dict] = {}
