@@ -1886,7 +1886,9 @@ git commit -m "chore(banco): script de calibración de umbral facial"
 
 **Interfaces:**
 - Consumes: `faces.detectar` (Task 3).
-- Produces: `classify.cargar_color(path: Path) -> np.ndarray | None`; `classify.contar_caras(img_color) -> tuple[int, int]` (misma forma de retorno que antes: `(total, claras)`).
+- Produces: `classify.cargar_color(path: Path) -> np.ndarray | None`; `classify.contar_caras(img_color) -> int`.
+
+**Cambio de firma decidido por Ricardo (3-ago):** la versión de Haar devolvía `(total, claras)` porque distinguía detecciones débiles de fuertes. YuNet ya filtra por score y tamaño dentro de `faces.detectar`, así que las dos cuentas serían idénticas. En vez de arrastrar una tupla con el mismo número repetido, `contar_caras` devuelve **un solo `int`** y se ajustan sus dos consumidores.
 
 El spec pide que YuNet reemplace a Haar. Si no se hace, `classify` y `banco` usan detectores distintos y se pisan el `faces_count` mutuamente según cuál corra al final.
 
@@ -1915,14 +1917,13 @@ def test_contar_caras_usa_yunet(monkeypatch) -> None:
         ]
 
     monkeypatch.setattr(classify.faces, "detectar", fake_detectar)
-    total, claras = classify.contar_caras(np.zeros((300, 300, 3), dtype=np.uint8))
+    assert classify.contar_caras(np.zeros((300, 300, 3), dtype=np.uint8)) == 2
     assert llamado.get("si") is True
-    assert (total, claras) == (2, 2)
 
 
 def test_contar_caras_sin_caras(monkeypatch) -> None:
     monkeypatch.setattr(classify.faces, "detectar", lambda img: [])
-    assert classify.contar_caras(np.zeros((300, 300, 3), dtype=np.uint8)) == (0, 0)
+    assert classify.contar_caras(np.zeros((300, 300, 3), dtype=np.uint8)) == 0
 
 
 def test_cargar_color_normaliza_ancho(tmp_path) -> None:
@@ -1974,19 +1975,16 @@ def cargar_color(path: Path) -> "np.ndarray | None":
 Reemplazar `contar_caras` completa:
 
 ```python
-def contar_caras(img_color: "np.ndarray") -> tuple[int, int]:
-    """(total, claras) con YuNet.
+def contar_caras(img_color: "np.ndarray") -> int:
+    """Cuántas caras usables tiene la imagen, según YuNet.
 
-    Devuelve la misma tupla que la versión de Haar para no tocar a sus
-    consumidores. Con YuNet la distinción total/claras se vuelve redundante
-    —el detector ya filtra por score y tamaño en `faces.detectar`— así que
-    ambas cuentas coinciden; se conserva la forma por compatibilidad.
+    `faces.detectar` ya filtra por score y tamaño mínimos, así que no hay
+    distinción entre detecciones "totales" y "claras" como en la época de Haar.
     """
-    caras = faces.detectar(img_color)
-    return len(caras), len(caras)
+    return len(faces.detectar(img_color))
 ```
 
-En `clasificar_foto`, cargar también la versión en color y pasarla:
+En `clasificar_foto`, cargar también la versión en color y ajustar a la firma nueva. Las dos variables `total` y `claras` se colapsan en una, `caras`:
 
 ```python
     gris = cargar_normalizada(path)
@@ -1996,8 +1994,12 @@ En `clasificar_foto`, cargar también la versión en color y pasarla:
         return "ilegible"
 
     nitidez = medir_nitidez(gris)
-    total, claras = contar_caras(color)
+    caras = contar_caras(color)
 ```
+
+Y en el resto de `clasificar_foto`, sustituir cada uso de `claras` por `caras` y cada uso de `total` por `caras`. Son cinco: la condición de `hay_persona` (`claras == 0`), la llamada a `decidir_usable(claras, ...)`, `faces_count=total`, `es_grupal=1 if claras >= 2 else 0`, y el mensaje de log (`f"{claras} cara(s)"`).
+
+`decidir_usable` **no cambia de firma**: su primer parámetro se sigue llamando `caras_claras` y recibe el mismo número.
 
 - [ ] **Step 4: Run test to verify it passes**
 
