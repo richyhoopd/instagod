@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import config
 from src import banco
 
 
@@ -37,10 +38,47 @@ def test_grupales_tienen_su_propio_cupo() -> None:
 
 
 def test_degradacion_sin_caras() -> None:
-    """Foro/paisaje: sin caras, conserva las más nítidas hasta el mínimo."""
+    """Banda sin material con caras: conserva las más nítidas hasta el mínimo."""
     fotos = [{"id": i, "nitidez": float(i), "caras": []} for i in range(10)]
     dentro = banco.aplicar_cupo(fotos, por_persona=5, grupales=3, minimo_sin_caras=4)
     assert dentro == {9, 8, 7, 6}
+
+
+def test_banda_con_caras_no_conserva_las_sin_caras() -> None:
+    """Comportamiento VIEJO intacto: para una banda la cubeta sin caras es solo
+    degradación de último recurso — con una sola foto con cara ya no aplica."""
+    fotos = [_foto(1, nitidez=10, personas=[0])]
+    fotos += [{"id": 100 + i, "nitidez": 500.0, "caras": []} for i in range(5)]
+    dentro = banco.aplicar_cupo(fotos, por_persona=5, grupales=3, minimo_sin_caras=4)
+    assert dentro == {1}
+
+
+def test_foro_conserva_ambas_cubetas() -> None:
+    """El bug que vaciaba el banco de foros: 1 foto con cara mataba a las 39 del
+    lugar. Con `admite_sin_caras` la cubeta sin caras tiene cupo propio."""
+    fotos = [_foto(1, nitidez=10, personas=[0])]
+    fotos += [{"id": 100 + i, "nitidez": 500.0, "caras": []} for i in range(39)]
+    dentro = banco.aplicar_cupo(fotos, por_persona=5, grupales=3, minimo_sin_caras=4,
+                                admite_sin_caras=True, cupo_sin_caras=20)
+    assert 1 in dentro                       # la de cara sigue entrando
+    assert len(dentro) == 21                 # + las 20 mejores sin cara
+    # Se quedan las más nítidas, no las primeras que aparezcan.
+    assert dentro - {1} == {100 + i for i in range(20)}
+
+
+def test_foro_sin_caras_usa_su_cupo_no_el_minimo() -> None:
+    """Sin ninguna cara, un foro NO se queda en los 4 de la degradación."""
+    fotos = [{"id": i, "nitidez": float(i), "caras": []} for i in range(30)]
+    dentro = banco.aplicar_cupo(fotos, por_persona=5, grupales=3, minimo_sin_caras=4,
+                                admite_sin_caras=True, cupo_sin_caras=20)
+    assert len(dentro) == 20
+
+
+def test_cupo_sin_caras_default_viene_de_config() -> None:
+    fotos = [{"id": i, "nitidez": float(i), "caras": []} for i in range(50)]
+    dentro = banco.aplicar_cupo(fotos, por_persona=5, grupales=3, minimo_sin_caras=4,
+                                admite_sin_caras=True)
+    assert len(dentro) == config.FOTOS_SIN_CARAS
 
 
 def test_una_sola_persona_no_gasta_cupo_grupal() -> None:

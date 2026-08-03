@@ -7,6 +7,15 @@ poder probarse sin imágenes ni base de datos.
 El cupo es POR PERSONA, no por banda: un tope por banda puede llenarse con
 diez fotos del vocalista y dejar al baterista fuera, que es exactamente el
 problema que este banco resuelve.
+
+⚠️ DOS ESCRITORES DE `usable_meme` — ORDEN OBLIGATORIO: classify PRIMERO, banco
+DESPUÉS. `src.classify` escribe la misma columna con otra política ("la foto es
+apta"), este módulo la re-escribe con la suya ("además ganó el cupo"). La última
+corrida gana. Corolario operativo: `python -m src.classify --redo` (el checkbox
+"re-hacer todas" de la GUI) INVALIDA la decisión de cupo de esa banda y obliga a
+re-correr `python -m src.banco <handle>` para recuperarla. Una corrida normal de
+classify (sin `--redo`) no la toca: filtra por `faces_count IS NULL` y el banco
+siempre escribe `faces_count`.
 """
 from __future__ import annotations
 
@@ -35,11 +44,28 @@ def puntuar(foto: dict[str, Any]) -> float:
 
 
 def aplicar_cupo(fotos: list[dict[str, Any]], por_persona: int, grupales: int,
-                 minimo_sin_caras: int) -> set[int]:
+                 minimo_sin_caras: int, *, admite_sin_caras: bool = False,
+                 cupo_sin_caras: int | None = None) -> set[int]:
     """Ids que entran al banco.
 
-    Tres cubetas independientes: una por persona (fotos de una sola cara), una
-    de grupales (2+ caras), y la degradación sin caras para foros y paisajes.
+    Tres cubetas: una por persona (fotos de una sola cara), una de grupales
+    (2+ caras) y una sin caras. Qué significa la tercera depende del actor:
+
+    - `admite_sin_caras=False` (banda, solista): una foto sin cara no sirve de
+      meme, así que la cubeta es DEGRADACIÓN de último recurso — solo se llena,
+      hasta `minimo_sin_caras`, si ninguna foto con cara entró.
+    - `admite_sin_caras=True` (los tipos de `config.TIPOS_SIN_CARA`: foro,
+      evento, colectivo): ahí lo que vale es el lugar, el ambiente, el público
+      — la foto sin cara es el material PRINCIPAL. La cubeta tiene cupo propio
+      (`cupo_sin_caras`, default `config.FOTOS_SIN_CARAS`) y se llena SIEMPRE,
+      igual que las de individuales y grupales.
+
+    Por qué el cupo propio y no `minimo_sin_caras`: `FOTOS_MINIMO_SIN_CARAS` es
+    4 porque es una degradación. Aplicárselo a un foro con 200 fotos del lugar
+    tira el 98% del acervo por una sola foto con cara que se colara. Un foro no
+    tiene "integrantes" entre los que repartir, así que su banco debe parecerse
+    al de una BANDA ENTERA: 3-4 integrantes × `por_persona` + `grupales` ≈ 18-23
+    fotos. De ahí el default de 20 (ver `config.FOTOS_SIN_CARAS`).
     """
     ordenadas = sorted(fotos, key=puntuar, reverse=True)
     individuales = [f for f in ordenadas if len(f.get("caras") or []) == 1]
@@ -56,8 +82,11 @@ def aplicar_cupo(fotos: list[dict[str, Any]], por_persona: int, grupales: int,
 
     dentro.update(f["id"] for f in de_grupo[:grupales])
 
-    # Degradación: solo si la banda no dio material con caras.
-    if not dentro:
+    if admite_sin_caras:
+        cupo = config.FOTOS_SIN_CARAS if cupo_sin_caras is None else cupo_sin_caras
+        dentro.update(f["id"] for f in sin_caras[:cupo])
+    elif not dentro:
+        # Degradación: solo si la banda no dio material con caras.
         dentro.update(f["id"] for f in sin_caras[:minimo_sin_caras])
     return dentro
 
@@ -131,6 +160,7 @@ def _asignar_members(nombradas: list[tuple[int, "np.ndarray"]],
 def _analizar_real(path: Path):
     """(hash, nitidez, [(bbox, det_score, frac_area, firma)]) de una foto en disco."""
     import cv2
+
     from src import classify
     img = cv2.imread(str(path))
     if img is None:
@@ -175,16 +205,31 @@ def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> d
     El análisis (lo que puede tronar por una imagen corrupta) corre ANTES de
     tocar la base: si `analizar` lanza, esta banda no queda con DELETE/UPDATE
     a medias — no se mutó nada suyo todavía.
+
+    Los flyers quedan fuera de la selección (mismo `NOT EXISTS` que el planner):
+    no se analizan, no compiten por el cupo y su `usable_meme` no se toca.
+
+    `bands.tipo` decide si la cubeta sin caras tiene cupo propio: ver
+    `aplicar_cupo` y `config.TIPOS_SIN_CARA`.
     """
     if limite <= 0:
         raise ValueError(f"limite debe ser positivo, recibido {limite!r}")
 
     analizar = _analizador or _analizar_real
+    banda = db.get(cx, "bands", band_id) or {}
+    admite_sin_caras = (banda.get("tipo") or "banda") in config.TIPOS_SIN_CARA
     nombradas = _centroides_nombrados(cx, band_id)
     filas = db.rows(cx, """
-        SELECT id, path FROM photos
-         WHERE band_id = ? AND descartada = 0
-         ORDER BY nitidez DESC
+        SELECT p.id, p.path FROM photos p
+         WHERE p.band_id = ? AND p.descartada = 0
+           -- Los flyers NO son memes (el planner ya los filtra en
+           -- `seleccionar`/`pick_replacement` y `generate_relleno.candidatas`):
+           -- si compitieran aquí se llevarían cupo —son nitidísimos, entran
+           -- primero al LIMIT— para no llegar nunca a un post.
+           AND NOT EXISTS (SELECT 1 FROM events e
+                           WHERE e.tipo = 'flyer'
+                             AND e.source_post_id = p.source_post_id)
+         ORDER BY p.nitidez DESC
          LIMIT ?
     """, (band_id, limite))
 
@@ -269,7 +314,9 @@ def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> d
                  for j in caras_por_foto.get(foto["id"], [])]
         para_cupo.append({"id": foto["id"], "nitidez": foto["nitidez"], "caras": caras})
     dentro = aplicar_cupo(para_cupo, config.FOTOS_POR_PERSONA, config.FOTOS_GRUPALES,
-                          config.FOTOS_MINIMO_SIN_CARAS)
+                          config.FOTOS_MINIMO_SIN_CARAS,
+                          admite_sin_caras=admite_sin_caras,
+                          cupo_sin_caras=config.FOTOS_SIN_CARAS)
 
     # 5. Marcar. NUNCA se borra ni se marca `descartada`: solo sale del banco.
     for foto in analizadas:

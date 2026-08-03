@@ -14,6 +14,21 @@ Por cada foto sin clasificar calcula:
 El OCR solo corre cuando faces_count <= 1 (los flyers casi nunca tienen caras
 detectables); eso evita pagar tesseract en cada foto de banda.
 
+⚠️ DOS ESCRITORES DE `usable_meme` — ORDEN OBLIGATORIO: classify PRIMERO, banco
+DESPUÉS. Este módulo y `src.banco` escriben la MISMA columna con políticas
+contrarias: aquí `usable_meme` significa "la foto es apta" (nítida, con gente,
+no flyer); en el banco significa "además ganó el cupo por persona". La última
+corrida gana, así que el orden correcto es siempre
+`python -m src.classify … && python -m src.banco …`.
+
+Hoy el conflicto está tapado por accidente: `clasificar()` sin `--redo` filtra
+`WHERE p.faces_count IS NULL` y el banco SIEMPRE escribe `faces_count`, así que
+una corrida normal de classify ya no vuelve a tocar lo que el banco decidió.
+Con `--redo` (el checkbox "re-hacer todas" de la GUI) esa protección desaparece:
+reclasifica TODAS las fotos de la banda y BORRA la decisión de cupo — fotos que
+el banco había sacado vuelven a `usable_meme=1`. Después de un `--redo` hay que
+RE-CORRER `python -m src.banco <handle>` para recuperar el cupo.
+
 Uso:
     python -m src.classify                 # todas las fotos sin clasificar
     python -m src.classify kabala_oficial  # solo esa banda
@@ -226,8 +241,10 @@ def score_flyer(ocr_text: str, caption_evento: bool = False) -> tuple[bool, str]
     return False, ""
 
 
-# Tipos cuyo contenido NO depende de una persona: el lugar o el cartel sirven igual.
-_TIPOS_SIN_CARA = {"foro", "evento", "colectivo"}
+# Tipos cuyo contenido NO depende de una persona: el lugar o el cartel sirven
+# igual. Vive en `config` porque `src.banco` lo necesita para el cupo de la
+# cubeta sin caras y no puede importar este módulo (arrastraría cv2).
+_TIPOS_SIN_CARA = config.TIPOS_SIN_CARA
 
 
 def decidir_usable(caras_claras: int, nitidez: float, flyer: bool,

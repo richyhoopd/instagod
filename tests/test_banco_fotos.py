@@ -98,20 +98,87 @@ def test_procesar_banda_dedup_saca_la_copia(cx, tmp_path, monkeypatch) -> None:
     assert fila_a["usable_meme"] == 0 and fila_a["descartada"] == 0
 
 
+def _hashes_distintos(n: int) -> list[np.ndarray]:
+    """n hashes a distancia de Hamming 16 entre sí (> DEDUP_HAMMING_MAX=8): un
+    bloque de 8 bits en cero desplazado por foto, así ninguna se deduplica."""
+    return [_hash("1" * (8 * i) + "0" * 8 + "1" * (64 - 8 * i - 8)) for i in range(n)]
+
+
 def test_procesar_banda_sin_caras_degrada(cx, tmp_path, monkeypatch) -> None:
+    """Degradación pura: una BANDA sin ninguna cara conserva el mínimo."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    for i in range(6):
+        db.insert(cx, "photos", band_id=bid, path=f"{i}.jpg", source_post_id=str(i))
+    hs = _hashes_distintos(6)
+    mapa = {f"{i}.jpg": (hs[i], float(i * 10), []) for i in range(6)}
+    res = banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+    assert res["personas"] == 0
+    assert res["fotos_dentro"] == 4  # FOTOS_MINIMO_SIN_CARAS
+
+
+def test_banda_con_una_cara_no_conserva_las_sin_cara(cx, tmp_path, monkeypatch) -> None:
+    """El comportamiento viejo NO se rompe: para tipo='banda' la cubeta sin
+    caras sigue siendo degradación de último recurso."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    for i in range(6):
+        db.insert(cx, "photos", band_id=bid, path=f"{i}.jpg", source_post_id=str(i))
+    hs = _hashes_distintos(6)
+    mapa = {f"{i}.jpg": (hs[i], 500.0, []) for i in range(1, 6)}
+    mapa["0.jpg"] = (hs[0], 10.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])
+    res = banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+    assert res["fotos_dentro"] == 1
+    dentro = db.rows(cx, "SELECT path FROM photos WHERE usable_meme = 1")
+    assert [f["path"] for f in dentro] == ["0.jpg"]
+
+
+def test_foro_conserva_las_fotos_del_lugar_aunque_haya_una_con_cara(
+        cx, tmp_path, monkeypatch) -> None:
+    """Bug crítico: un foro con 1 foto con cara y N del lugar se quedaba SOLO
+    con la de cara. `bands.tipo` en TIPOS_SIN_CARA le da cupo propio a la
+    cubeta sin caras y ambas se conservan."""
     monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
     bid = db.insert(cx, "bands", nombre="Foro", ig_handle="f", tipo="foro")
     for i in range(6):
         db.insert(cx, "photos", band_id=bid, path=f"{i}.jpg", source_post_id=str(i))
-    # Bloque de 8 bits en cero desplazado por foto: distancia de Hamming 16
-    # entre cualquier par (> DEDUP_HAMMING_MAX=8), así ninguna se deduplica.
-    mapa = {}
-    for i in range(6):
-        bits = "1" * (8 * i) + "0" * 8 + "1" * (64 - 8 * i - 8)
-        mapa[f"{i}.jpg"] = (_hash(bits), float(i * 10), [])
+    hs = _hashes_distintos(6)
+    mapa = {f"{i}.jpg": (hs[i], 500.0, []) for i in range(1, 6)}
+    mapa["0.jpg"] = (hs[0], 10.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])
     res = banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
-    assert res["personas"] == 0
-    assert res["fotos_dentro"] == 4  # FOTOS_MINIMO_SIN_CARAS
+    assert res["personas"] == 1
+    assert res["fotos_dentro"] == 6  # la de cara + las 5 del lugar
+    assert all(f["usable_meme"] == 1
+               for f in db.rows(cx, "SELECT usable_meme FROM photos"))
+
+
+def test_flyers_no_compiten_por_el_cupo_del_banco(cx, tmp_path, monkeypatch) -> None:
+    """Un flyer es nitidísimo: sin el filtro entraba primero al LIMIT y se
+    llevaba un slot que nunca iba a usar (el planner los excluye del post)."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    pid_flyer = db.insert(cx, "photos", band_id=bid, path="flyer.jpg",
+                          source_post_id="F", nitidez=9999.0, usable_meme=0)
+    db.insert(cx, "events", band_id=bid, tipo="flyer", source_post_id="F",
+              flyer_path="flyer.jpg", status="nuevo")
+    db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a", nitidez=10.0)
+    hs = _hashes_distintos(2)
+    llamadas: list[str] = []
+
+    def analizar(path):
+        llamadas.append(Path(path).name)
+        i = 0 if Path(path).name == "flyer.jpg" else 1
+        return hs[i], 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))]
+
+    res = banco.procesar_banda(cx, bid, limite=1, _analizador=analizar)
+
+    # Con el LIMIT en 1 el flyer (nitidez 9999) habría desplazado a a.jpg.
+    assert llamadas == ["a.jpg"]
+    assert res["fotos_dentro"] == 1
+    # Y su usable_meme no se toca: el banco no decide sobre flyers.
+    assert db.get(cx, "photos", pid_flyer)["usable_meme"] == 0
+    assert db.rows(cx, "SELECT path FROM photos WHERE usable_meme = 1"
+                   )[0]["path"] == "a.jpg"
 
 
 def test_procesar_banda_es_idempotente(cx, tmp_path, monkeypatch) -> None:

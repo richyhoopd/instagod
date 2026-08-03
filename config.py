@@ -147,10 +147,25 @@ FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.01") or "0.01")
 FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.45") or "0.45")
 MODELS_DIR = _get("MODELS_DIR", "./data/models")
 
+# Tipos de actor cuyo contenido NO depende de una persona: vale el lugar, el
+# ambiente, el público. Vive en config (no en src/classify) porque lo consumen
+# DOS módulos —`src.classify` para decidir `usable_meme` y `src.banco` para
+# darle cupo propio a la cubeta sin caras— y `src.banco` es puro a propósito:
+# importar `src.classify` desde ahí arrastraría cv2, los cascades de Haar y el
+# MSER en tiempo de import de un módulo que se debe poder probar sin imágenes.
+TIPOS_SIN_CARA = {"foro", "evento", "colectivo"}
+
 # ---------- Banco de fotos por persona ----------
 FOTOS_POR_PERSONA = int(_get("FOTOS_POR_PERSONA", "5") or "5")
 FOTOS_GRUPALES = int(_get("FOTOS_GRUPALES", "3") or "3")
 FOTOS_MINIMO_SIN_CARAS = int(_get("FOTOS_MINIMO_SIN_CARAS", "4") or "4")
+# Cupo de la cubeta SIN CARAS para los actores de TIPOS_SIN_CARA (foro, evento,
+# colectivo). No es la degradación de FOTOS_MINIMO_SIN_CARAS: para un foro las
+# fotos sin cara son el material principal, no el último recurso. Un foro no
+# tiene "integrantes" entre los que repartir, así que su banco debe parecerse
+# al de una BANDA ENTERA: una de 3-4 integrantes se lleva
+# 3..4 × FOTOS_POR_PERSONA + FOTOS_GRUPALES = 18..23 fotos. De ahí el 20.
+FOTOS_SIN_CARAS = int(_get("FOTOS_SIN_CARAS", "20") or "20")
 DEDUP_HAMMING_MAX = int(_get("DEDUP_HAMMING_MAX", "8") or "8")
 ANTI_REPETICION_DIAS = int(_get("ANTI_REPETICION_DIAS", "45") or "45")
 
