@@ -5,7 +5,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+import pytz
 
+import config
 from src import db, planner
 
 
@@ -55,6 +57,37 @@ def test_seleccionar_evita_persona_reciente(cx) -> None:
               scheduled_datetime=(ahora - timedelta(days=5)).isoformat())
     sel = planner.seleccionar(cx, max_posts=1, ahora=ahora)
     assert [f["photo_id"] for f in sel] == [f2]
+
+
+def test_personas_recientes_default_es_timezone_aware(cx, monkeypatch) -> None:
+    """El default de `ahora` debe usar config.TIMEZONE, no datetime.now() naive.
+
+    Mismo bug que ya mordió a approval.aprobar (ver src/approval.py:44): si la
+    máquina reporta la hora en otro huso y el default cae a datetime.now() sin
+    tz, el corte de la ventana se calcula sobre un instante distinto al resto
+    del motor y compara mal contra scheduled_datetime (que SIEMPRE se guarda
+    tz-aware). Aquí simulamos ese desfase: now(tz=CDMX) da mediodía correcto,
+    pero now() naive (lo que devolvería un host en otro huso) da las 22:00.
+    """
+    bid, p1, _, f1, _ = _banda_con_dos_personas(cx)
+    tz = pytz.timezone(config.TIMEZONE)
+
+    class _FakeDT(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = datetime(2026, 8, 3, 12, 0)
+            return tz.localize(base) if tz else datetime(2026, 8, 3, 22, 0)
+
+    monkeypatch.setattr(planner, "datetime", _FakeDT)
+
+    ahora_correcto = tz.localize(datetime(2026, 8, 3, 12, 0))
+    # 45 días - 6h antes del mediodía CDMX: dentro de la ventana SOLO si el
+    # corte usa el "ahora" tz-aware correcto (12:00), no el naive (22:00).
+    scheduled = ahora_correcto - timedelta(days=45) + timedelta(hours=6)
+    db.insert(cx, "content_queue", tipo="meme", band_id=bid, photo_id=f1,
+              status="publicado", scheduled_datetime=scheduled.isoformat())
+
+    assert planner.personas_recientes(cx, dias=45) == {p1}
 
 
 def test_sin_persona_sigue_funcionando(cx) -> None:

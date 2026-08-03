@@ -61,15 +61,19 @@ def personas_recientes(cx, dias: int, ahora: "datetime | None" = None) -> set[in
 
     Mira `content_queue` (no `photos.usada`) porque ahí vive la fecha del post.
     """
-    ahora = ahora or datetime.now()
+    # OJO timezone: default tz-aware (config.TIMEZONE), NO datetime.now() naive
+    # (mismo bug que ya mordió a approval.aprobar, ver src/approval.py:44). Con
+    # naive, la máquina en otro huso movería el corte respecto a lo que guarda
+    # scheduled_datetime (siempre tz-aware) y la ventana quedaría mal calculada.
+    ahora = ahora or datetime.now(pytz.timezone(config.TIMEZONE))
     corte = (ahora - timedelta(days=dias)).isoformat()
     filas = db.rows(cx, """
         SELECT DISTINCT p.persona_id
           FROM content_queue q JOIN photos p ON p.id = q.photo_id
          WHERE p.persona_id IS NOT NULL
-           AND q.status IN ('en_sheet', 'publicado')
+           AND q.status IN (?, ?)
            AND q.scheduled_datetime >= ?
-    """, (corte,))
+    """, (db.QUEUE_EN_SHEET, db.QUEUE_PUBLICADO, corte))
     return {f["persona_id"] for f in filas}
 
 
@@ -347,7 +351,7 @@ def plan_month(year: int, month: int, *, replan: bool = False) -> dict[str, int]
             print(f"No quedan slots futuros en {ini} (el mes ya transcurrió).")
             return {"posts": 0, "bandas": 0, "slots": 0}
 
-        seleccion = seleccionar(cx, len(slots))
+        seleccion = seleccionar(cx, len(slots), ahora=ahora)
         if not seleccion:
             print("No hay fotos usables sin usar. Corre el pipeline / cura fotos.")
             return {"posts": 0}
