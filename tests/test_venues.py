@@ -94,3 +94,12 @@ def test_sugerencias_respeta_el_tope() -> None:
 
 def test_sugerencias_sin_candidatos() -> None:
     assert venues.sugerencias("lo que sea", []) == []
+
+
+def test_normalizar_articulo_mas_generico_se_conserva() -> None:
+    """Un artículo + genérico no debe colapsar a solo el artículo.
+    Dos lugares 'El Bar' y 'El Salon' no deben fusionarse."""
+    assert venues.normalizar("El Foro") == "el foro"
+    assert venues.normalizar("El Bar") == "el bar"
+    assert venues.normalizar("El Salon") == "el salon"
+    assert venues.normalizar("El Pub") == "el pub"

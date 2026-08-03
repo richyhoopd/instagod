@@ -31,6 +31,10 @@ _GENERICOS = (
     "el foro", "foro", "salon", "sala", "bar", "pub",
 )
 
+# Artículos españoles. Si después de podar genéricos queda solo un artículo,
+# conservamos el texto original: "El Foro" → "el foro", no "el".
+_ARTICULOS = ("el", "la", "los", "las")
+
 
 def normalizar(s: str | None) -> str:
     """Clave de comparación de un lugar. PURA.
@@ -42,7 +46,6 @@ def normalizar(s: str | None) -> str:
     # Paréntesis y su contenido: "Staditche (Espacio Cultural)" → "Staditche".
     s = re.sub(r"\([^)]*\)", " ", s)
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    s = s.replace("@", " ")
     s = re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
     s = re.sub(r"\s+", " ", s)
     if not s:
@@ -60,7 +63,8 @@ def normalizar(s: str | None) -> str:
     # Si el lugar era SOLO una palabra genérica ("Foro"), conservamos el texto:
     # "" está reservado para "no hay lugar" y confundir ambos casos haría que
     # todos los eventos sin lugar se fusionaran entre sí.
-    return s or completo
+    # También si el resultado es solo un artículo ("El Foro" → "el"), conservamos.
+    return s if s and s not in _ARTICULOS else completo
 
 
 def sugerencias(texto: str, candidatos: list[tuple[int, str]],
