@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import re
 import sys
-import unicodedata
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -32,47 +30,23 @@ from src import compose as compose_mod
 from src.generate_anuncios import _MESES
 
 
-# Prefijos genéricos de "tipo de local" que NO identifican el venue: el mismo
-# lugar se anuncia con o sin ellos ("Foro Anexo Independencia" == "Anexo
-# Independencia"). Se listan normalizados (sin acentos, minúsculas). Conservador
-# a propósito: solo genéricos inequívocos y solo si están AL INICIO, para no
-# fusionar lugares realmente distintos. Orden: los de más palabras primero.
-_PREFIJOS_VENUE = (
-    "centro cultural", "el foro", "foro", "salon", "sala", "bar",
-)
-
-
-def _norm_venue(s: str | None) -> str:
-    """Normaliza un lugar para comparar: sin acentos, minúsculas, solo alfanum.
-
-    Colapsa además variantes del mismo venue quitando prefijos genéricos de tipo
-    de local (ver _PREFIJOS_VENUE): "Foro Anexo" y "Anexo" caen en el mismo grupo.
-    """
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    # Puntuación → espacio (colapsa "foro:", "**foro**" contra "foro ").
-    s = re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
-    for pref in _PREFIJOS_VENUE:  # quita UN prefijo genérico al inicio
-        if s.startswith(pref + " "):
-            s = s[len(pref) + 1:].strip()
-            break
-    return re.sub(r"\s+", " ", s).strip()
-
-
 def agrupar_por_evento(eventos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fusiona eventos con MISMA fecha + MISMO foro en uno solo con TODAS las bandas.
 
-    Dos bandas que tocan en el mismo evento (o la misma banda con el flyer repetido)
-    aparecen una sola vez, listando los participantes. Sin lugar no se fusiona
-    (no hay forma de saber que es el mismo evento).
+    La identidad del foro es `events.venue_id`, del catálogo de `src/venues.py`,
+    no el texto de `lugar` — el mismo foro llega escrito de media docena de
+    formas ("REY" y "Hake al Rey" son el mismo lugar) y comparar texto dejaba
+    pasar duplicados a la agenda.
+
+    Sin `venue_id` no se fusiona: adivinar que dos flyers son el mismo evento
+    desaparecería uno de la agenda, y eso es peor que mostrarlo dos veces.
     """
     grupos: dict[tuple, dict] = {}
     orden: list[tuple] = []
     for e in eventos:
         fecha = (e.get("fecha_evento") or "")[:10]
-        venue = _norm_venue(e.get("lugar"))
-        clave = (fecha, venue) if venue else (fecha, f"__solo{e['id']}")
+        vid = e.get("venue_id")
+        clave = (fecha, vid) if vid else (fecha, f"__solo{e['id']}")
         g = grupos.get(clave)
         if g is None:
             g = {**e, "bandas": [], "handles": [], "ids": []}
@@ -88,14 +62,10 @@ def agrupar_por_evento(eventos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for clave in orden:
         g = grupos[clave]
-        g["banda_nombre"] = " · ".join(g["bandas"])  # todas las bandas del evento
+        g["banda_nombre"] = " · ".join(g["bandas"])
         out.append(g)
     return out
 
-_PERIODOS = {"semanal": 7, "mensual": 30}
-_MES_ABREV = ["ene", "feb", "mar", "abr", "may", "jun",
-              "jul", "ago", "sep", "oct", "nov", "dic"]
-_MAX_EN_TARJETA = 10  # más que esto no se lee; el resto va en "+N más"
 
 _PERIODOS = {"semanal": 7, "mensual": 30}
 _MES_ABREV = ["ene", "feb", "mar", "abr", "may", "jun",

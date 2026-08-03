@@ -230,9 +230,9 @@ def test_caption_agenda_etiqueta_todos_los_handles_fusionados() -> None:
     from src.generate_agenda import _caption_agenda, agrupar_por_evento
 
     evs = [
-        {"id": 1, "fecha_evento": "2026-07-12", "lugar": "Anexo Independencia",
+        {"id": 1, "fecha_evento": "2026-07-12", "venue_id": 1, "lugar": "Anexo Independencia",
          "banda_nombre": "DSPlusMx", "banda_handle": "dsplusmx", "flyer_path": "a.jpg"},
-        {"id": 2, "fecha_evento": "2026-07-12", "lugar": "ANEXO INDEPENDENCIA",
+        {"id": 2, "fecha_evento": "2026-07-12", "venue_id": 1, "lugar": "ANEXO INDEPENDENCIA",
          "banda_nombre": "the greacks", "banda_handle": "the_greacks", "flyer_path": "b.jpg"},
     ]
     grupos = agrupar_por_evento(evs)
@@ -284,8 +284,11 @@ def test_anexo_independencia_un_solo_slide_flyer_imagen1(tmp_path, monkeypatch) 
     """Las 5 filas del mismo show (incl. la variante 'foro …') → UN solo grupo,
     UN flyer (el representativo DZs_DvOBMTB) y AMBOS @handles.
 
-    Regresión BUG 1: _norm_venue no quitaba el prefijo 'foro ' → la fila 614
-    ('foro anexo independencia') caía en un grupo aparte y producía un 2º slide.
+    Regresión BUG 1 (histórica): antes se agrupaba por texto normalizado de
+    `lugar` y una variante mal normalizada producía un 2º slide. Ahora la
+    identidad es `venue_id` (Task 5/6 del catálogo de foros): las 5 filas
+    comparten venue_id aunque el texto de `lugar` varíe fila a fila — así
+    llega en la vida real, ya resuelto por `venues.resolver`.
     """
     from src import generate_agenda
 
@@ -297,19 +300,19 @@ def test_anexo_independencia_un_solo_slide_flyer_imagen1(tmp_path, monkeypatch) 
         return str(p)
 
     filas = [
-        {"id": 543, "fecha_evento": "2026-07-12", "lugar": "anexo independencia",
+        {"id": 543, "fecha_evento": "2026-07-12", "venue_id": 99, "lugar": "anexo independencia",
          "banda_nombre": "DSPlusMx", "banda_handle": "dsplusmx",
          "source_post_id": "DZs_DvOBMTB", "flyer_path": flyer("DZs_DvOBMTB_0.jpg")},
-        {"id": 614, "fecha_evento": "2026-07-12", "lugar": "foro anexo independencia",
+        {"id": 614, "fecha_evento": "2026-07-12", "venue_id": 99, "lugar": "foro anexo independencia",
          "banda_nombre": "the greacks", "banda_handle": "the_greacks",
          "source_post_id": "DZs-VeTBIa2", "flyer_path": flyer("DZs-VeTBIa2_0.jpg")},
-        {"id": 616, "fecha_evento": "2026-07-12", "lugar": "ANEXO INDEPENDENCIA",
+        {"id": 616, "fecha_evento": "2026-07-12", "venue_id": 99, "lugar": "ANEXO INDEPENDENCIA",
          "banda_nombre": "the greacks", "banda_handle": "the_greacks",
          "source_post_id": "DZ9TSqqusaj", "flyer_path": flyer("DZ9TSqqusaj_0.jpg")},
-        {"id": 617, "fecha_evento": "2026-07-12", "lugar": "ANEXO INDEPENDENCIA",
+        {"id": 617, "fecha_evento": "2026-07-12", "venue_id": 99, "lugar": "ANEXO INDEPENDENCIA",
          "banda_nombre": "the greacks", "banda_handle": "the_greacks",
          "source_post_id": "DZ6zLEbFYNH", "flyer_path": flyer("DZ6zLEbFYNH_0.jpg")},
-        {"id": 618, "fecha_evento": "2026-07-12", "lugar": "Anexo Independencia",
+        {"id": 618, "fecha_evento": "2026-07-12", "venue_id": 99, "lugar": "Anexo Independencia",
          "banda_nombre": "the greacks", "banda_handle": "the_greacks",
          "source_post_id": "DZs_DvOBMTB", "flyer_path": flyer("DZs_DvOBMTB_b.jpg")},
     ]
@@ -415,9 +418,9 @@ def test_build_agenda_partes_agrupa_antes_de_dedup(tmp_path, monkeypatch) -> Non
     p2 = tmp_path / "g2.png"; p2.write_bytes(b"\x89PNG\r\n\x1a\n\x02")
     b1 = db.insert(cx, "bands", nombre="Banda A", ig_handle="banda_a")
     b2 = db.insert(cx, "bands", nombre="Banda B", ig_handle="banda_b")
-    e1 = db.insert(cx, "events", band_id=b1, tipo="fecha",
+    e1 = db.insert(cx, "events", band_id=b1, tipo="fecha", venue_id=5,
                    fecha_evento="2026-06-10", lugar="Foro X", flyer_path=str(p1))
-    e2 = db.insert(cx, "events", band_id=b2, tipo="fecha",
+    e2 = db.insert(cx, "events", band_id=b2, tipo="fecha", venue_id=5,
                    fecha_evento="2026-06-10", lugar="Foro X", flyer_path=str(p2))
     cx.close()
 

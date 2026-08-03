@@ -1,41 +1,18 @@
-"""Tests de fusión de eventos: misma fecha + mismo foro = un evento, varias bandas."""
+"""Tests de fusión de eventos: misma fecha + mismo foro (venue_id) = un evento, varias bandas."""
 from __future__ import annotations
 
-from src.generate_agenda import _norm_venue, agrupar_por_evento
+from src.generate_agenda import agrupar_por_evento
 
 
-def test_norm_venue_tolera_acentos_y_typos() -> None:
-    assert _norm_venue("Foro Boletomóvil") == _norm_venue("Foro Boletomovil")
-    assert _norm_venue("  C3   STAGE!! ") == "c3 stage"
-    assert _norm_venue(None) == ""
-
-
-def test_norm_venue_quita_prefijos_de_tipo_de_local() -> None:
-    """El mismo venue con o sin prefijo genérico colapsa en la misma clave."""
-    base = _norm_venue("Anexo Independencia")
-    assert base == "anexo independencia"
-    assert _norm_venue("Foro Anexo Independencia") == base
-    assert _norm_venue("FORO ANEXO INDEPENDENCIA") == base
-    assert _norm_venue("**Foro** Anexo Independencia") == base   # puntuación → espacio
-    assert _norm_venue("El Foro Anexo Independencia") == base
-    assert _norm_venue("Foro: Anexo Independencia") == base
-    assert _norm_venue("Salón Anexo Independencia") == base
-    assert _norm_venue("Centro Cultural Anexo Independencia") == base
-    # Conservador: solo quita UN prefijo al inicio; no toca nombres sin prefijo.
-    assert _norm_venue("C3 Stage") == "c3 stage"
-    # No fusiona lugares realmente distintos (el sufijo diferencia).
-    assert _norm_venue("Foro X") != _norm_venue("Foro Y")
-
-
-def _ev(i, fecha, banda, lugar, handle=None):
-    return {"id": i, "fecha_evento": fecha, "banda_nombre": banda,
-            "lugar": lugar, "banda_handle": handle}
+def _ev(i, fecha, venue_id, banda, handle=None, lugar="lo que sea"):
+    return {"id": i, "fecha_evento": fecha, "venue_id": venue_id,
+            "lugar": lugar, "banda_nombre": banda, "banda_handle": handle}
 
 
 def test_dos_bandas_mismo_evento_se_fusionan() -> None:
     evs = [
-        _ev(1, "2026-06-14", "Cuerda", "Garibaldi #580", "cuerda"),
-        _ev(2, "2026-06-14", "Cuerda Cultura Medios", "Garibaldi #580", "cuerdacmedios"),
+        _ev(1, "2026-06-14", 1, "Cuerda", "cuerda", lugar="Garibaldi #580"),
+        _ev(2, "2026-06-14", 1, "Cuerda Cultura Medios", "cuerdacmedios", lugar="Garibaldi #580"),
     ]
     g = agrupar_por_evento(evs)
     assert len(g) == 1
@@ -46,8 +23,8 @@ def test_dos_bandas_mismo_evento_se_fusionan() -> None:
 
 def test_misma_banda_flyer_repetido_se_colapsa() -> None:
     evs = [
-        _ev(1, "2026-06-05", "Duck Fizz", "Foro Boletomóvil"),
-        _ev(2, "2026-06-05", "Duck Fizz", "Foro Boletomovil"),  # typo del OCR
+        _ev(1, "2026-06-05", 2, "Duck Fizz", lugar="Foro Boletomóvil"),
+        _ev(2, "2026-06-05", 2, "Duck Fizz", lugar="Foro Boletomovil"),  # typo del OCR, mismo venue_id
     ]
     g = agrupar_por_evento(evs)
     assert len(g) == 1
@@ -56,16 +33,62 @@ def test_misma_banda_flyer_repetido_se_colapsa() -> None:
 
 def test_distinto_foro_o_fecha_no_se_fusiona() -> None:
     evs = [
-        _ev(1, "2026-06-05", "A", "Foro X"),
-        _ev(2, "2026-06-05", "B", "Foro Y"),      # otro foro
-        _ev(3, "2026-06-06", "C", "Foro X"),      # otra fecha
+        _ev(1, "2026-06-05", 1, "A", lugar="Foro X"),
+        _ev(2, "2026-06-05", 2, "B", lugar="Foro Y"),      # otro foro
+        _ev(3, "2026-06-06", 1, "C", lugar="Foro X"),      # otra fecha
     ]
     assert len(agrupar_por_evento(evs)) == 3
 
 
 def test_sin_lugar_no_se_fusiona() -> None:
-    evs = [_ev(1, "2026-06-05", "A", None), _ev(2, "2026-06-05", "B", None)]
+    evs = [_ev(1, "2026-06-05", None, "A", lugar=None), _ev(2, "2026-06-05", None, "B", lugar=None)]
     assert len(agrupar_por_evento(evs)) == 2  # sin foro no hay forma de saber si es el mismo
+
+
+def test_agrupa_por_venue_id_aunque_el_texto_difiera() -> None:
+    """El caso real del 23-ago: 'REY' y 'Hake al Rey' resuelven al mismo foro."""
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", 7, "SilentNoir", "silentnoirofficial"),
+        _ev(2, "2026-08-23", 7, "Hake Al Rey", "hakealrey"),
+    ])
+    assert len(grupos) == 1
+    assert set(grupos[0]["handles"]) == {"silentnoirofficial", "hakealrey"}
+    assert grupos[0]["ids"] == [1, 2]
+
+
+def test_no_agrupa_venues_distintos() -> None:
+    """Salas distintas son foros distintos: C3 Stage y C3 Rooftop no se funden."""
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", 7, "A", "a"),
+        _ev(2, "2026-08-23", 8, "B", "b"),
+    ])
+    assert len(grupos) == 2
+
+
+def test_no_agrupa_sin_venue_id() -> None:
+    """Sin foro resuelto no se fusiona: adivinar es peor que duplicar."""
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", None, "A", "a"),
+        _ev(2, "2026-08-23", None, "B", "b"),
+    ])
+    assert len(grupos) == 2
+
+
+def test_no_agrupa_fechas_distintas() -> None:
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", 7, "A", "a"),
+        _ev(2, "2026-08-24", 7, "B", "b"),
+    ])
+    assert len(grupos) == 2
+
+
+def test_no_repite_la_misma_banda() -> None:
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", 7, "A", "a"),
+        _ev(2, "2026-08-23", 7, "A", "a"),
+    ])
+    assert grupos[0]["bandas"] == ["A"]
+    assert grupos[0]["ids"] == [1, 2]
 
 
 def test_al_final_ordena_ultimo(tmp_path):
