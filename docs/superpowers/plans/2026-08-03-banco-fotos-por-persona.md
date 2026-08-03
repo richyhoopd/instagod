@@ -17,7 +17,7 @@
   ```
   FACE_DET_SCORE_MIN        0.6
   FACE_CARA_MIN_FRAC        0.01
-  FACE_COS_MISMA_PERSONA    0.363
+  FACE_COS_MISMA_PERSONA    0.45
   FOTOS_POR_PERSONA         5
   FOTOS_GRUPALES            3
   DEDUP_HAMMING_MAX         8
@@ -366,7 +366,11 @@ def test_dos_personas_distintas_no_se_agrupan() -> None:
     img = cv2.imread(str(_FIXTURE))
     caras = faces.detectar(img)
     firmas = [faces.firma(img, c) for c in caras]
-    assert len(faces.agrupar(firmas, umbral=0.363)) == 2
+    # Umbral desde config, no literal: este test sigue la calibración.
+    # Medido: estas dos caras dan similitud 0.388 — con el 0.363 del sample de
+    # OpenCV se fundirían en una sola persona, que es justo el fallo que el
+    # banco no puede permitirse.
+    assert len(faces.agrupar(firmas, config.FACE_COS_MISMA_PERSONA)) == 2
 
 
 def test_detectar_imagen_sin_caras() -> None:
@@ -389,8 +393,14 @@ FACE_DET_SCORE_MIN = float(_get("FACE_DET_SCORE_MIN", "0.6") or "0.6")
 # corpus son CHICAS — con 0.05 solo 4 de 120 fotos conservaban alguna cara, y
 # el propio fixture de esta tarea perdía una de sus dos. Con 0.01 quedan 34.
 FACE_CARA_MIN_FRAC = float(_get("FACE_CARA_MIN_FRAC", "0.01") or "0.01")
-# Similitud coseno de SFace para "misma persona" (valor del sample de OpenCV).
-FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.363") or "0.363")
+# Similitud coseno de SFace para "misma persona". El sample de OpenCV usa
+# 0.363, calibrado para verificación 1-a-1 en LFW; sobre ESTE acervo (90 pares
+# de caras distintas en la misma foto, 75 pares de la misma cara) 0.363 fundía
+# a dos personas distintas el 7.8% de las veces contra 3.3% en 0.45. Los dos
+# errores no cuestan igual: fundir integrantes deja a uno sin cobertura (el
+# objetivo del banco), mientras que partir a uno en dos grupos solo produce
+# personas de más, que la GUI fusiona con un botón.
+FACE_COS_MISMA_PERSONA = float(_get("FACE_COS_MISMA_PERSONA", "0.45") or "0.45")
 MODELS_DIR = _get("MODELS_DIR", "./data/models")
 ```
 
@@ -1843,7 +1853,7 @@ for handle in BANDAS:
     """, (fila[0]["id"],))
     vecs = [np.frombuffer(f["embedding"], dtype=np.float32) for f in firmas]
     print(f"\n@{handle} — {len(vecs)} cara(s)")
-    for u in (0.25, 0.30, 0.363, 0.42, 0.50):
+    for u in (0.30, 0.363, 0.45, 0.55, 0.65):
         grupos = faces.agrupar(vecs, u)
         tam = sorted((len(g) for g in grupos), reverse=True)[:6]
         print(f"  umbral {u:.3f} → {len(grupos)} persona(s), tamaños {tam}")
@@ -1862,7 +1872,9 @@ Contrastar contra la realidad: Kabala y Los Baxters son bandas (3-5 integrantes)
 
 - [ ] **Step 4: Fijar el valor y documentarlo**
 
-Si el barrido señala un umbral distinto de 0.363, ponerlo en `.env` como `FACE_COS_MISMA_PERSONA` y anotar en el spec, en la sección de Configuración, el valor elegido con el dato que lo justifica.
+El default vigente es **0.45**, fijado durante la Task 3 con una medición sobre 90 pares de impostores y 75 de genuinos (ver el comentario en `config.py`). Esta tarea lo confirma o lo mueve con datos de más bandas. Si el barrido señala otro valor, ponerlo en `.env` como `FACE_COS_MISMA_PERSONA` y anotar en el spec, en la sección de Configuración, el valor elegido con el dato que lo justifica.
+
+**Cómo leer el barrido:** los dos errores no cuestan igual. Fundir a dos integrantes en una persona deja a uno sin cobertura y rompe el objetivo del banco; partir a uno en dos grupos solo produce personas de más, que se arreglan con el botón de fusionar de la GUI. Ante la duda, subir el umbral, no bajarlo.
 
 - [ ] **Step 5: Commit**
 
