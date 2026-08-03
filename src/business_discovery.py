@@ -41,7 +41,7 @@ from typing import Any, Callable
 import requests
 
 import config
-from src import db
+from src import banco, db
 
 _TIMEOUT = 60
 # Pausa corta entre cuentas: Graph no necesita ritmo humano, solo no ráfaga.
@@ -283,13 +283,45 @@ def guardar_media(cx, band_id: int, handle: str, medias: list[dict[str, Any]],
     return insertadas
 
 
+def _podar_fuera_del_banco(cx, band_id: int, shortcodes_nuevos: set[str]) -> list[dict]:
+    """Borra de disco y de la DB las fotos RECIÉN traídas que no entraron al banco.
+
+    Solo toca lo de esta corrida (`shortcodes_nuevos`): una foto vieja que salga
+    del cupo se marca `usable_meme=0` pero NUNCA se borra — regla del spec.
+    """
+    fuera = db.rows(cx, """
+        SELECT id, path, source_post_id FROM photos
+         WHERE band_id = ? AND usable_meme = 0
+    """, (band_id,))
+    borradas = 0
+    for fila in fuera:
+        if fila["source_post_id"] not in shortcodes_nuevos:
+            continue
+        p = Path(fila["path"])
+        if not p.is_absolute():
+            p = config.BASE_DIR / p
+        p.unlink(missing_ok=True)
+        cx.execute("DELETE FROM face_signatures WHERE photo_id = ?", (fila["id"],))
+        cx.execute("DELETE FROM photos WHERE id = ?", (fila["id"],))
+        borradas += 1
+    cx.commit()
+    if borradas:
+        print(f"   🗑  {borradas} descarga(s) fuera del cupo, borradas")
+    return db.rows(cx, "SELECT id, source_post_id FROM photos WHERE band_id = ?",
+                   (band_id,))
+
+
 # ---------- orquestación ----------
 
 def traer(handles: list[str], *, max_posts: int | None = None, activar: bool = False,
-          _cx=None) -> dict[str, Any]:
+          selectivo: bool = False, _cx=None) -> dict[str, Any]:
     """Trae y registra varias cuentas. Una caída aislada no tumba el lote.
 
     Corta en seco ante GraphRateLimited (insistir solo empeora la cuota).
+
+    `selectivo=True`: mira `BD_POSTS_A_MIRAR` posts, corre el banco por persona y
+    BORRA las descargas que no entraron al cupo. Pedir 50 posts cuesta lo mismo
+    en cuota que pedir 12 — lo caro es guardar, no consultar.
     """
     propia = _cx is None
     cx = _cx or db.connect()
@@ -304,8 +336,9 @@ def traer(handles: list[str], *, max_posts: int | None = None, activar: bool = F
         for i, handle in enumerate(handles):
             handle = handle.lstrip("@")
             print(f"▶ @{handle}")
+            mirar = config.BD_POSTS_A_MIRAR if selectivo else max_posts
             try:
-                bd = fetch_cuenta(handle, max_posts=max_posts, ig_id=ig_id)
+                bd = fetch_cuenta(handle, max_posts=mirar, ig_id=ig_id)
             except NoEsBusiness:
                 print("   ⏭  cuenta personal: fuera del alcance de Business Discovery")
                 resumen["personales"].append(handle)
@@ -326,6 +359,9 @@ def traer(handles: list[str], *, max_posts: int | None = None, activar: bool = F
             band_id = registrar_banda(cx, bd, activar=activar)
             medias = (bd.get("media") or {}).get("data") or []
             nuevas = guardar_media(cx, band_id, handle, medias)
+            if selectivo:
+                banco.procesar_banda(cx, band_id)
+                nuevas = _podar_fuera_del_banco(cx, band_id, {n["shortcode"] for n in nuevas})
             db.update(cx, "bands", band_id,
                       scraped_at=datetime.now().isoformat(timespec="seconds"))
             resumen["ok"].append({"handle": handle, "band_id": band_id,
@@ -381,6 +417,8 @@ if __name__ == "__main__":
     parser.add_argument("--activar", action="store_true",
                         help="dar de alta como activa=1 (default: candidata para curar)")
     parser.add_argument("--check", action="store_true", help="solo diagnóstico de permisos")
+    parser.add_argument("--selectivo", action="store_true",
+                        help=f"mira {config.BD_POSTS_A_MIRAR} posts y guarda solo lo que entra al banco")
     args = parser.parse_args()
 
     if args.check:
@@ -395,7 +433,8 @@ if __name__ == "__main__":
     if not objetivos:
         sys.exit("Nada que traer: pasa handles o --archivo.")
     try:
-        res = traer(objetivos, max_posts=args.max_posts, activar=args.activar)
+        res = traer(objetivos, max_posts=args.max_posts, activar=args.activar,
+                    selectivo=args.selectivo)
     except BusinessDiscoveryNoDisponible as exc:
         sys.exit(f"❌ {exc}\nCorre `python -m src.business_discovery --check` para el detalle.")
     except KeyboardInterrupt:

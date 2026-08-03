@@ -250,3 +250,45 @@ def test_traer_corta_en_seco_por_cuota(cx, monkeypatch) -> None:
     res = bd.traer(["a", "b", "c"], _cx=cx)
     assert res["cortado_por_cuota"] is True
     assert len(llamadas) == 1  # no siguió con b ni c
+
+
+# ---------- modo selectivo ----------
+
+def test_traer_selectivo_borra_lo_que_no_entra(cx, tmp_path, monkeypatch) -> None:
+    """Las fotos que no entran al banco se borran del disco y de la DB."""
+    monkeypatch.setattr(bd.config, "FB_IG_USER_ID", "999")
+    monkeypatch.setattr(bd.config, "FB_PAGE_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(bd.config, "resolve_photos_dir", lambda: tmp_path)
+    monkeypatch.setattr(bd.config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(bd, "_descargar", lambda u, d: (d.write_bytes(b"j"), True)[1])
+    medias = [_media(shortcode=f"S{i}") for i in range(3)]
+    _mock_get(monkeypatch, _perfil(medias=medias))
+
+    # El banco solo deja la primera.
+    def fake_procesar(conn, band_id, **kw):
+        ids = [r["id"] for r in db.rows(conn, "SELECT id FROM photos ORDER BY id")]
+        for pid in ids[1:]:
+            db.update(conn, "photos", pid, usable_meme=0)
+        db.update(conn, "photos", ids[0], usable_meme=1)
+        return {"personas": 1, "fotos_dentro": 1, "fotos_fuera": len(ids) - 1,
+                "duplicadas": 0}
+
+    monkeypatch.setattr(bd.banco, "procesar_banda", fake_procesar)
+    res = bd.traer(["kabala_oficial"], _cx=cx, selectivo=True)
+
+    assert res["fotos"] == 1
+    assert len(db.rows(cx, "SELECT id FROM photos")) == 1
+    assert len(list((tmp_path / "kabala_oficial").glob("*.jpg"))) == 1
+
+
+def test_traer_no_selectivo_conserva_todo(cx, tmp_path, monkeypatch) -> None:
+    """El modo por defecto no borra nada: compatible con lo ya traído."""
+    monkeypatch.setattr(bd.config, "FB_IG_USER_ID", "999")
+    monkeypatch.setattr(bd.config, "FB_PAGE_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(bd.config, "resolve_photos_dir", lambda: tmp_path)
+    monkeypatch.setattr(bd.config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(bd, "_descargar", lambda u, d: (d.write_bytes(b"j"), True)[1])
+    _mock_get(monkeypatch, _perfil(medias=[_media(shortcode=f"S{i}") for i in range(3)]))
+    res = bd.traer(["kabala_oficial"], _cx=cx)
+    assert res["fotos"] == 3
+    assert len(db.rows(cx, "SELECT id FROM photos")) == 3

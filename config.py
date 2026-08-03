@@ -84,6 +84,10 @@ IG_SCRAPER_UA = _get("IG_SCRAPER_UA")
 # Login por script dispara checkpoints; la cookie del navegador es la vía estable.
 IG_SCRAPER_SESSIONID = _get("IG_SCRAPER_SESSIONID")
 IG_INGEST_MAX_POSTS = int(_get("IG_INGEST_MAX_POSTS", "12") or "12")
+# Modo selectivo de Business Discovery: pedir 50 posts cuesta lo mismo en cuota
+# de Graph que pedir 12 (las URLs vienen en la misma llamada). Lo caro es
+# descargar y guardar, no consultar — de ahí "mirar mucho, guardar poco".
+BD_POSTS_A_MIRAR = int(_get("BD_POSTS_A_MIRAR", "50") or "50")
 # Modo NOVEDADES: cada cuenta scraper aguanta ~33 llamadas de feed por ventana.
 # Con el pool de cuentas (data/ig_accounts.json) la corrida rota a otra cuenta
 # al quemarse una, así que el tope puede cubrir TODAS las bandas en una corrida
