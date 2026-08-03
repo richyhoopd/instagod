@@ -91,3 +91,81 @@ def test_dos_personas_distintas_no_se_agrupan() -> None:
 
 def test_detectar_imagen_sin_caras() -> None:
     assert faces.detectar(np.zeros((200, 200, 3), dtype=np.uint8)) == []
+
+
+# ---------- Descarga de modelos: validar antes de cachear ----------
+
+class _RespFalsa:
+    def __init__(self, contenido: bytes) -> None:
+        self.content = contenido
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+def _fake_get(contenido: bytes):
+    def get(url, timeout=None):  # noqa: ARG001
+        return _RespFalsa(contenido)
+    return get
+
+
+@pytest.fixture()
+def modelos_dir(tmp_path: Path, monkeypatch):
+    d = tmp_path / "models"
+    d.mkdir()
+    monkeypatch.setattr(faces.config, "resolve_models_dir", lambda: d)
+    return d
+
+
+def test_bajar_rechaza_html_y_no_cachea_nada(modelos_dir, monkeypatch) -> None:
+    """Un 200 con HTML (portal cautivo, página de error) NO debe quedar en cache:
+    el early-return por `exists()` lo reusaría en cada corrida futura y el
+    síntoma sería un error de cv2 sin relación aparente."""
+    monkeypatch.setattr(faces.requests, "get",
+                        _fake_get(b"<!DOCTYPE html><html>404</html>" + b"x" * 200_000))
+    with pytest.raises(RuntimeError) as exc:
+        faces._bajar("m.onnx", "http://x/m.onnx", 1000)
+    assert "m.onnx" in str(exc.value)
+    assert list(modelos_dir.iterdir()) == []
+
+
+def test_bajar_rechaza_cuerpo_truncado(modelos_dir, monkeypatch) -> None:
+    """Cabecera ONNX correcta pero descarga cortada a la mitad → tampoco cachea."""
+    monkeypatch.setattr(faces.requests, "get", _fake_get(b"\x08\x06" + b"\x00" * 50))
+    with pytest.raises(RuntimeError) as exc:
+        faces._bajar("m.onnx", "http://x/m.onnx", 100_000)
+    assert "100000" in str(exc.value).replace("_", "")
+    assert list(modelos_dir.iterdir()) == []
+
+
+def test_bajar_guarda_un_onnx_valido(modelos_dir, monkeypatch) -> None:
+    bueno = b"\x08\x06" + b"\x00" * 5000
+    monkeypatch.setattr(faces.requests, "get", _fake_get(bueno))
+    destino = faces._bajar("m.onnx", "http://x/m.onnx", 1000)
+    assert destino.read_bytes() == bueno
+    assert not (modelos_dir / "m.onnx.part").exists()
+
+
+def test_bajar_reusa_el_cacheado_sin_red(modelos_dir, monkeypatch) -> None:
+    (modelos_dir / "m.onnx").write_bytes(b"\x08\x06" + b"\x00" * 5000)
+
+    def explota(*a, **k):
+        raise AssertionError("no debe tocar la red si el cache es válido")
+
+    monkeypatch.setattr(faces.requests, "get", explota)
+    assert faces._bajar("m.onnx", "http://x/m.onnx", 1000).exists()
+
+
+def test_bajar_rebaja_un_cache_corrupto_previo(modelos_dir, monkeypatch) -> None:
+    """Recuperación sin intervención manual: un ONNX corrupto de una corrida
+    vieja (antes de esta validación) se re-baja solo."""
+    (modelos_dir / "m.onnx").write_bytes(b"<html>error</html>")
+    bueno = b"\x08\x06" + b"\x00" * 5000
+    monkeypatch.setattr(faces.requests, "get", _fake_get(bueno))
+    assert faces._bajar("m.onnx", "http://x/m.onnx", 1000).read_bytes() == bueno
+
+
+def test_modelos_declarados_traen_nombre_url_y_minimo() -> None:
+    for nombre, url, minimo in (faces._YUNET, faces._SFACE):
+        assert nombre.endswith(".onnx") and url.startswith("https://")
+        assert minimo > 0

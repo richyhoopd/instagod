@@ -21,11 +21,20 @@ import requests
 import config
 
 _ZOO = "https://github.com/opencv/opencv_zoo/raw/main/models"
+# (nombre, url, tamaño mínimo plausible en bytes). Los reales pesan 232 KB y
+# 38.7 MB; el mínimo es holgado (la mitad) — sirve para atajar un cuerpo
+# truncado o una página de error, no para verificar la versión exacta.
 _YUNET = ("face_detection_yunet_2023mar.onnx",
-          f"{_ZOO}/face_detection_yunet/face_detection_yunet_2023mar.onnx")
+          f"{_ZOO}/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+          100_000)
 _SFACE = ("face_recognition_sface_2021dec.onnx",
-          f"{_ZOO}/face_recognition_sface/face_recognition_sface_2021dec.onnx")
+          f"{_ZOO}/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+          19_000_000)
 _TIMEOUT = 120
+# Un .onnx es un protobuf `ModelProto` cuyo primer campo es `ir_version`
+# (field 1, varint) → el archivo SIEMPRE empieza con el byte de tag 0x08.
+# Un 200 con HTML ('<') o un redirect en texto jamás empiezan así.
+_ONNX_MAGIC = b"\x08"
 
 _detector = None
 _reconocedor = None
@@ -39,16 +48,45 @@ class Cara:
     frac_area: float                     # área de la cara / área de la imagen
 
 
-def _bajar(nombre: str, url: str) -> Path:
-    """Descarga el modelo a data/models/ con escritura atómica. Falla ruidosa."""
+def _es_onnx(path: Path, minimo: int) -> bool:
+    """¿El archivo en disco parece el ONNX esperado? (bytes mágicos + tamaño)."""
+    try:
+        if path.stat().st_size < minimo:
+            return False
+        with path.open("rb") as fh:
+            return fh.read(len(_ONNX_MAGIC)) == _ONNX_MAGIC
+    except OSError:
+        return False
+
+
+def _bajar(nombre: str, url: str, minimo: int) -> Path:
+    """Descarga el modelo a data/models/ con escritura atómica. Falla ruidosa.
+
+    Mismo patrón que `src.covers.asegurar_cover`: descarga → VALIDA → escritura
+    atómica. Sin la validación, un 200 con HTML (portal cautivo, página de error
+    de GitHub) o un cuerpo truncado se cacheaban para siempre: el early-return
+    por `exists()` los reusaba en cada corrida y el síntoma era un error de cv2
+    sin relación aparente, que solo se curaba borrando `data/models/` a mano.
+
+    Por eso el archivo YA cacheado también se valida: un ONNX corrupto de una
+    corrida vieja se re-baja solo, sin intervención manual.
+    """
     destino = config.resolve_models_dir() / nombre
-    if destino.exists() and destino.stat().st_size > 0:
+    if destino.exists() and _es_onnx(destino, minimo):
         return destino
     print(f"⬇️  bajando modelo {nombre}…", file=sys.stderr)
     resp = requests.get(url, timeout=_TIMEOUT)
     resp.raise_for_status()
     tmp = destino.with_suffix(destino.suffix + ".part")
     tmp.write_bytes(resp.content)
+    if not _es_onnx(tmp, minimo):
+        cabeza = resp.content[:16]
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"descarga inválida de {nombre} desde {url}: se esperaba un ONNX "
+            f"(≥{minimo} bytes, empezando con {_ONNX_MAGIC!r}) y llegaron "
+            f"{len(resp.content)} bytes que empiezan con {cabeza!r}. "
+            f"No se cacheó nada en {destino.parent}.")
     tmp.replace(destino)
     return destino
 
