@@ -117,8 +117,44 @@ def _llm_agrupar(pendientes: list[str]) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
+def _grupo_valido(grupo: Any) -> tuple[str, list[str]] | None:
+    """Valida la forma de una propuesta del LLM. None si está mal formada.
+
+    El LLM no siempre respeta el formato pedido en el prompt. Tres formas
+    rotas que sí llegan en la práctica:
+
+    - El grupo no es un objeto (el LLM devolvió una lista de strings suelta).
+    - 'canonico' no es texto (lista, dict, número).
+    - 'alias' es una cadena suelta en vez de una lista — "alias": "REY" en
+      vez de ["REY"]. Este es el peligroso: iterar una cadena carácter por
+      carácter produce alias de una sola letra ('r', 'e', 'y') que se
+      insertarían como reales y fusionarían cualquier lugar cuyo nombre
+      normalice a una sola letra con el venue equivocado. Descartamos el
+      grupo ENTERO en vez de envolver la cadena en una lista de un elemento:
+      no hay forma de distinguir "el LLM quiso un solo alias" de "el LLM
+      olvidó los corchetes y esa cadena en realidad son varios alias
+      pegados" — perder el grupo (queda pendiente para curación manual en la
+      GUI) es más honesto que adivinar la intención.
+    """
+    if not isinstance(grupo, dict):
+        return None
+    canonico = grupo.get("canonico")
+    if not isinstance(canonico, str) or not canonico.strip():
+        return None
+    alias_raw = grupo.get("alias")
+    if not isinstance(alias_raw, list):
+        return None
+    alias = [a.strip() for a in alias_raw if isinstance(a, str) and a.strip()]
+    if not alias:
+        return None
+    return canonico.strip(), alias
+
+
 def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dict:
-    """Siembra completa. Devuelve {venues, alias, huerfanos, pendientes_llm}."""
+    """Siembra completa.
+
+    Devuelve {venues, alias, huerfanos, pendientes_llm, grupos_invalidos}.
+    """
     llm = _llm or _llm_agrupar
     db.init_db(cx)
     creados = sembrar_desde_bands(cx)
@@ -133,11 +169,14 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
                   if venues.resolver(cx, textos[0]) is None]
 
     alias_nuevos = 0
+    grupos_invalidos = 0
     for grupo in llm(pendientes):
-        canonico = (grupo.get("canonico") or "").strip()
-        alias = [a for a in (grupo.get("alias") or []) if a and a.strip()]
-        if not canonico or not alias:
+        valido = _grupo_valido(grupo)
+        if valido is None:
+            grupos_invalidos += 1
+            print(f"venues_seed: grupo del LLM con forma inválida, se descarta: {grupo!r}")
             continue
+        canonico, alias = valido
         vid = venues.resolver(cx, canonico)
         if vid is None:
             vid = db.insert(cx, "venues", nombre=canonico)
@@ -164,4 +203,5 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
     cx.commit()
     return {"venues": creados, "alias": alias_nuevos,
             "huerfanos": len(venues.huerfanos(cx)),
-            "pendientes_llm": len(pendientes)}
+            "pendientes_llm": len(pendientes),
+            "grupos_invalidos": grupos_invalidos}

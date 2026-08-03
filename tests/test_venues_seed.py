@@ -122,6 +122,66 @@ def test_sembrar_no_pisa_lo_sembrado_desde_bands(cx) -> None:
     assert venues.resolver(cx, "staditche") == foro
 
 
+def test_sembrar_descarta_grupo_que_no_es_dict(cx) -> None:
+    """Si el LLM devuelve una lista de strings en vez de objetos, la siembra
+    termina (no truena) y descarta cada elemento mal formado."""
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "REY")
+
+    res = venues_seed.sembrar(cx, _llm=lambda pendientes: ["REY", "Hake al Rey"])
+    assert res["grupos_invalidos"] == 2
+    letras = db.rows(cx, "SELECT alias_norm FROM venue_alias WHERE length(alias_norm) = 1")
+    assert letras == []
+
+
+def test_sembrar_descarta_alias_como_string(cx) -> None:
+    """'alias': 'REY' (cadena suelta) no debe fragmentarse en alias de una
+    sola letra: es la corrupción silenciosa del catálogo."""
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "REY")
+
+    def _llm(pendientes):
+        return [{"canonico": "Hake Al Rey", "alias": "REY"}]
+
+    res = venues_seed.sembrar(cx, _llm=_llm)
+    assert res["grupos_invalidos"] == 1
+    letras = db.rows(cx, "SELECT alias_norm FROM venue_alias WHERE length(alias_norm) = 1")
+    assert letras == []
+
+
+def test_sembrar_descarta_canonico_no_string(cx) -> None:
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "REY")
+
+    def _llm(pendientes):
+        return [{"canonico": ["Hake", "Al", "Rey"], "alias": ["REY"]}]
+
+    res = venues_seed.sembrar(cx, _llm=_llm)
+    assert res["grupos_invalidos"] == 1
+    letras = db.rows(cx, "SELECT alias_norm FROM venue_alias WHERE length(alias_norm) = 1")
+    assert letras == []
+
+
+def test_sembrar_completo_es_idempotente(cx) -> None:
+    """Correr sembrar() dos veces con el mismo _llm no duplica venues ni alias."""
+    db.insert(cx, "bands", nombre="STADITCHE", ig_handle="staditche",
+              tipo="foro", activa=1)
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "REY")
+    _evento(cx, bid, "Hake al Rey")
+
+    def _llm(pendientes):
+        return [{"canonico": "Hake Al Rey", "alias": ["REY", "Hake al Rey"]}]
+
+    venues_seed.sembrar(cx, _llm=_llm)
+    n_venues = len(db.rows(cx, "SELECT * FROM venues"))
+    n_alias = len(db.rows(cx, "SELECT * FROM venue_alias"))
+
+    venues_seed.sembrar(cx, _llm=_llm)
+    assert len(db.rows(cx, "SELECT * FROM venues")) == n_venues
+    assert len(db.rows(cx, "SELECT * FROM venue_alias")) == n_alias
+
+
 def test_sembrar_deja_huerfano_lo_que_el_llm_no_agrupa(cx) -> None:
     bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
     _evento(cx, bid, "GRAL.MANUEL pm COVER M.DIEGUEZ #71")
