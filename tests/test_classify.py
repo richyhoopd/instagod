@@ -1,8 +1,10 @@
 """Tests de Fase 3: heurísticas de clasificación con imágenes sintéticas.
 
-No usan fotos reales ni red. La detección de caras Haar se prueba indirecta
-(imagen sintética sin caras → 0); las decisiones usable/flyer se prueban como
-funciones puras contra los umbrales de config.
+No usan fotos reales ni red: `faces.detectar` (YuNet) se mockea en todos los
+casos que lo tocan, así este archivo no depende de que `data/models/` ya
+tenga los ONNX descargados (~37 MB). Esa cobertura contra el detector real
+vive en test_faces.py. Las decisiones usable/flyer se prueban como funciones
+puras contra los umbrales de config.
 """
 from __future__ import annotations
 
@@ -37,7 +39,9 @@ def test_nitidez_distingue_borrosa_de_nitida() -> None:
     assert medir_nitidez(borrosa) < medir_nitidez(nitida) / 10
 
 
-def test_imagen_plana_no_tiene_caras_ni_nitidez() -> None:
+def test_imagen_plana_no_tiene_caras_ni_nitidez(monkeypatch) -> None:
+    # Mockeado: sin esto, contar_caras dispararía el detector real (YuNet).
+    monkeypatch.setattr(classify.faces, "detectar", lambda img: [])
     plana_gris = np.full((900, 1200), 128, dtype=np.uint8)
     plana_color = np.full((900, 1200, 3), 128, dtype=np.uint8)
     assert contar_caras(plana_color) == 0
@@ -200,6 +204,7 @@ def test_clasificar_foto_nitida_sin_flyer_es_usable(tmp_path, monkeypatch) -> No
     db.init_db(cx)
     monkeypatch.setattr(classify, "texto_ocr", lambda p: "")          # sin OCR
     monkeypatch.setattr(classify, "es_grafico", lambda g: (False, 0))  # no póster
+    monkeypatch.setattr(classify, "contar_caras", lambda c: 0)  # sin red: no toca YuNet
     nitida = _ruido()
     foto = _foto_en_db(cx, tmp_path, nitida, tipo="foro")             # foro: no exige cara
     etiqueta = clasificar_foto(cx, foto)
@@ -215,6 +220,7 @@ def test_clasificar_foto_flyer_va_a_events_y_no_es_usable(tmp_path, monkeypatch)
     flyer_txt = ("FESTIVAL presenta a Kabala viernes 21 de noviembre 9:00 pm "
                  "Foro Independencia boletos preventa cover acceso 8:00 hrs")
     monkeypatch.setattr(classify, "texto_ocr", lambda p: flyer_txt)
+    monkeypatch.setattr(classify, "contar_caras", lambda c: 0)  # sin red: no toca YuNet
     foto = _foto_en_db(cx, tmp_path, _ruido(), tipo="banda")
     etiqueta = clasificar_foto(cx, foto)
     assert etiqueta.startswith("flyer")
@@ -242,6 +248,7 @@ def test_clasificar_foto_descartada_nunca_usable(tmp_path, monkeypatch) -> None:
     db.init_db(cx)
     monkeypatch.setattr(classify, "texto_ocr", lambda p: "")
     monkeypatch.setattr(classify, "es_grafico", lambda g: (False, 0))
+    monkeypatch.setattr(classify, "contar_caras", lambda c: 0)  # sin red: no toca YuNet
     foto = _foto_en_db(cx, tmp_path, _ruido(), tipo="foro", descartada=1)
     clasificar_foto(cx, foto)
     assert db.get(cx, "photos", foto["id"])["usable_meme"] == 0   # lista negra manda

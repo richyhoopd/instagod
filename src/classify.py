@@ -103,6 +103,13 @@ def contar_caras(img_color: "np.ndarray") -> int:
 
     `faces.detectar` ya filtra por score y tamaño mínimos, así que no hay
     distinción entre detecciones "totales" y "claras" como en la época de Haar.
+
+    OJO operativo: `clasificar()` solo reprocesa fotos con `faces_count IS
+    NULL` salvo que se le pase `--redo`. Las fotos clasificadas ANTES de este
+    cambio quedan con un `faces_count` calculado con los cascades de Haar
+    (semántica vieja) conviviendo en la misma columna con las clasificadas
+    después con YuNet. Homogeneizar el acervo requiere correr `--redo` a
+    propósito; no pasa solo.
     """
     return len(faces.detectar(img_color))
 

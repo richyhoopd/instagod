@@ -130,8 +130,6 @@ CLASSIFY_OCR_MIN_CHARS = int(_get("CLASSIFY_OCR_MIN_CHARS", "80") or "80")
 # Regiones MSER (tipo texto) a partir de las cuales una imagen es póster/flyer
 # DIBUJADO (tipografía artística que el OCR no lee). Fotos reales rondan <1400.
 CLASSIFY_MSER_FLYER = int(_get("CLASSIFY_MSER_FLYER", "1700") or "1500")
-# Tamaño mínimo de una cara "clara": fracción del lado menor de la imagen.
-CLASSIFY_CARA_MIN_FRAC = float(_get("CLASSIFY_CARA_MIN_FRAC", "0.08") or "0.08")
 
 # ---------- Reconocimiento facial (banco por persona) ----------
 FACE_DET_SCORE_MIN = float(_get("FACE_DET_SCORE_MIN", "0.6") or "0.6")
