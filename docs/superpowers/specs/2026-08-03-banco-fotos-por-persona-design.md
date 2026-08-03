@@ -131,9 +131,8 @@ Un par de fixtures pequeños para el detector, que sí necesita imagen real.
 
 ```
 FACE_DET_SCORE_MIN        0.6    confianza mínima de YuNet
-FACE_CARA_MIN_FRAC        0.05   fracción mínima del área que debe ocupar la cara
-FACE_COS_MISMA_PERSONA    0.363  similitud coseno; el valor del sample de OpenCV
-                                 para SFace (mayor = más parecido)
+FACE_CARA_MIN_FRAC        0.01   fracción mínima del área que debe ocupar la cara
+FACE_COS_MISMA_PERSONA    0.45   similitud coseno para "misma persona" (mayor = más parecido)
 FOTOS_POR_PERSONA         5
 FOTOS_GRUPALES            3
 DEDUP_HAMMING_MAX         8      sobre hash de 64 bits
@@ -141,9 +140,62 @@ BD_POSTS_A_MIRAR          50
 ANTI_REPETICION_DIAS      45     días que una persona no se repite en un post
 ```
 
-Los umbrales son puntos de partida, no verdades: `FACE_COS_MISMA_PERSONA` y `DEDUP_HAMMING_MAX` se calibran contra el acervo real en la implementación, y como los embeddings quedan guardados, reagrupar con otro umbral cuesta segundos.
+`FACE_CARA_MIN_FRAC` bajó de 0.05 a 0.01 al medirlo sobre el acervo real
+(3-ago, 120 fotos de bandas): las caras de este corpus son chicas — con 0.05
+solo 4 de 120 fotos conservaban alguna cara. Con 0.01 quedan 34.
+
+`FACE_COS_MISMA_PERSONA` subió de 0.363 (el valor del sample de OpenCV,
+calibrado para verificación 1-a-1 en LFW) a 0.45 en la Task 3, midiendo sobre
+90 pares de caras distintas en la misma foto y 75 pares de la misma cara de
+este acervo: 0.363 fundía a dos personas distintas el 7.8% de las veces
+contra 3.3% en 0.45. La Task 11 lo confirmó corriendo el banco sobre 9
+bandas reales y barriendo el umbral sobre las firmas guardadas — ver
+"Estado de la calibración" abajo para los números.
+
+Los dos errores no cuestan igual: fundir integrantes deja a uno sin
+cobertura (el objetivo del banco), mientras que partir a uno en dos grupos
+solo produce personas de más, que la GUI fusiona con un botón. Ante la duda,
+el umbral sube, no baja.
 
 `ANTI_REPETICION_DIAS` en 45 sale del ritmo actual: 2 posts/día sobre 144 cuentas hace que una banda salga cada ~2 meses, así que 45 días no restringe casi nada hoy y sí protege a las P1, que salen hasta 5 veces al mes.
+
+## Estado de la calibración (Task 11, 3-ago)
+
+`scripts/calibrar_caras.py` corrió el banco (`python -m src.banco`, `--limite
+40`) sobre 9 bandas reales contra la DB de producción (respaldada antes en
+`data/gdlscene.backup-pre-banco-20260803.db`) y barrió `FACE_COS_MISMA_PERSONA`
+de 0.25 a 0.65 sobre las firmas ya guardadas de cada una: `dsplusmx` y
+`eterealetal` (banda), `elmalilla_` (solista), `kabala_oficial` y
+`los_baxters` (banda, tamaño real conocido: 3-5 integrantes),
+`fotografoamarillo` (colectivo), `hakealrey`, `staditche` y `cuerdacultura`
+(foro).
+
+**0.45 se confirma.** Es el umbral más bajo que deshace las fusiones
+catastróficas que sí se ven con datos reales a ≤0.363 (mega-clusters de
+5-25 caras en una sola "persona" en eterealetal, los_baxters y
+kabala_oficial — poco creíble que sean literalmente la misma cara). Subir
+más allá de 0.45 no deshace ninguna fusión adicional, solo fragmenta más.
+
+**Hallazgo, no bug:** con este acervo, ningún umbral acerca a `kabala_oficial`
+ni a `los_baxters` a su tamaño real de banda (3-5 integrantes) sin volver a
+provocar las fusiones catastróficas de arriba en otras bandas. En 0.45:
+
+- `kabala_oficial`: 8 personas de 8 caras — cero agrupamiento.
+- `los_baxters`: 16 personas de 19 caras.
+- `elmalilla_` (solista, debería dominar 1 persona): 10 personas de 10
+  caras — y ni el umbral más bajo probado (0.25 → 5 personas) lo arregla sin
+  fundir a distintos en otras bandas.
+
+Esto no es un problema de dónde cortar la similitud: es calidad de firma —
+caras chicas, mala luz de escenario, crops marginales que YuNet apenas
+detecta. El umbral está en el mejor punto disponible dado este acervo; la
+fragmentación restante la absorbe el botón de fusionar de la GUI, que existe
+precisamente para esto. Quien retome esto en el futuro no debería intentar
+"arreglarlo" bajando el umbral — bajarlo vuelve a fundir integrantes
+distintos, que es el error que el banco no puede permitirse.
+
+Detalle completo del barrido (las 9 bandas, 10 umbrales cada una) en
+`.superpowers/sdd/2026-08-03-banco-fotos-por-persona/task-11-report.md`.
 
 ## Trabajo previo (no es parte de este spec)
 
