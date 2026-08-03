@@ -70,6 +70,9 @@ FB_PAGE_ACCESS_TOKEN = _get("FB_PAGE_ACCESS_TOKEN")
 FB_GRAPH_BASE = _get("FB_GRAPH_BASE", "https://graph.facebook.com")
 FB_API_VERSION = _get("FB_API_VERSION", "v25.0")
 CROSSPOST_FB = (_get("CROSSPOST_FB", "1") or "1") != "0"
+# Cuenta de IG Business vinculada a la Página: sujeto de las consultas de
+# Business Discovery. Vacío = se resuelve contra la Página en cada corrida.
+FB_IG_USER_ID = _get("FB_IG_USER_ID")
 
 # ---------- Scraping de Instagram (cuenta secundaria, Fase 2) ----------
 IG_SCRAPER_USER = _get("IG_SCRAPER_USER")
