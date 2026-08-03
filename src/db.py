@@ -46,7 +46,7 @@ TABLES: dict[str, set[str]] = {
     "events": {
         "band_id", "tipo", "fecha_evento", "titulo", "cover_url", "lugar", "ciudad",
         "flyer_path", "source_post_id", "parseado_por_llm", "status", "al_final",
-        "irrelevante", "creditos",
+        "irrelevante", "creditos", "venue_id",
     },
     "content_queue": {
         "tipo", "band_id", "member_id", "photo_id", "event_id",
@@ -73,6 +73,8 @@ TABLES: dict[str, set[str]] = {
     # Motor de segmentos (Task A)
     "audience_activity": {"account_id", "dow", "hora", "valor", "updated_at"},
     "segment_runs": {"segmento", "account_id", "ventana", "corrido_at"},
+    "venues": {"nombre", "ciudad", "ig_handle", "activa"},
+    "venue_alias": {"venue_id", "alias_norm", "alias_visto", "origen"},
 }
 
 # Estados de content_queue (espejo del CHECK en schema.sql).
@@ -135,6 +137,8 @@ _MIGRATIONS = {
         # Dedupe cross-banda de releases: JSON list de band_ids que publicaron
         # el mismo flyer (post colab); el caption los acredita con (con @handles).
         "creditos": "TEXT",
+        # Catálogo de foros: identidad estable del venue (NULL = sin resolver).
+        "venue_id": "INTEGER",
     },
     "content_queue": {
         "meme_url": "TEXT",
@@ -197,7 +201,9 @@ def init_db(cx: sqlite3.Connection) -> None:
                 "CREATE INDEX IF NOT EXISTS idx_igposts_account ON ig_posts(account_id)",
                 "CREATE INDEX IF NOT EXISTS idx_personas_band ON personas(band_id)",
                 "CREATE INDEX IF NOT EXISTS idx_firmas_photo ON face_signatures(photo_id)",
-                "CREATE INDEX IF NOT EXISTS idx_firmas_persona ON face_signatures(persona_id)"):
+                "CREATE INDEX IF NOT EXISTS idx_firmas_persona ON face_signatures(persona_id)",
+                "CREATE INDEX IF NOT EXISTS idx_alias_venue ON venue_alias(venue_id)",
+                "CREATE INDEX IF NOT EXISTS idx_events_venue ON events(venue_id)"):
         cx.execute(idx)
     # Backfill idempotente: banda que ya tiene spotify_id/deezer_id cuenta 'ok'.
     cx.execute("UPDATE bands SET spotify_status = 'ok' "

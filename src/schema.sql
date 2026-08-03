@@ -297,3 +297,36 @@ CREATE TABLE IF NOT EXISTS face_signatures (
     embedding  BLOB NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- =============================================================================
+-- venues — foros canónicos. `events.lugar` es texto libre que un LLM saca del
+-- OCR y trae el mismo foro con media docena de escrituras; esta tabla es la
+-- identidad estable contra la que se resuelven. `ig_handle` liga al foro que ya
+-- se sigue en `bands`, cuando existe.
+-- Salas distintas = venues distintos (C3 Stage y C3 Rooftop son dos filas).
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS venues (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre     TEXT NOT NULL,
+    ciudad     TEXT,
+    ig_handle  TEXT,
+    activa     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- =============================================================================
+-- venue_alias — cada escritura vista de un foro, normalizada. venue_id NULL =
+-- alias HUÉRFANO: texto visto en un flyer que nadie ha asignado todavía; es la
+-- cola de curación de la GUI. `alias_visto` guarda el texto crudo porque al
+-- curar hace falta ver qué decía el flyer, no la versión normalizada.
+-- origen: 'semilla' | 'visto' | 'llm' | 'manual' | 'no_es_lugar'
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS venue_alias (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    venue_id    INTEGER,
+    alias_norm  TEXT NOT NULL UNIQUE,
+    alias_visto TEXT NOT NULL,
+    origen      TEXT NOT NULL DEFAULT 'visto',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
