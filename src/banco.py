@@ -142,6 +142,15 @@ def _analizar_real(path: Path):
     return imghash.phash(path), nitidez, detectadas
 
 
+def _limpiar_banda(cx, band_id: int) -> None:
+    """Borra firmas/personas de la banda y desasocia sus fotos. Sin commit:
+    quien llama decide cuándo es seguro persistir."""
+    cx.execute("DELETE FROM face_signatures WHERE photo_id IN "
+               "(SELECT id FROM photos WHERE band_id = ?)", (band_id,))
+    cx.execute("DELETE FROM personas WHERE band_id = ?", (band_id,))
+    cx.execute("UPDATE photos SET persona_id = NULL WHERE band_id = ?", (band_id,))
+
+
 def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> dict:
     """Deduplica, agrupa caras, aplica cupo y persiste. Idempotente.
 
@@ -155,9 +164,23 @@ def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> d
 
     `limite` es el perezoso a propósito: solo se analizan las `limite`
     fotos con mejor `nitidez` ya guardada en DB. Analizar el acervo completo
-    es gastar CPU en fotos que de todos modos van a perder el cupo.
+    es gastar CPU en fotos que de todos modos van a perder el cupo. Debe ser
+    positivo: en SQLite un `LIMIT` negativo significa "sin límite", así que
+    un valor negativo anularía en silencio esta protección. Consecuencia a
+    propósito: las fotos que quedan fuera del límite NO se reanalizan, y
+    como la limpieza pone `persona_id = NULL` para toda la banda, quedan con
+    `persona_id` NULL hasta que una corrida con `limite` mayor las alcance
+    — es preferible a dejar ids colgando (el bug que resolvió la Task 6).
+
+    El análisis (lo que puede tronar por una imagen corrupta) corre ANTES de
+    tocar la base: si `analizar` lanza, esta banda no queda con DELETE/UPDATE
+    a medias — no se mutó nada suyo todavía.
     """
+    if limite <= 0:
+        raise ValueError(f"limite debe ser positivo, recibido {limite!r}")
+
     analizar = _analizador or _analizar_real
+    nombradas = _centroides_nombrados(cx, band_id)
     filas = db.rows(cx, """
         SELECT id, path FROM photos
          WHERE band_id = ? AND descartada = 0
@@ -165,16 +188,10 @@ def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> d
          LIMIT ?
     """, (band_id, limite))
 
-    # Limpieza + preservación de lo manual ANTES de cualquier early-return: el
-    # estado en DB debe ser el mismo invariante con fotos o sin ellas (nunca
-    # deja personas/firmas huérfanas de una corrida anterior).
-    nombradas = _centroides_nombrados(cx, band_id)
-    cx.execute("DELETE FROM face_signatures WHERE photo_id IN "
-               "(SELECT id FROM photos WHERE band_id = ?)", (band_id,))
-    cx.execute("DELETE FROM personas WHERE band_id = ?", (band_id,))
-    cx.execute("UPDATE photos SET persona_id = NULL WHERE band_id = ?", (band_id,))
-
     if not filas:
+        # Sin fotos que analizar no hay nada que pueda tronar: limpiar y
+        # recrear nombradas de una vez es seguro.
+        _limpiar_banda(cx, band_id)
         for indice, (member_id, centroide) in enumerate(nombradas):
             db.insert(cx, "personas", band_id=band_id, member_id=member_id,
                       etiqueta_auto=f"persona {_etiqueta(indice)}",
@@ -190,6 +207,11 @@ def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> d
         h, nitidez, caras = analizar(p)
         analizadas.append({"id": fila["id"], "hash": h, "nitidez": nitidez,
                            "caras_raw": caras})
+
+    # Limpieza + preservación de lo manual: recién AHORA que el análisis
+    # completo sin tronar, se borra y reconstruye. Si algo de arriba lanza,
+    # esta banda no quedó mutada — la excepción sube intacta a `procesar`.
+    _limpiar_banda(cx, band_id)
 
     # 1. Dedup: solo el representante de cada grupo compite por el cupo.
     grupos_dup = dedup_fotos.agrupar_duplicadas(analizadas, config.DEDUP_HAMMING_MAX)
@@ -272,6 +294,8 @@ def procesar_banda(cx, band_id: int, *, limite: int = 40, _analizador=None) -> d
 def procesar(handles: list[str] | None = None, *, limite_por_banda: int = 40,
              _cx=None, _analizador=None) -> dict:
     """Corre el banco sobre las bandas activas. Una caída aislada no tumba el lote."""
+    if limite_por_banda <= 0:
+        raise ValueError(f"limite_por_banda debe ser positivo, recibido {limite_por_banda!r}")
     propia = _cx is None
     cx = _cx or db.connect()
     resumen = {"bandas": 0, "personas": 0, "fotos_dentro": 0,
@@ -291,6 +315,7 @@ def procesar(handles: list[str] | None = None, *, limite_por_banda: int = 40,
                 r = procesar_banda(cx, banda["id"], limite=limite_por_banda,
                                    _analizador=_analizador)
             except Exception as exc:  # noqa: BLE001 — banda rota no tumba la corrida
+                cx.rollback()  # cinturón: cualquier mutación a medias de esta banda no persiste
                 print(f"   ❌ {exc}")
                 resumen["fallidas"].append(banda["ig_handle"])
                 continue

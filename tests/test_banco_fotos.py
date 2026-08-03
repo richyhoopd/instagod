@@ -336,3 +336,82 @@ def test_procesar_banda_caida_no_tumba_el_lote(cx, tmp_path, monkeypatch) -> Non
     res = banco.procesar(_cx=cx, _analizador=analizar)
     assert res["fallidas"] == ["a"]
     assert res["bandas"] == 1  # la sana sí se procesó
+
+
+def test_banda_caida_no_destruye_sus_propios_datos_por_transaccion_compartida(
+        cx, tmp_path, monkeypatch) -> None:
+    """Bug crítico: los DELETE/UPDATE de limpieza corrían en la misma
+    conexión SIN commit, antes de analizar. Si `analizar` tronaba a media
+    banda, esos DELETE quedaban pendientes en la transacción; cuando la
+    SIGUIENTE banda procesaba bien y llegaba a su `cx.commit()`, arrastraba
+    también los DELETE de la banda caída — dejándola sin sus personas
+    nombradas, peor que antes de correr."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid_a = db.insert(cx, "bands", nombre="A", ig_handle="a", tipo="banda", activa=1)
+    bid_b = db.insert(cx, "bands", nombre="B", ig_handle="b", tipo="banda", activa=1)
+    db.insert(cx, "photos", band_id=bid_a, path="a.jpg", source_post_id="a")
+    db.insert(cx, "photos", band_id=bid_b, path="b.jpg", source_post_id="b")
+
+    mapa_inicial = {"a.jpg": (_hash("1" * 64), 90.0,
+                              [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])}
+    banco.procesar_banda(cx, bid_a, _analizador=_analizador_falso(mapa_inicial))
+    persona_a = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid_a,))[0]
+    mid = db.insert(cx, "members", band_id=bid_a, nombre="Fercho", rol="baterista")
+    db.update(cx, "personas", persona_a["id"], member_id=mid)
+
+    def analizar(path):
+        if str(path).endswith("a.jpg"):
+            raise OSError("imagen corrupta")
+        return _hash("0" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(0, 1))]
+
+    res = banco.procesar(_cx=cx, _analizador=analizar)
+    assert res["fallidas"] == ["a"]
+
+    personas_a = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid_a,))
+    assert len(personas_a) == 1 and personas_a[0]["member_id"] == mid
+
+
+def test_procesar_banda_limite_cero_lanza_valueerror(cx, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    with pytest.raises(ValueError):
+        banco.procesar_banda(cx, bid, limite=0)
+
+
+def test_procesar_banda_limite_negativo_lanza_valueerror(cx, tmp_path, monkeypatch) -> None:
+    """Crítico: en SQLite un LIMIT negativo significa 'sin límite', así que
+    un --limite -1 mal tecleado, sin este guard, anularía en silencio toda
+    la protección perezosa y reanalizaría el acervo completo."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    with pytest.raises(ValueError):
+        banco.procesar_banda(cx, bid, limite=-1)
+
+
+def test_foto_fuera_del_limite_persona_id_queda_null_hasta_reproceso_mas_amplio(
+        cx, tmp_path, monkeypatch) -> None:
+    """Comportamiento FIJADO a propósito (no es un bug): una foto que queda
+    fuera del top-N por nitidez no se reanaliza, y la limpieza deja su
+    `persona_id` en NULL para toda la banda. La alternativa —conservar el
+    persona_id viejo de una foto que no se reanalizó— dejaría ids colgando
+    apuntando a una persona que la corrida acaba de borrar y recrear (el bug
+    que resolvió la Task 6). No “arreglar” este test sin releer esa Task."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    db.insert(cx, "photos", band_id=bid, path="alta.jpg", source_post_id="1", nitidez=50.0)
+    pid_baja = db.insert(cx, "photos", band_id=bid, path="baja.jpg",
+                         source_post_id="2", nitidez=10.0)
+    mapa_amplio = {
+        "alta.jpg": (_hash("1" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))]),
+        "baja.jpg": (_hash("0" * 64), 10.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(0, 1))]),
+    }
+    # Con límite amplio ambas se analizan: "baja" entra a una persona.
+    banco.procesar_banda(cx, bid, limite=2, _analizador=_analizador_falso(mapa_amplio))
+    assert db.rows(cx, "SELECT persona_id FROM photos WHERE id = ?",
+                  (pid_baja,))[0]["persona_id"] is not None
+
+    # Reproceso con límite=1: "baja" queda fuera del corte y no se reanaliza.
+    mapa_angosto = {"alta.jpg": mapa_amplio["alta.jpg"]}
+    banco.procesar_banda(cx, bid, limite=1, _analizador=_analizador_falso(mapa_angosto))
+    fila_baja = db.rows(cx, "SELECT * FROM photos WHERE id = ?", (pid_baja,))[0]
+    assert fila_baja["persona_id"] is None
