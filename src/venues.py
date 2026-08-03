@@ -23,6 +23,8 @@ import difflib
 import re
 import unicodedata
 
+from src import db
+
 # Palabras de "tipo de local" que no distinguen un foro de otro. Se quita como
 # máximo UNA al inicio y UNA al final: "Foro Sala Diana" es "sala diana", no
 # "diana" — encadenar borrados fusionaría lugares distintos.
@@ -82,3 +84,77 @@ def sugerencias(texto: str, candidatos: list[tuple[int, str]],
     ]
     puntuadas.sort(key=lambda t: (-t[2], t[0]))
     return puntuadas[:tope]
+
+
+def resolver(cx, lugar: str | None) -> int | None:
+    """venue_id del lugar, o None si no hay alias registrado. SOLO LECTURA.
+
+    Separada de `registrar_desconocido` a propósito: una función que consulta
+    no debe escribir, y quien llama decide si quiere dejar rastro del fallo.
+    """
+    clave = normalizar(lugar)
+    if not clave:
+        return None
+    filas = db.rows(cx, "SELECT venue_id FROM venue_alias WHERE alias_norm = ?", (clave,))
+    return filas[0]["venue_id"] if filas else None
+
+
+def registrar_desconocido(cx, lugar: str) -> int | None:
+    """Deja el alias en la cola de curación. Devuelve su id (None si vacío).
+
+    Idempotente: si el alias ya existe —resuelto, huérfano o marcado basura—
+    devuelve el id existente sin tocarlo. Eso evita que un lugar descartado
+    como 'no es un lugar' reaparezca en la cola cada vez que pasa un flyer.
+
+    origen='visto': el DEFAULT de la columna. No es 'llm' porque este alias
+    solo apareció en un flyer y nadie lo ha curado — 'llm' queda reservado
+    para lo que proponga la siembra automática.
+    """
+    clave = normalizar(lugar)
+    if not clave:
+        return None
+    filas = db.rows(cx, "SELECT id FROM venue_alias WHERE alias_norm = ?", (clave,))
+    if filas:
+        return int(filas[0]["id"])
+    return db.insert(cx, "venue_alias", venue_id=None, alias_norm=clave,
+                     alias_visto=lugar, origen="visto")
+
+
+def asignar_alias(cx, venue_id: int, texto: str) -> int:
+    """Liga un texto a un foro. Curación manual: gana sobre lo que hubiera."""
+    clave = normalizar(texto)
+    filas = db.rows(cx, "SELECT id FROM venue_alias WHERE alias_norm = ?", (clave,))
+    if filas:
+        aid = int(filas[0]["id"])
+        db.update(cx, "venue_alias", aid, venue_id=venue_id, origen="manual")
+        return aid
+    return db.insert(cx, "venue_alias", venue_id=venue_id, alias_norm=clave,
+                     alias_visto=texto, origen="manual")
+
+
+def marcar_no_es_lugar(cx, alias_id: int) -> None:
+    """Basura (nombre de banda, dirección): sale de la cola pero NO se borra,
+    para que el mismo texto no vuelva a entrar en la próxima corrida."""
+    db.update(cx, "venue_alias", alias_id, venue_id=None, origen="no_es_lugar")
+
+
+def fusionar(cx, dst_id: int, src_id: int) -> None:
+    """Absorbe src en dst: mueve alias y reapunta events antes de borrar.
+
+    Nunca deja `events.venue_id` colgando (no hay FK que lo cuide).
+    """
+    if dst_id == src_id:
+        return
+    cx.execute("UPDATE venue_alias SET venue_id = ? WHERE venue_id = ?", (dst_id, src_id))
+    cx.execute("UPDATE events SET venue_id = ? WHERE venue_id = ?", (dst_id, src_id))
+    cx.execute("DELETE FROM venues WHERE id = ?", (src_id,))
+    cx.commit()
+
+
+def huerfanos(cx) -> list[dict]:
+    """Alias pendientes de curar: sin foro y sin marcar como basura."""
+    return db.rows(cx, """
+        SELECT * FROM venue_alias
+         WHERE venue_id IS NULL AND origen != 'no_es_lugar'
+         ORDER BY created_at, id
+    """)
