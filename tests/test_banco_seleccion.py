@@ -39,6 +39,28 @@ def test_personas_recientes_detecta_la_publicada(cx) -> None:
     assert planner.personas_recientes(cx, dias=45, ahora=ahora) == {p1}
 
 
+def test_personas_recientes_cuenta_las_listo(cx) -> None:
+    """`listo` = aprobado y en cola para publicar. Es el bucket MÁS GRANDE del
+    embudo (en la DB real 125 vs 75 en_sheet + 37 publicado): dejarlo fuera
+    hacía que la anti-repetición volviera a proponer una cara que sale mañana."""
+    bid, p1, _, f1, _ = _banda_con_dos_personas(cx)
+    ahora = datetime(2026, 8, 3, 12, 0)
+    db.insert(cx, "content_queue", tipo="meme", band_id=bid, photo_id=f1,
+              status=db.QUEUE_LISTO,
+              scheduled_datetime=(ahora - timedelta(days=3)).isoformat())
+    assert planner.personas_recientes(cx, dias=45, ahora=ahora) == {p1}
+
+
+def test_personas_recientes_ignora_borradores(cx) -> None:
+    """Un borrador del plan aún no compromete la cara: no es 'reciente'."""
+    bid, p1, _, f1, _ = _banda_con_dos_personas(cx)
+    ahora = datetime(2026, 8, 3, 12, 0)
+    db.insert(cx, "content_queue", tipo="meme", band_id=bid, photo_id=f1,
+              status="borrador",
+              scheduled_datetime=(ahora - timedelta(days=3)).isoformat())
+    assert planner.personas_recientes(cx, dias=45, ahora=ahora) == set()
+
+
 def test_persona_fuera_de_ventana_no_cuenta(cx) -> None:
     bid, p1, _, f1, _ = _banda_con_dos_personas(cx)
     ahora = datetime(2026, 8, 3, 12, 0)

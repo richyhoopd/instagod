@@ -57,9 +57,16 @@ def proximo_mes(hoy: date | None = None) -> tuple[int, int]:
 
 
 def personas_recientes(cx, dias: int, ahora: "datetime | None" = None) -> set[int]:
-    """Personas que ya salieron en un post dentro de la ventana de `dias`.
+    """Personas que ya salieron —o están por salir— en un post dentro de `dias`.
 
     Mira `content_queue` (no `photos.usada`) porque ahí vive la fecha del post.
+
+    Los tres status cuentan como "esa cara ya está comprometida": `listo` es
+    aprobado y en cola para publicar (lo inserta la GUI, lo consume
+    generate_plan), `en_sheet` está esperando en el Sheet y `publicado` ya
+    salió. Dejar `listo` fuera hacía que la anti-repetición viera menos de la
+    mitad del embudo (en la DB real: listo=125 vs en_sheet=75 + publicado=37) y
+    volviera a proponer una cara que se publica mañana.
     """
     # OJO timezone: default tz-aware (config.TIMEZONE), NO datetime.now() naive
     # (mismo bug que ya mordió a approval.aprobar, ver src/approval.py:44). Con
@@ -71,9 +78,9 @@ def personas_recientes(cx, dias: int, ahora: "datetime | None" = None) -> set[in
         SELECT DISTINCT p.persona_id
           FROM content_queue q JOIN photos p ON p.id = q.photo_id
          WHERE p.persona_id IS NOT NULL
-           AND q.status IN (?, ?)
+           AND q.status IN (?, ?, ?)
            AND q.scheduled_datetime >= ?
-    """, (db.QUEUE_EN_SHEET, db.QUEUE_PUBLICADO, corte))
+    """, (db.QUEUE_LISTO, db.QUEUE_EN_SHEET, db.QUEUE_PUBLICADO, corte))
     return {f["persona_id"] for f in filas}
 
 
