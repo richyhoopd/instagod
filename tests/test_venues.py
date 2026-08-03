@@ -60,6 +60,16 @@ def test_migracion_es_idempotente(cx) -> None:
     # Acentos y puntuación
     ("Foro Lázaro", "lazaro"),
     ("C3 Stage & C3 Rooftop", "c3 stage c3 rooftop"),
+    # Prefijo con puntuación embebida alrededor ("**foro**" → "foro" tras el
+    # barrido de puntuación, luego se poda como prefijo genérico).
+    ("**Foro** Anexo Independencia", "anexo independencia"),
+    # Prefijo seguido de dos puntos.
+    ("Foro: Anexo Independencia", "anexo independencia"),
+    # Prefijo en mayúsculas junto con el resto del texto.
+    ("FORO ANEXO INDEPENDENCIA", "anexo independencia"),
+    # Prefijo acentuado: debe normalizarse (quitar acento) ANTES de matchear
+    # contra la lista de genéricos, o "salon" nunca calzaría con "Salón".
+    ("Salón Anexo Independencia", "anexo independencia"),
     # Vacíos
     (None, ""),
     ("", ""),
@@ -67,6 +77,20 @@ def test_migracion_es_idempotente(cx) -> None:
 ])
 def test_normalizar(crudo, esperado) -> None:
     assert venues.normalizar(crudo) == esperado
+
+
+def test_normalizar_no_funde_lugares_distintos_con_el_mismo_prefijo() -> None:
+    """Poda el prefijo genérico, pero el resto del nombre sigue distinguiendo.
+
+    Protege contra el fallo catastrófico de este módulo: que la poda de
+    genéricos se vuelva tan agresiva que "Foro X" y "Foro Y" (dos foros
+    reales distintos) colapsen a la misma clave y se fundan en el catálogo.
+    Sin este test, "mejorar" la poda de prefijos podría romper esto sin que
+    nada se ponga rojo.
+    """
+    assert venues.normalizar("Foro X") != venues.normalizar("Foro Y")
+    assert venues.normalizar("Foro X") == "x"
+    assert venues.normalizar("Foro Y") == "y"
 
 
 def test_normalizar_quita_un_prefijo_y_un_sufijo_como_maximo() -> None:
