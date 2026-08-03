@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -146,3 +147,131 @@ def test_reprocesar_conserva_el_nombre_capturado_a_mano(cx, tmp_path, monkeypatc
     personas = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))
     assert len(personas) == 1
     assert personas[0]["member_id"] == mid  # el nombre sobrevivió al reproceso
+
+
+def test_nombre_sobrevive_si_su_foto_se_vuelve_duplicada_no_representante(
+        cx, tmp_path, monkeypatch) -> None:
+    """El centroide vive en `personas.centroide`, no solo en las firmas: si la
+    foto de un nombrado deja de ser la representante de su grupo de dedup (y
+    su cara ya no entra a la agrupación), el member_id no debe perderse."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a")
+    hash_a = _hash("1" * 64)
+    mapa = {"a.jpg": (hash_a, 50.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])}
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    persona = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))[0]
+    mid = db.insert(cx, "members", band_id=bid, nombre="Fercho", rol="baterista")
+    db.update(cx, "personas", persona["id"], member_id=mid)
+
+    # b.jpg: mismo hash que a.jpg (dedup los funde) pero MÁS nítida y de OTRA
+    # persona → se vuelve la representante; la cara de "a" queda fuera del
+    # todo y ningún grupo nuevo calza con el centroide nombrado.
+    db.insert(cx, "photos", band_id=bid, path="b.jpg", source_post_id="b")
+    mapa["b.jpg"] = (hash_a, 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(0, 1))])
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    personas = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))
+    assert any(p["member_id"] == mid for p in personas)
+
+
+def test_nombre_sobrevive_si_su_unica_foto_se_descarta(cx, tmp_path, monkeypatch) -> None:
+    """Marcar `descartada` la única foto de un nombrado saca a la banda del
+    early-return (sin fotos activas); el member_id debe sobrevivir igual."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    pid_foto = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a")
+    mapa = {"a.jpg": (_hash("1" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])}
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    persona = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))[0]
+    mid = db.insert(cx, "members", band_id=bid, nombre="Fercho", rol="baterista")
+    db.update(cx, "personas", persona["id"], member_id=mid)
+
+    db.update(cx, "photos", pid_foto, descartada=1)
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    personas = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))
+    assert any(p["member_id"] == mid for p in personas)
+
+
+def test_member_no_se_asigna_a_dos_personas_si_sus_caras_se_parten(
+        cx, tmp_path, monkeypatch) -> None:
+    """Asignación 1-a-1: si las caras de un nombrado se agrupan en DOS grupos
+    nuevos (ambos parecidos al centroide), el member_id se queda en solo uno."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    pid_a = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a")
+    mapa = {"a.jpg": (_hash("1" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])}
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    persona = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))[0]
+    mid = db.insert(cx, "members", band_id=bid, nombre="Fercho", rol="baterista")
+    db.update(cx, "personas", persona["id"], member_id=mid)
+
+    # "a" sale de juego (descartada). Llegan b y c: cada una a 40° del
+    # centroide nombrado (cos ≈ 0.766 ≥ 0.45, ambas calzarían) pero a 80°
+    # entre sí (cos ≈ 0.174 < 0.45: NO se agrupan entre ellas).
+    db.update(cx, "photos", pid_a, descartada=1)
+    db.insert(cx, "photos", band_id=bid, path="b.jpg", source_post_id="b")
+    db.insert(cx, "photos", band_id=bid, path="c.jpg", source_post_id="c")
+    ang = math.radians(40)
+    mapa["b.jpg"] = (_hash("0011" * 16), 80.0,
+                     [((0, 0, 50, 50), 0.9, 0.2, _vec(math.cos(ang), math.sin(ang)))])
+    mapa["c.jpg"] = (_hash("1100" * 16), 70.0,
+                     [((0, 0, 50, 50), 0.9, 0.2, _vec(math.cos(ang), -math.sin(ang)))])
+    res = banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    assert res["personas"] == 2  # b y c NO se fusionaron entre sí
+    personas = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))
+    con_nombre = [p for p in personas if p["member_id"] == mid]
+    assert len(con_nombre) == 1  # el nombre no se duplicó
+
+
+def test_foto_descartada_con_persona_id_previo_no_queda_colgando(
+        cx, tmp_path, monkeypatch) -> None:
+    """`photos.persona_id` no tiene FK (se agregó por ALTER): si la foto se
+    descarta y su persona se recrea con otro id, el viejo no debe sobrevivir
+    apuntando a nada (o peor, a la persona de otra banda)."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    for n in ("a.jpg", "b.jpg"):
+        db.insert(cx, "photos", band_id=bid, path=n, source_post_id=n[0])
+    mapa = {
+        "a.jpg": (_hash("1" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))]),
+        "b.jpg": (_hash("0101" * 16), 80.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(0, 1))]),
+    }
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+    fila_a = db.rows(cx, "SELECT * FROM photos WHERE path = 'a.jpg'")[0]
+    assert fila_a["persona_id"] is not None
+
+    db.update(cx, "photos", fila_a["id"], descartada=1)
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    fila_a2 = db.rows(cx, "SELECT * FROM photos WHERE path = 'a.jpg'")[0]
+    ids_persona_banda = {p["id"] for p in
+                         db.rows(cx, "SELECT id FROM personas WHERE band_id = ?", (bid,))}
+    assert fila_a2["persona_id"] is None or fila_a2["persona_id"] in ids_persona_banda
+
+
+def test_banda_sin_fotos_activas_no_deja_firmas_huerfanas(cx, tmp_path, monkeypatch) -> None:
+    """Sin fotos activas (early-return), el limpiado corre igual: cero firmas
+    huérfanas en la tabla y el nombre capturado a mano sigue existiendo."""
+    monkeypatch.setattr(banco.config, "BASE_DIR", tmp_path)
+    bid = db.insert(cx, "bands", nombre="K", ig_handle="k", tipo="banda")
+    pid_foto = db.insert(cx, "photos", band_id=bid, path="a.jpg", source_post_id="a")
+    mapa = {"a.jpg": (_hash("1" * 64), 90.0, [((0, 0, 50, 50), 0.9, 0.2, _vec(1, 0))])}
+    banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+    persona = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))[0]
+    mid = db.insert(cx, "members", band_id=bid, nombre="Fercho", rol="baterista")
+    db.update(cx, "personas", persona["id"], member_id=mid)
+    assert len(db.rows(cx, "SELECT * FROM face_signatures")) == 1
+
+    db.update(cx, "photos", pid_foto, descartada=1)
+    res = banco.procesar_banda(cx, bid, _analizador=_analizador_falso(mapa))
+
+    assert res == {"personas": 0, "fotos_dentro": 0, "fotos_fuera": 0, "duplicadas": 0}
+    assert len(db.rows(cx, "SELECT * FROM face_signatures")) == 0
+    personas = db.rows(cx, "SELECT * FROM personas WHERE band_id = ?", (bid,))
+    assert len(personas) == 1 and personas[0]["member_id"] == mid

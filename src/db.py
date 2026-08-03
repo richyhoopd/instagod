@@ -41,7 +41,7 @@ TABLES: dict[str, set[str]] = {
         "faces_count", "es_grupal", "nitidez", "usable_meme", "descartada",
         "caption_original", "usada", "evento_analizado", "persona_id",
     },
-    "personas": {"band_id", "member_id", "etiqueta_auto"},
+    "personas": {"band_id", "member_id", "etiqueta_auto", "centroide"},
     "face_signatures": {"photo_id", "persona_id", "bbox", "det_score", "embedding"},
     "events": {
         "band_id", "tipo", "fecha_evento", "titulo", "cover_url", "lugar", "ciudad",
@@ -166,6 +166,14 @@ _MIGRATIONS = {
         "evento_analizado": "INTEGER NOT NULL DEFAULT 0",
         # Banco por persona: cara dominante de la foto (NULL = sin cara o sin agrupar).
         "persona_id": "INTEGER",
+    },
+    "personas": {
+        # Vector medio (128 float32, mismo formato que face_signatures.embedding)
+        # de las firmas del grupo AL MOMENTO de crearlo. Persistido en la fila y
+        # no solo derivado de las firmas vivas: así una persona nombrada a mano
+        # sobrevive un reproceso aunque sus firmas desaparezcan (dedup, fotos
+        # descartadas) — el batch nunca pisa lo manual.
+        "centroide": "BLOB",
     },
 }
 
