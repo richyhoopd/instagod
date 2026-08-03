@@ -45,7 +45,8 @@ Detección y firma facial.
 - `similitud(a, b) -> float` — coseno. **Puro.**
 - `agrupar(firmas, umbral) -> list[list[int]]` — aglomerativo. **Puro.**
 
-Umbral de "misma persona": 0.363 coseno, el valor que documenta OpenCV para SFace. No hay que calibrarlo a ciegas.
+Umbral de "misma persona": 0.45 coseno, medido y confirmado contra este acervo
+(ver "Configuración" y "Estado de la calibración").
 
 Los modelos se cachean con el mismo patrón de descarga-valida-escritura-atómica que `src/covers.py` usa para las portadas.
 
