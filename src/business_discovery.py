@@ -288,13 +288,27 @@ def _podar_fuera_del_banco(cx, band_id: int, shortcodes_nuevos: set[str]) -> lis
 
     Solo toca lo de esta corrida (`shortcodes_nuevos`): una foto vieja que salga
     del cupo se marca `usable_meme=0` pero NUNCA se borra — regla del spec.
+
+    Invariante real, independiente de cualquier `limite` que reciba
+    `procesar_banda`: NO SE BORRA LO QUE NO SE JUZGÓ. `procesar_banda` solo
+    escribe `nitidez` en las fotos que efectivamente analizó; una fila con
+    `nitidez IS NULL` nunca compitió por el cupo (quedó fuera del análisis),
+    así que se salta aquí aunque `usable_meme` traiga el 0 de default de
+    columna — ese 0 no significa "perdió", significa "no se sabe todavía".
+
+    Devuelve solo las fotos DE ESTA CORRIDA (`shortcodes_nuevos`) que
+    sobrevivieron a la poda, no el total de fotos vivas de la banda — para
+    que el resumen de `traer` no infle el conteo con fotos viejas ya
+    conservadas de corridas anteriores.
     """
     fuera = db.rows(cx, """
-        SELECT id, path, source_post_id FROM photos
+        SELECT id, path, source_post_id, nitidez FROM photos
          WHERE band_id = ? AND usable_meme = 0
     """, (band_id,))
     borradas = 0
     for fila in fuera:
+        if fila["nitidez"] is None:
+            continue  # nunca se juzgó: no se borra lo que no se juzgó
         if fila["source_post_id"] not in shortcodes_nuevos:
             continue
         p = Path(fila["path"])
@@ -307,8 +321,13 @@ def _podar_fuera_del_banco(cx, band_id: int, shortcodes_nuevos: set[str]) -> lis
     cx.commit()
     if borradas:
         print(f"   🗑  {borradas} descarga(s) fuera del cupo, borradas")
-    return db.rows(cx, "SELECT id, source_post_id FROM photos WHERE band_id = ?",
-                   (band_id,))
+    if not shortcodes_nuevos:
+        return []
+    marcadores = ",".join("?" * len(shortcodes_nuevos))
+    return db.rows(cx, f"""
+        SELECT id, source_post_id FROM photos
+         WHERE band_id = ? AND source_post_id IN ({marcadores})
+    """, (band_id, *shortcodes_nuevos))
 
 
 # ---------- orquestación ----------
@@ -360,8 +379,23 @@ def traer(handles: list[str], *, max_posts: int | None = None, activar: bool = F
             medias = (bd.get("media") or {}).get("data") or []
             nuevas = guardar_media(cx, band_id, handle, medias)
             if selectivo:
-                banco.procesar_banda(cx, band_id)
-                nuevas = _podar_fuera_del_banco(cx, band_id, {n["shortcode"] for n in nuevas})
+                try:
+                    # El fetch selectivo es deliberado: aquí sí se juzga TODO lo
+                    # vivo de la banda, no las 40 mejores por default — si el
+                    # cupo por defecto se queda corto, las recién bajadas con
+                    # nitidez aún NULL nunca competirían (ver _podar_fuera_del_banco).
+                    total_vivas = db.rows(cx, """
+                        SELECT count(*) AS n FROM photos
+                         WHERE band_id = ? AND descartada = 0
+                    """, (band_id,))[0]["n"]
+                    if total_vivas:
+                        banco.procesar_banda(cx, band_id, limite=total_vivas)
+                        nuevas = _podar_fuera_del_banco(
+                            cx, band_id, {n["shortcode"] for n in nuevas})
+                except Exception as exc:  # noqa: BLE001 — el banco no debe tumbar el lote
+                    print(f"   ❌ el banco falló para @{handle}: {exc}")
+                    resumen["errores"].append(handle)
+                    continue
             db.update(cx, "bands", band_id,
                       scraped_at=datetime.now().isoformat(timespec="seconds"))
             resumen["ok"].append({"handle": handle, "band_id": band_id,
@@ -418,7 +452,8 @@ if __name__ == "__main__":
                         help="dar de alta como activa=1 (default: candidata para curar)")
     parser.add_argument("--check", action="store_true", help="solo diagnóstico de permisos")
     parser.add_argument("--selectivo", action="store_true",
-                        help=f"mira {config.BD_POSTS_A_MIRAR} posts y guarda solo lo que entra al banco")
+                        help=(f"mira {config.BD_POSTS_A_MIRAR} posts, corre el banco y BORRA "
+                              "del disco las descargas que no entren al cupo"))
     args = parser.parse_args()
 
     if args.check:

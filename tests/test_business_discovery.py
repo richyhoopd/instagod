@@ -264,12 +264,12 @@ def test_traer_selectivo_borra_lo_que_no_entra(cx, tmp_path, monkeypatch) -> Non
     medias = [_media(shortcode=f"S{i}") for i in range(3)]
     _mock_get(monkeypatch, _perfil(medias=medias))
 
-    # El banco solo deja la primera.
+    # El banco solo deja la primera; las demás SÍ se juzgaron (nitidez seteada).
     def fake_procesar(conn, band_id, **kw):
         ids = [r["id"] for r in db.rows(conn, "SELECT id FROM photos ORDER BY id")]
         for pid in ids[1:]:
-            db.update(conn, "photos", pid, usable_meme=0)
-        db.update(conn, "photos", ids[0], usable_meme=1)
+            db.update(conn, "photos", pid, usable_meme=0, nitidez=1.0)
+        db.update(conn, "photos", ids[0], usable_meme=1, nitidez=9.0)
         return {"personas": 1, "fotos_dentro": 1, "fotos_fuera": len(ids) - 1,
                 "duplicadas": 0}
 
@@ -292,3 +292,100 @@ def test_traer_no_selectivo_conserva_todo(cx, tmp_path, monkeypatch) -> None:
     res = bd.traer(["kabala_oficial"], _cx=cx)
     assert res["fotos"] == 3
     assert len(db.rows(cx, "SELECT id FROM photos")) == 3
+
+
+def test_selectivo_no_borra_fotos_no_juzgadas(cx, tmp_path, monkeypatch) -> None:
+    """Invariante: NO SE BORRA LO QUE NO SE JUZGÓ (nitidez NULL nunca se borra).
+
+    Simula un banco que, pese al `limite` que recibió, solo alcanza a
+    escribir `nitidez` en 2 de las 3 fotos vivas (p. ej. porque el `limite`
+    seguía siendo insuficiente en algún punto del flujo). La 3a nunca
+    compitió por el cupo — se queda con `usable_meme=0` de default de
+    columna pero `nitidez` en NULL — y debe sobrevivir a la poda.
+    """
+    monkeypatch.setattr(bd.config, "FB_IG_USER_ID", "999")
+    monkeypatch.setattr(bd.config, "FB_PAGE_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(bd.config, "resolve_photos_dir", lambda: tmp_path)
+    monkeypatch.setattr(bd.config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(bd, "_descargar", lambda u, d: (d.write_bytes(b"j"), True)[1])
+    medias = [_media(shortcode=f"S{i}") for i in range(3)]
+    _mock_get(monkeypatch, _perfil(medias=medias))
+
+    def fake_procesar(conn, band_id, **kw):
+        ids = [r["id"] for r in db.rows(conn, "SELECT id FROM photos ORDER BY id")]
+        db.update(conn, "photos", ids[0], usable_meme=1, nitidez=9.0)   # entra
+        db.update(conn, "photos", ids[1], usable_meme=0, nitidez=1.0)   # pierde el cupo
+        # ids[2] no se toca: usable_meme=0 (default), nitidez=NULL — nunca juzgada
+        return {"personas": 1, "fotos_dentro": 1, "fotos_fuera": 1, "duplicadas": 0}
+
+    monkeypatch.setattr(bd.banco, "procesar_banda", fake_procesar)
+    bd.traer(["kabala_oficial"], _cx=cx, selectivo=True)
+
+    filas = db.rows(cx, "SELECT source_post_id, nitidez FROM photos")
+    codigos = {f["source_post_id"] for f in filas}
+    assert codigos == {"S0", "S2"}   # S1 sí se borró (perdió, juzgada); S2 sobrevive
+    assert len(list((tmp_path / "kabala_oficial").glob("*.jpg"))) == 2
+
+
+def test_selectivo_no_infla_conteo_en_banda_ya_poblada(cx, tmp_path, monkeypatch) -> None:
+    """resumen['fotos'] cuenta solo lo de ESTA corrida, no el total vivo de la banda."""
+    monkeypatch.setattr(bd.config, "FB_IG_USER_ID", "999")
+    monkeypatch.setattr(bd.config, "FB_PAGE_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(bd.config, "resolve_photos_dir", lambda: tmp_path)
+    monkeypatch.setattr(bd.config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(bd, "_descargar", lambda u, d: (d.write_bytes(b"j"), True)[1])
+
+    # La banda ya traía 5 fotos viejas conservadas (fuera del cupo, nunca borradas).
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    for i in range(5):
+        db.insert(cx, "photos", band_id=bid, path=f"vieja_{i}.jpg",
+                 source_post_id=f"OLD{i}", usable_meme=0, nitidez=3.0)
+
+    _mock_get(monkeypatch, _perfil(medias=[_media(shortcode="NEW1")]))
+
+    def fake_procesar(conn, band_id, **kw):
+        fila = db.rows(conn,
+            "SELECT id FROM photos WHERE band_id = ? AND source_post_id = 'NEW1'",
+            (band_id,))[0]
+        db.update(conn, "photos", fila["id"], usable_meme=1, nitidez=9.0)
+        return {"personas": 1, "fotos_dentro": 1, "fotos_fuera": 0, "duplicadas": 0}
+
+    monkeypatch.setattr(bd.banco, "procesar_banda", fake_procesar)
+    res = bd.traer(["kabala_oficial"], _cx=cx, selectivo=True)
+
+    assert res["fotos"] == 1                                   # no cuenta las 5 viejas
+    assert len(db.rows(cx, "SELECT id FROM photos")) == 6       # 5 viejas + 1 nueva, nada se borró
+
+
+def test_selectivo_banco_truena_no_tumba_lote(cx, tmp_path, monkeypatch) -> None:
+    """Si el banco truena analizando una cuenta, el lote sigue con las demás."""
+    monkeypatch.setattr(bd.config, "FB_IG_USER_ID", "999")
+    monkeypatch.setattr(bd.config, "FB_PAGE_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(bd.config, "resolve_photos_dir", lambda: tmp_path)
+    monkeypatch.setattr(bd.config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(bd, "_descargar", lambda u, d: (d.write_bytes(b"j"), True)[1])
+
+    def _get(url, params):
+        if "banda1" in params["fields"]:
+            return _Resp(_perfil(handle="banda1", medias=[_media(shortcode="S1")]))
+        return _Resp(_perfil(handle="banda2", medias=[_media(shortcode="S2")]))
+
+    monkeypatch.setattr(bd, "_get", _get)
+
+    llamadas: list[int] = []
+
+    def fake_procesar(conn, band_id, **kw):
+        llamadas.append(band_id)
+        if len(llamadas) == 1:
+            raise RuntimeError("imagen corrupta")
+        fila = db.rows(conn, "SELECT id FROM photos WHERE band_id = ?", (band_id,))[0]
+        db.update(conn, "photos", fila["id"], usable_meme=1, nitidez=5.0)
+        return {"personas": 1, "fotos_dentro": 1, "fotos_fuera": 0, "duplicadas": 0}
+
+    monkeypatch.setattr(bd.banco, "procesar_banda", fake_procesar)
+    res = bd.traer(["banda1", "banda2"], _cx=cx, selectivo=True)
+
+    assert res["errores"] == ["banda1"]
+    assert [o["handle"] for o in res["ok"]] == ["banda2"]
+    assert res["fotos"] == 1
+    assert len(llamadas) == 2   # el banco sí se intentó para las dos cuentas
