@@ -294,6 +294,44 @@ def test_traer_no_selectivo_conserva_todo(cx, tmp_path, monkeypatch) -> None:
     assert len(db.rows(cx, "SELECT id FROM photos")) == 3
 
 
+def test_selectivo_limite_cubre_todas_las_vivas(cx, tmp_path, monkeypatch) -> None:
+    """El `limite` que recibe `procesar_banda` debe cubrir TODAS las fotos
+    vivas de la banda (viejas conservadas + recién bajadas), no el default
+    de 40 — si no, las nuevas con `nitidez` NULL nunca competirían por el
+    cupo (se quedarían en el limbo: el guard de `_podar_fuera_del_banco`
+    las salva del borrado, pero nunca las juzga)."""
+    monkeypatch.setattr(bd.config, "FB_IG_USER_ID", "999")
+    monkeypatch.setattr(bd.config, "FB_PAGE_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(bd.config, "resolve_photos_dir", lambda: tmp_path)
+    monkeypatch.setattr(bd.config, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(bd, "_descargar", lambda u, d: (d.write_bytes(b"j"), True)[1])
+
+    # 45 fotos viejas ya conservadas: por sí solas ya rebasan el default
+    # de `procesar_banda` (`limite=40`), barato de sembrar (sin descarga real).
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial")
+    for i in range(45):
+        db.insert(cx, "photos", band_id=bid, path=f"vieja_{i}.jpg",
+                 source_post_id=f"OLD{i}", usable_meme=0, nitidez=3.0)
+
+    medias = [_media(shortcode=f"NEW{i}") for i in range(3)]
+    _mock_get(monkeypatch, _perfil(medias=medias))
+
+    limites_recibidos: list[int] = []
+
+    def fake_procesar(conn, band_id, *, limite=40, **kw):
+        limites_recibidos.append(limite)
+        for r in db.rows(conn, "SELECT id FROM photos WHERE band_id = ?", (band_id,)):
+            db.update(conn, "photos", r["id"], usable_meme=1, nitidez=1.0)
+        return {"personas": 1, "fotos_dentro": 48, "fotos_fuera": 0, "duplicadas": 0}
+
+    monkeypatch.setattr(bd.banco, "procesar_banda", fake_procesar)
+    bd.traer(["kabala_oficial"], _cx=cx, selectivo=True)
+
+    # 45 viejas + 3 nuevas = 48: inequívocamente distinto del default (40),
+    # así que este test falla si alguien revierte a la llamada sin `limite`.
+    assert limites_recibidos == [48]
+
+
 def test_selectivo_no_borra_fotos_no_juzgadas(cx, tmp_path, monkeypatch) -> None:
     """Invariante: NO SE BORRA LO QUE NO SE JUZGÓ (nitidez NULL nunca se borra).
 
