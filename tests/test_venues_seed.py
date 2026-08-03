@@ -35,6 +35,16 @@ def test_siembra_desde_bands_usa_los_foros_que_ya_sigue(cx) -> None:
     assert venues.resolver(cx, "STADITCHE") is not None
 
 
+def test_siembra_desde_bands_marca_origen_semilla(cx) -> None:
+    """Los alias sembrados desde bands son 'semilla', no 'manual': nadie los
+    curó a mano, salieron de una cuenta que Ricardo ya sigue."""
+    db.insert(cx, "bands", nombre="Pool Sessions", ig_handle="poolsessions_",
+              tipo="evento", activa=1)
+    venues_seed.sembrar_desde_bands(cx)
+    origenes = {r["origen"] for r in db.rows(cx, "SELECT origen FROM venue_alias")}
+    assert origenes == {"semilla"}
+
+
 def test_siembra_desde_bands_es_idempotente(cx) -> None:
     db.insert(cx, "bands", nombre="Cuerda", ig_handle="cuerdacultura",
               tipo="foro", activa=1)
@@ -94,6 +104,22 @@ def test_sembrar_no_pisa_lo_curado(cx) -> None:
 
     venues_seed.sembrar(cx, _llm=_llm)
     assert venues.resolver(cx, "REY") == mio
+
+
+def test_sembrar_no_pisa_lo_sembrado_desde_bands(cx) -> None:
+    """Un alias con origen='semilla' tampoco lo pisa una propuesta del LLM.
+
+    Debe fallar si el chequeo de protección se reduce a solo 'manual'.
+    """
+    db.insert(cx, "bands", nombre="STADITCHE", ig_handle="staditche",
+              tipo="foro", activa=1)
+
+    def _llm(pendientes):
+        return [{"canonico": "Otro Foro", "alias": ["staditche"]}]
+
+    venues_seed.sembrar(cx, _llm=_llm)
+    foro = db.rows(cx, "SELECT id FROM venues WHERE nombre = 'STADITCHE'")[0]["id"]
+    assert venues.resolver(cx, "staditche") == foro
 
 
 def test_sembrar_deja_huerfano_lo_que_el_llm_no_agrupa(cx) -> None:

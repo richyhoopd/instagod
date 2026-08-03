@@ -9,7 +9,9 @@ Orden deliberado, de lo barato y seguro a lo caro e incierto:
 3. Solo lo que sigue ambiguo va al LLM, en UNA llamada.
 4. Lo que el LLM no agrupa queda huérfano para curación en la GUI.
 
-Idempotente y respetuoso de lo manual: un alias con origen='manual' no se toca.
+Idempotente y respetuoso de lo curado: un alias con origen='manual' (curación a
+mano) o 'semilla' (cuenta que Ricardo ya sigue) no lo pisa el batch — ambos son
+igual de confiables, ninguno es una adivinanza del LLM ni del OCR.
 """
 from __future__ import annotations
 
@@ -38,6 +40,27 @@ Textos:
 """
 
 
+def _asignar_alias_semilla(cx, venue_id: int, texto: str) -> None:
+    """Liga un texto a un foro con origen='semilla' (cuenta que ya se sigue).
+
+    No reusa `venues.asignar_alias`: esa función es el contrato de curación
+    MANUAL de la Task 3 (ya cerrada, no se toca) y marca origen='manual' a
+    propósito — un humano decidiendo en la GUI. Este alias es automático (sale
+    de una cuenta que Ricardo ya sigue, no de un clic), así que necesita su
+    propio origen sin reabrir ese contrato. Igual que `asignar_alias`, nunca
+    pisa lo curado a mano: si el alias ya es 'manual', se deja intacto.
+    """
+    clave = venues.normalizar(texto)
+    filas = db.rows(cx, "SELECT id, origen FROM venue_alias WHERE alias_norm = ?", (clave,))
+    if filas:
+        if filas[0]["origen"] == "manual":
+            return
+        db.update(cx, "venue_alias", filas[0]["id"], venue_id=venue_id, origen="semilla")
+        return
+    db.insert(cx, "venue_alias", venue_id=venue_id, alias_norm=clave,
+             alias_visto=texto, origen="semilla")
+
+
 def sembrar_desde_bands(cx) -> int:
     """Crea venues desde las cuentas de tipo foro/evento. Devuelve cuántos creó."""
     creados = 0
@@ -53,7 +76,7 @@ def sembrar_desde_bands(cx) -> int:
         creados += 1
         for texto in (b["nombre"], b["ig_handle"]):
             if texto and venues.normalizar(texto):
-                venues.asignar_alias(cx, vid, texto)
+                _asignar_alias_semilla(cx, vid, texto)
     return creados
 
 
@@ -102,6 +125,10 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
 
     grupos = agrupar_mecanico(lugares_distintos(cx))
     # Lo que ya resuelve contra el catálogo no se toca; el resto es "pendiente".
+    # Un solo texto representativo por clave normalizada (no las N variantes de
+    # escritura que ya fusionó `agrupar_mecanico`): son la misma clave, así que
+    # ya son la misma info para el LLM — mandarlas todas sería gastar tokens
+    # sin darle nada nuevo con qué decidir.
     pendientes = [textos[0] for clave, textos in grupos.items()
                   if venues.resolver(cx, textos[0]) is None]
 
@@ -121,8 +148,8 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
                 continue
             filas = db.rows(cx, "SELECT id, origen FROM venue_alias WHERE alias_norm = ?",
                             (clave,))
-            if filas and filas[0]["origen"] == "manual":
-                continue          # el batch NUNCA pisa lo curado a mano
+            if filas and filas[0]["origen"] in ("manual", "semilla"):
+                continue          # el batch NUNCA pisa lo curado a mano ni lo sembrado
             if filas:
                 db.update(cx, "venue_alias", filas[0]["id"], venue_id=vid, origen="llm")
             else:
