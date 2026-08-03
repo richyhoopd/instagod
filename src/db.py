@@ -39,8 +39,10 @@ TABLES: dict[str, set[str]] = {
     "photos": {
         "band_id", "member_id", "path", "source_post_id", "fecha",
         "faces_count", "es_grupal", "nitidez", "usable_meme", "descartada",
-        "caption_original", "usada", "evento_analizado",
+        "caption_original", "usada", "evento_analizado", "persona_id",
     },
+    "personas": {"band_id", "member_id", "etiqueta_auto"},
+    "face_signatures": {"photo_id", "persona_id", "bbox", "det_score", "embedding"},
     "events": {
         "band_id", "tipo", "fecha_evento", "titulo", "cover_url", "lugar", "ciudad",
         "flyer_path", "source_post_id", "parseado_por_llm", "status", "al_final",
@@ -162,6 +164,8 @@ _MIGRATIONS = {
         # El caption de este post ya pasó por el detector de eventos/releases
         # (sea cual sea el resultado). Hace el backfill idempotente: nunca re-LLM.
         "evento_analizado": "INTEGER NOT NULL DEFAULT 0",
+        # Banco por persona: cara dominante de la foto (NULL = sin cara o sin agrupar).
+        "persona_id": "INTEGER",
     },
 }
 
@@ -182,7 +186,10 @@ def init_db(cx: sqlite3.Connection) -> None:
                   VALUES (1, 'gdlscene', 'gdlscene', 'La Escena GDL', 'Guadalajara')""")
     for idx in ("CREATE INDEX IF NOT EXISTS idx_bands_account ON bands(account_id)",
                 "CREATE INDEX IF NOT EXISTS idx_queue_account ON content_queue(account_id)",
-                "CREATE INDEX IF NOT EXISTS idx_igposts_account ON ig_posts(account_id)"):
+                "CREATE INDEX IF NOT EXISTS idx_igposts_account ON ig_posts(account_id)",
+                "CREATE INDEX IF NOT EXISTS idx_personas_band ON personas(band_id)",
+                "CREATE INDEX IF NOT EXISTS idx_firmas_photo ON face_signatures(photo_id)",
+                "CREATE INDEX IF NOT EXISTS idx_firmas_persona ON face_signatures(persona_id)"):
         cx.execute(idx)
     # Backfill idempotente: banda que ya tiene spotify_id/deezer_id cuenta 'ok'.
     cx.execute("UPDATE bands SET spotify_status = 'ok' "

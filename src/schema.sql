@@ -269,3 +269,31 @@ CREATE TABLE IF NOT EXISTS segment_runs (
     corrido_at  TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (segmento, account_id, ventana)
 );
+
+-- =====================================================================
+-- personas — grupo automático de caras dentro de una banda ("persona A de
+-- Kabala"). member_id la liga a `members` cuando Ricardo le pone nombre y rol
+-- en la GUI; hasta entonces es anónima pero utilizable para dar variedad.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS personas (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    band_id       INTEGER NOT NULL,
+    member_id     INTEGER,
+    etiqueta_auto TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- =====================================================================
+-- face_signatures — una fila por cara detectada. `embedding` es el vector de
+-- 128 float32 de SFace, L2-normalizado, como BLOB (512 bytes). Guardarlo
+-- permite reagrupar con otro umbral sin volver a procesar imágenes.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS face_signatures (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    photo_id   INTEGER NOT NULL,
+    persona_id INTEGER,
+    bbox       TEXT NOT NULL,
+    det_score  REAL NOT NULL,
+    embedding  BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
