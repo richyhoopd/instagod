@@ -54,3 +54,6 @@ data/ig_accounts.json
 .coverage
 coverage.xml
 htmlcov/
+
+# Scratch de subagent-driven-development (ledger, briefs, reportes)
+.superpowers/
