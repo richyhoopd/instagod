@@ -25,7 +25,7 @@ from typing import Any
 import pytz
 
 import config
-from src import approval, covers, db, host, sheets, telegram_bot
+from src import approval, covers, db, host, sheets, telegram_bot, venues
 from src import compose as compose_mod
 from src.generate_anuncios import _MESES
 
@@ -33,20 +33,38 @@ from src.generate_anuncios import _MESES
 def agrupar_por_evento(eventos: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Fusiona eventos con MISMA fecha + MISMO foro en uno solo con TODAS las bandas.
 
-    La identidad del foro es `events.venue_id`, del catálogo de `src/venues.py`,
-    no el texto de `lugar` — el mismo foro llega escrito de media docena de
-    formas ("REY" y "Hake al Rey" son el mismo lugar) y comparar texto dejaba
-    pasar duplicados a la agenda.
+    La clave de agrupación tiene TRES ramas, en este orden:
 
-    Sin `venue_id` no se fusiona: adivinar que dos flyers son el mismo evento
-    desaparecería uno de la agenda, y eso es peor que mostrarlo dos veces.
+    1. `("venue", venue_id)` — la identidad real del foro, del catálogo de
+       `src/venues.py`. El mismo foro llega escrito de media docena de formas
+       ("REY" y "Hake al Rey" son el mismo lugar) y comparar texto dejaba
+       pasar duplicados a la agenda. Si hay `venue_id`, manda.
+    2. `("texto", normalizar(lugar))` — respaldo para eventos que todavía no
+       tienen foro resuelto pero cuyo `lugar` normaliza a la MISMA cadena.
+       Esto no viola "sin venue_id no se fusiona por adivinanza": comparar dos
+       cadenas idénticas no es adivinar, es exactamente el dedup que corría en
+       producción antes del catálogo. Quitarlo perdió cobertura real: mientras
+       la cola de curación esté llena, la mayoría de los eventos tiene
+       `venue_id` NULL y sin este respaldo NINGÚN par fusiona.
+    3. `("solo", id)` — sin `venue_id` y sin lugar normalizable no hay nada que
+       comparar: cada evento va solo. Nunca se fusionan entre sí los "sin
+       lugar", que es lo que pasaría si la clave fuera la cadena vacía.
+
+    El discriminante ("venue"/"texto"/"solo") impide que un `venue_id` colisione
+    con un texto normalizado o con un id de evento.
     """
     grupos: dict[tuple, dict] = {}
     orden: list[tuple] = []
     for e in eventos:
         fecha = (e.get("fecha_evento") or "")[:10]
         vid = e.get("venue_id")
-        clave = (fecha, vid) if vid else (fecha, f"__solo{e['id']}")
+        norm = venues.normalizar(e.get("lugar"))
+        if vid:
+            clave = (fecha, "venue", vid)
+        elif norm:
+            clave = (fecha, "texto", norm)
+        else:
+            clave = (fecha, "solo", e["id"])
         g = grupos.get(clave)
         if g is None:
             g = {**e, "bandas": [], "handles": [], "ids": []}

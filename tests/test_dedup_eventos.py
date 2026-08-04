@@ -65,11 +65,55 @@ def test_no_agrupa_venues_distintos() -> None:
     assert len(grupos) == 2
 
 
-def test_no_agrupa_sin_venue_id() -> None:
-    """Sin foro resuelto no se fusiona: adivinar es peor que duplicar."""
+def test_sin_venue_id_fusiona_si_el_lugar_normaliza_igual() -> None:
+    """Respaldo por texto: el dedup que ya corría en producción antes del
+    catálogo. Comparar dos cadenas idénticas no es adivinar."""
     grupos = agrupar_por_evento([
-        _ev(1, "2026-08-23", None, "A", "a"),
-        _ev(2, "2026-08-23", None, "B", "b"),
+        _ev(1, "2026-08-23", None, "A", "a", lugar="Foro Anexo Independencia"),
+        _ev(2, "2026-08-23", None, "B", "b", lugar="ANEXO INDEPENDENCIA"),
+    ])
+    assert len(grupos) == 1
+    assert set(grupos[0]["handles"]) == {"a", "b"}
+
+
+def test_sin_venue_id_no_fusiona_lugares_distintos() -> None:
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", None, "A", "a", lugar="Foro X"),
+        _ev(2, "2026-08-23", None, "B", "b", lugar="Foro Y"),
+    ])
+    assert len(grupos) == 2
+
+
+def test_sin_venue_id_ni_lugar_cada_evento_va_solo() -> None:
+    """La cadena vacía es 'no hay lugar': no puede fusionar a todos entre sí."""
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", None, "A", "a", lugar=None),
+        _ev(2, "2026-08-23", None, "B", "b", lugar=""),
+        _ev(3, "2026-08-23", None, "C", "c", lugar="   "),
+    ])
+    assert len(grupos) == 3
+
+
+def test_venue_id_manda_sobre_el_texto_del_lugar() -> None:
+    """Con foro resuelto, el texto no opina: ni fusiona lo que el catálogo
+    separó (C3 Stage vs C3 Rooftop mal escritos) ni separa lo que unió."""
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", 7, "A", "a", lugar="C3"),
+        _ev(2, "2026-08-23", 8, "B", "b", lugar="C3"),      # mismo texto, otro foro
+    ])
+    assert len(grupos) == 2
+    juntos = agrupar_por_evento([
+        _ev(3, "2026-08-23", 7, "A", "a", lugar="REY"),
+        _ev(4, "2026-08-23", 7, "B", "b", lugar="Hake al Rey"),
+    ])
+    assert len(juntos) == 1
+
+
+def test_un_evento_con_venue_id_no_se_mezcla_con_uno_sin_el() -> None:
+    """Claves de ramas distintas nunca colisionan (el discriminante)."""
+    grupos = agrupar_por_evento([
+        _ev(1, "2026-08-23", 7, "A", "a", lugar="Hake Al Rey"),
+        _ev(2, "2026-08-23", None, "B", "b", lugar="Hake Al Rey"),
     ])
     assert len(grupos) == 2
 
