@@ -419,6 +419,95 @@ def persona_descartar(persona_id: int) -> Response:
         cx.close()
 
 
+# ---------- Catálogo de foros: cola de curación + fusión ----------
+
+@app.get("/venues", response_class=HTMLResponse)
+def venues_vista(request: Request) -> HTMLResponse:
+    from src import venues as venues_mod
+    cx = db.connect()
+    try:
+        foros = db.rows(cx, "SELECT * FROM venues ORDER BY nombre")
+        for v in foros:
+            v["alias"] = [a["alias_visto"] for a in db.rows(
+                cx, "SELECT alias_visto FROM venue_alias WHERE venue_id = ? ORDER BY id",
+                (v["id"],))]
+        candidatos = [(v["id"], v["nombre"]) for v in foros]
+        huerfanos = venues_mod.huerfanos(cx)
+        for h in huerfanos:
+            sug = venues_mod.sugerencias(h["alias_visto"], candidatos, tope=1)
+            h["sugerencia"] = sug[0][0] if sug else None
+        return templates.TemplateResponse(
+            request, "venues.html", {"foros": foros, "huerfanos": huerfanos})
+    finally:
+        cx.close()
+
+
+@app.post("/venues/alias/{alias_id}/asignar")
+def venue_alias_asignar(alias_id: int, venue_id: int = Form(...)) -> Response:
+    from src import venues as venues_mod
+    cx = db.connect()
+    try:
+        alias = db.get(cx, "venue_alias", alias_id)
+        if not alias:
+            raise HTTPException(status_code=404, detail="alias no encontrado")
+        if not db.get(cx, "venues", venue_id):
+            raise HTTPException(status_code=404, detail="foro no encontrado")
+        venues_mod.asignar_alias(cx, venue_id, alias["alias_visto"])
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
+@app.post("/venues/alias/{alias_id}/no-es-lugar")
+def venue_alias_basura(alias_id: int) -> Response:
+    from src import venues as venues_mod
+    cx = db.connect()
+    try:
+        if not db.get(cx, "venue_alias", alias_id):
+            raise HTTPException(status_code=404, detail="alias no encontrado")
+        venues_mod.marcar_no_es_lugar(cx, alias_id)
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
+@app.post("/venues/nuevo")
+def venue_nuevo(nombre: str = Form(...), alias_id: int | None = Form(None)) -> Response:
+    """Crea un foro nuevo y liga el huérfano que originó el alta, si lo hay."""
+    from src import venues as venues_mod
+    nombre = nombre.strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="nombre vacío")
+    cx = db.connect()
+    try:
+        vid = db.insert(cx, "venues", nombre=nombre)
+        venues_mod.asignar_alias(cx, vid, nombre)
+        if alias_id:
+            alias = db.get(cx, "venue_alias", alias_id)
+            if alias:
+                venues_mod.asignar_alias(cx, vid, alias["alias_visto"])
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
+@app.post("/venues/{venue_id}/fusionar")
+def venue_fusionar(venue_id: int, otro_id: int = Form(...)) -> Response:
+    """Absorbe `otro_id` en `venue_id`: mismo foro registrado dos veces."""
+    from src import venues as venues_mod
+    cx = db.connect()
+    try:
+        if venue_id == otro_id:
+            raise HTTPException(status_code=400,
+                                detail="un foro no se fusiona consigo mismo")
+        if not db.get(cx, "venues", venue_id) or not db.get(cx, "venues", otro_id):
+            raise HTTPException(status_code=404, detail="foro no encontrado")
+        venues_mod.fusionar(cx, venue_id, otro_id)
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
 # ---------- Plan mensual de contenido (pantalla de badges) ----------
 
 def _mes_actual_plan(mes: str | None) -> str:

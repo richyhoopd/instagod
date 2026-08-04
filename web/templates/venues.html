@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Foros <span class="muted">({{ foros|length }} en catálogo{% if huerfanos %} · {{ huerfanos|length }} por curar{% endif %})</span></h2>
+
+{% if huerfanos %}
+<section>
+  <h3>Por curar ({{ huerfanos|length }})</h3>
+  {% for h in huerfanos %}
+  <div class="huerfano" style="border:1px solid #ddd; border-radius:8px; padding:14px; margin-bottom:12px;">
+    <strong>{{ h.alias_visto }}</strong>
+    {% if foros %}
+    <form hx-post="/venues/alias/{{ h.id }}/asignar" hx-swap="none">
+      <select name="venue_id">
+        {% for v in foros %}
+          <option value="{{ v.id }}" {% if h.sugerencia == v.id %}selected{% endif %}>
+            {{ v.nombre }}{% if h.sugerencia == v.id %} (sugerido){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+      <button type="submit">Asignar</button>
+    </form>
+    {% endif %}
+    <form hx-post="/venues/nuevo" hx-swap="none">
+      <input type="hidden" name="alias_id" value="{{ h.id }}">
+      <input name="nombre" placeholder="nombre del foro" value="{{ h.alias_visto }}">
+      <button type="submit">Crear foro</button>
+    </form>
+    <button hx-post="/venues/alias/{{ h.id }}/no-es-lugar"
+            hx-confirm="¿Marcar como que no es un lugar? No vuelve a aparecer en la cola.">
+      No es un lugar
+    </button>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section>
+  <h3>Catálogo ({{ foros|length }})</h3>
+  {% for v in foros %}
+  <div class="foro" style="border:1px solid #eee; border-radius:8px; padding:10px 14px; margin-bottom:8px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <strong>{{ v.nombre }}</strong>
+    {% if v.ig_handle %}<span class="muted">@{{ v.ig_handle }}</span>{% endif %}
+    <span class="muted">{{ v.alias|join(" · ") }}</span>
+    {% if foros|length > 1 %}
+    <form hx-post="/venues/{{ v.id }}/fusionar" hx-swap="none" style="margin-left:auto; display:flex; gap:6px;">
+      <select name="otro_id">
+        {% for o in foros if o.id != v.id %}
+          <option value="{{ o.id }}">{{ o.nombre }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Absorber</button>
+    </form>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Catálogo vacío todavía.</p>
+  {% endfor %}
+</section>
+
+<p id="venues-msg" class="muted" style="margin-top:12px;"></p>
+<script>
+  // Feedback de las acciones de curación. Mismo patrón que caras.html: toda
+  // acción de esta pantalla cambia la cola de huérfanos o el catálogo, así
+  // que con hx-swap="none" el clic no produciría NINGÚN cambio visible sin
+  // esto — recargamos en éxito para reflejar el estado real.
+  const _boton = (el) => el.tagName === 'FORM' ? el.querySelector('button') : el;
+  const _esAccionVenue = (el) => el.matches?.('[hx-post^="/venues/"]') || el.matches?.('[hx-post^="/venues"]');
+
+  document.body.addEventListener('htmx:beforeRequest', (e) => {
+    const el = e.detail.elt;
+    if (!_esAccionVenue(el)) return;
+    const b = _boton(el);
+    if (!b) return;
+    b.disabled = true;
+    b.dataset.label = b.textContent;
+    b.textContent = '⏳…';
+  });
+
+  document.body.addEventListener('htmx:afterRequest', (e) => {
+    const el = e.detail.elt;
+    if (!_esAccionVenue(el)) return;
+    const b = _boton(el);
+    const msg = document.getElementById('venues-msg');
+    if (e.detail.successful) {
+      msg.textContent = '✅ listo — recargando…';
+      location.reload();
+      return;
+    }
+    msg.textContent = '❌ falló (HTTP ' + (e.detail.xhr ? e.detail.xhr.status : '?')
+                    + ') — no se guardó nada.';
+    if (b) { b.textContent = b.dataset.label; b.disabled = false; }
+  });
+</script>
+{% endblock %}
