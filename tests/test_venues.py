@@ -57,6 +57,11 @@ def test_migracion_es_idempotente(cx) -> None:
     ("El Foro Diez", "diez"),
     # Sufijo genérico
     ("Hake Al Rey - Concert Room", "hake al rey"),
+    # Nombre + dirección pegados en el mismo texto del flyer: la dirección NO
+    # se poda (podarla fusionaría lugares distintos de la misma calle), así que
+    # esta variante necesita un alias en `venue_alias` para ligarse al foro.
+    ("Hake Al Rey · Libertad 1482, Col. Americana",
+     "hake al rey libertad 1482 col americana"),
     # Acentos y puntuación
     ("Foro Lázaro", "lazaro"),
     ("C3 Stage & C3 Rooftop", "c3 stage c3 rooftop"),

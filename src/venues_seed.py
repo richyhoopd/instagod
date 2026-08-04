@@ -90,10 +90,10 @@ def lugares_distintos(cx) -> list[str]:
 def agrupar_mecanico(lugares: list[str]) -> dict[str, list[str]]:
     """Clave normalizada → textos crudos que caen en ella. PURA."""
     grupos: dict[str, list[str]] = {}
-    for l in lugares:
-        clave = venues.normalizar(l)
+    for texto in lugares:
+        clave = venues.normalizar(texto)
         if clave:
-            grupos.setdefault(clave, []).append(l)
+            grupos.setdefault(clave, []).append(texto)
     return grupos
 
 

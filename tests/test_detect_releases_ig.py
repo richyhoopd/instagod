@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from src import db
+from src import db, venues
 from src import detect_releases_ig as dr
-from src import venues
 
 
 @pytest.fixture()

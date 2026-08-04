@@ -67,8 +67,8 @@ def test_sembrar_resuelve_lo_mecanico_sin_llm(cx) -> None:
     db.insert(cx, "bands", nombre="STADITCHE", ig_handle="staditche",
               tipo="foro", activa=1)
     bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
-    for l in ("@staditche", "Staditche (Espacio Cultural)", "STADITCHE"):
-        _evento(cx, bid, l)
+    for texto in ("@staditche", "Staditche (Espacio Cultural)", "STADITCHE"):
+        _evento(cx, bid, texto)
     vistos = {}
 
     def _llm(pendientes):
