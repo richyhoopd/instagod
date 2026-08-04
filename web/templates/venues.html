@@ -11,8 +11,11 @@
     {% if foros %}
     <form hx-post="/venues/alias/{{ h.id }}/asignar" hx-swap="none">
       <select name="venue_id">
+        {# Vacía y seleccionada por default: asignar es un acto deliberado, no
+           lo que pasa por darle clic a "Asignar" sin mirar. #}
+        <option value="" selected>— elegir foro —</option>
         {% for v in foros %}
-          <option value="{{ v.id }}" {% if h.sugerencia == v.id %}selected{% endif %}>
+          <option value="{{ v.id }}">
             {{ v.nombre }}{% if h.sugerencia == v.id %} (sugerido){% endif %}
           </option>
         {% endfor %}
@@ -40,7 +43,14 @@
   <div class="foro" style="border:1px solid #eee; border-radius:8px; padding:10px 14px; margin-bottom:8px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <strong>{{ v.nombre }}</strong>
     {% if v.ig_handle %}<span class="muted">@{{ v.ig_handle }}</span>{% endif %}
-    <span class="muted">{{ v.alias|join(" · ") }}</span>
+    <span class="muted">
+      {% for a in v.alias %}
+        {{ a.alias_visto }}<button hx-post="/venues/alias/{{ a.id }}/desasignar"
+                hx-confirm="¿Quitar «{{ a.alias_visto }}» de {{ v.nombre }}? Vuelve a la cola por curar."
+                title="Desasignar de este foro"
+                style="border:0; background:none; cursor:pointer; padding:0 6px 0 2px;">✕</button>{% if not loop.last %}· {% endif %}
+      {% endfor %}
+    </span>
     {% if foros|length > 1 %}
     <form hx-post="/venues/{{ v.id }}/fusionar" hx-swap="none" style="margin-left:auto; display:flex; gap:6px;">
       <select name="otro_id">

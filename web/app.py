@@ -421,6 +421,12 @@ def persona_descartar(persona_id: int) -> Response:
 
 # ---------- Catálogo de foros: cola de curación + fusión ----------
 
+# Parecido mínimo para PRESELECCIONAR nada — solo para etiquetar "(sugerido)".
+# Por debajo de esto la sugerencia es ruido: `GRAL.MANUEL pm COVER M.DIEGUEZ #71`
+# contra cualquier foro real puntúa ~0.08 y sugerirlo invita a ligar basura.
+_UMBRAL_SUGERENCIA = 0.6
+
+
 @app.get("/venues", response_class=HTMLResponse)
 def venues_vista(request: Request) -> HTMLResponse:
     from src import venues as venues_mod
@@ -428,14 +434,15 @@ def venues_vista(request: Request) -> HTMLResponse:
     try:
         foros = db.rows(cx, "SELECT * FROM venues ORDER BY nombre")
         for v in foros:
-            v["alias"] = [a["alias_visto"] for a in db.rows(
-                cx, "SELECT alias_visto FROM venue_alias WHERE venue_id = ? ORDER BY id",
-                (v["id"],))]
+            v["alias"] = db.rows(
+                cx, "SELECT id, alias_visto FROM venue_alias WHERE venue_id = ? ORDER BY id",
+                (v["id"],))
         candidatos = [(v["id"], v["nombre"]) for v in foros]
         huerfanos = venues_mod.huerfanos(cx)
         for h in huerfanos:
             sug = venues_mod.sugerencias(h["alias_visto"], candidatos, tope=1)
-            h["sugerencia"] = sug[0][0] if sug else None
+            h["sugerencia"] = (sug[0][0] if sug and sug[0][2] >= _UMBRAL_SUGERENCIA
+                               else None)
         return templates.TemplateResponse(
             request, "venues.html", {"foros": foros, "huerfanos": huerfanos})
     finally:
@@ -443,18 +450,50 @@ def venues_vista(request: Request) -> HTMLResponse:
 
 
 @app.post("/venues/alias/{alias_id}/asignar")
-def venue_alias_asignar(alias_id: int, venue_id: int = Form(...)) -> Response:
+def venue_alias_asignar(alias_id: int, venue_id: str = Form("")) -> Response:
+    """Liga el alias a un foro y REAPUNTA los eventos que lo usan.
+
+    `venue_id` vacío es "no elegí nada": el <select> arranca sin foro
+    seleccionado a propósito (asignar es un acto deliberado), así que un submit
+    distraído no debe tronar ni ligar nada.
+    """
     from src import venues as venues_mod
+    if not venue_id.strip():
+        return Response(status_code=200)
+    try:
+        destino = int(venue_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="venue_id inválido") from None
     cx = db.connect()
     try:
         alias = db.get(cx, "venue_alias", alias_id)
         if not alias:
             raise HTTPException(status_code=404, detail="alias no encontrado")
-        if not db.get(cx, "venues", venue_id):
+        if not db.get(cx, "venues", destino):
             raise HTTPException(status_code=404, detail="foro no encontrado")
-        aid = venues_mod.asignar_alias(cx, venue_id, alias["alias_visto"])
+        aid = venues_mod.asignar_alias(cx, destino, alias["alias_visto"])
         if aid is not None:
             venues_mod.reresolver_eventos_de_alias(cx, aid)
+        return Response(status_code=200)
+    finally:
+        cx.close()
+
+
+@app.post("/venues/alias/{alias_id}/desasignar")
+def venue_alias_desasignar(alias_id: int) -> Response:
+    """Deshace una asignación: el alias vuelve a la cola de huérfanos.
+
+    Sin esto, un alias mal ligado (el LLM metiendo 'C3 Rooftop' dentro de
+    'C3 Stage') salía de la GUI para siempre: la cola solo muestra los que no
+    tienen foro y `fusionar` une pero nunca separa.
+    """
+    from src import venues as venues_mod
+    cx = db.connect()
+    try:
+        if not db.get(cx, "venue_alias", alias_id):
+            raise HTTPException(status_code=404, detail="alias no encontrado")
+        venues_mod.desasignar_alias(cx, alias_id)
+        venues_mod.reresolver_eventos_de_alias(cx, alias_id)
         return Response(status_code=200)
     finally:
         cx.close()
@@ -476,14 +515,23 @@ def venue_alias_basura(alias_id: int) -> Response:
 
 @app.post("/venues/nuevo")
 def venue_nuevo(nombre: str = Form(...), alias_id: int | None = Form(None)) -> Response:
-    """Crea un foro nuevo y liga el huérfano que originó el alta, si lo hay."""
+    """Crea un foro nuevo y liga el huérfano que originó el alta, si lo hay.
+
+    Si el nombre ya resuelve a un foro del catálogo, REUSA ese foro en vez de
+    insertar otro. El formulario viene precargado con el texto del huérfano, así
+    que "Crear foro" sobre `Hake al Rey` con `Hake Al Rey` ya en el catálogo era
+    el camino corto a partir un foro en dos: el viejo se quedaba con sus eventos
+    pero perdía su alias, y los eventos nuevos resolvían al foro vacío.
+    """
     from src import venues as venues_mod
     nombre = nombre.strip()
     if not nombre:
         raise HTTPException(status_code=400, detail="nombre vacío")
     cx = db.connect()
     try:
-        vid = db.insert(cx, "venues", nombre=nombre)
+        vid = venues_mod.resolver(cx, nombre)
+        if vid is None:
+            vid = db.insert(cx, "venues", nombre=nombre)
         aid = venues_mod.asignar_alias(cx, vid, nombre)
         if aid is not None:
             venues_mod.reresolver_eventos_de_alias(cx, aid)

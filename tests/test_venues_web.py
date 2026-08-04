@@ -109,6 +109,41 @@ def test_crear_foro_reapunta_los_eventos_de_ese_lugar(cliente) -> None:
     assert db.get(cx, "events", eid)["venue_id"] == venues.resolver(cx, "Foro Nuevo")
 
 
+def test_crear_foro_con_nombre_que_ya_existe_reusa_el_foro(cliente) -> None:
+    """El formulario viene precargado con el texto del huérfano: 'Crear foro'
+    sobre un nombre que ya resuelve NO puede partir el foro en dos ids."""
+    cli, cx = cliente
+    vid = db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.asignar_alias(cx, vid, "Hake Al Rey")
+    viejo = _evento(cx, "Hake Al Rey", venue_id=vid)
+    aid = venues.registrar_desconocido(cx, "REY")
+    r = cli.post("/venues/nuevo", data={"nombre": "Hake al Rey", "alias_id": str(aid)})
+    assert r.status_code == 200
+    assert len(db.rows(cx, "SELECT * FROM venues")) == 1     # no se creó un gemelo
+    assert venues.resolver(cx, "Hake Al Rey") == vid         # no perdió su alias
+    assert venues.resolver(cx, "REY") == vid
+    assert db.get(cx, "events", viejo)["venue_id"] == vid
+
+
+def test_desasignar_devuelve_el_alias_a_la_cola_y_suelta_los_eventos(cliente) -> None:
+    cli, cx = cliente
+    vid = db.insert(cx, "venues", nombre="C3 Stage")
+    aid = venues.asignar_alias(cx, vid, "C3 Rooftop")
+    eid = _evento(cx, "C3 Rooftop", venue_id=vid)
+    r = cli.post(f"/venues/alias/{aid}/desasignar")
+    assert r.status_code == 200
+    assert [h["id"] for h in venues.huerfanos(cx)] == [aid]
+    assert db.get(cx, "events", eid)["venue_id"] is None
+
+
+def test_la_tarjeta_del_foro_ofrece_desasignar(cliente) -> None:
+    cli, cx = cliente
+    vid = db.insert(cx, "venues", nombre="C3 Stage")
+    aid = venues.asignar_alias(cx, vid, "C3 Rooftop")
+    r = cli.get("/venues")
+    assert f"/venues/alias/{aid}/desasignar" in r.text
+
+
 def test_no_es_lugar_suelta_los_eventos_que_lo_usaban(cliente) -> None:
     cli, cx = cliente
     vid = db.insert(cx, "venues", nombre="Hake Al Rey")
@@ -163,6 +198,35 @@ def test_guardar_sin_cambiar_el_lugar_conserva_el_venue_id(cliente) -> None:
     eid = _evento(cx, "Hake Al Rey", venue_id=rey)   # sin alias: no resolvería
     _guardar(cli, eid, lugar="Hake Al Rey", fecha_evento="2026-09-01")
     assert db.get(cx, "events", eid)["venue_id"] == rey
+
+
+def test_el_dropdown_no_preselecciona_ningun_foro(cliente) -> None:
+    """Basura como sugerencia era un clic distraído de ligar mal un evento."""
+    cli, cx = cliente
+    db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.registrar_desconocido(cx, "GRAL.MANUEL pm COVER M.DIEGUEZ #71")
+    r = cli.get("/venues")
+    assert '<option value="" selected>' in r.text
+    assert "(sugerido)" not in r.text          # score ~0.08: ni etiquetado
+
+
+def test_sugiere_solo_cuando_el_parecido_es_alto(cliente) -> None:
+    cli, cx = cliente
+    db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.registrar_desconocido(cx, "HAKE AL REY - Concert Hall")
+    r = cli.get("/venues")
+    assert "(sugerido)" in r.text
+    assert '<option value="" selected>' in r.text   # etiqueta, pero no preselecciona
+
+
+def test_asignar_sin_elegir_foro_no_hace_nada(cliente) -> None:
+    cli, cx = cliente
+    db.insert(cx, "venues", nombre="Hake Al Rey")
+    aid = venues.registrar_desconocido(cx, "REY")
+    r = cli.post(f"/venues/alias/{aid}/asignar", data={"venue_id": ""})
+    assert r.status_code == 200
+    assert venues.resolver(cx, "REY") is None
+    assert [h["id"] for h in venues.huerfanos(cx)] == [aid]
 
 
 def test_asignar_a_foro_inexistente_falla(cliente) -> None:
