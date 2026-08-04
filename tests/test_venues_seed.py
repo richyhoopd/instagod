@@ -182,6 +182,60 @@ def test_sembrar_completo_es_idempotente(cx) -> None:
     assert len(db.rows(cx, "SELECT * FROM venue_alias")) == n_alias
 
 
+def _cliente_openai_falso(contenido: str, capturado: dict):
+    """Doble del cliente de openai que devuelve `contenido` como respuesta cruda.
+
+    Los demás tests inyectan `_llm=` y por eso nunca ejercitan el parseo de la
+    respuesta del modelo — que es exactamente donde vivía el bug de que
+    `_llm_agrupar` devolvía [] siempre.
+    """
+    from types import SimpleNamespace
+
+    def create(**kwargs):
+        capturado.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=contenido))])
+
+    return lambda **_: SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+def test_llm_agrupar_parsea_la_respuesta_cruda_del_modelo(monkeypatch) -> None:
+    """Un {"grupos": [...]} con DOS grupos devuelve los dos (antes: ninguno)."""
+    import openai
+    capturado: dict = {}
+    crudo = ('```json\n{"grupos": ['
+             '{"canonico": "Hake Al Rey", "alias": ["REY"]}, '
+             '{"canonico": "Staditche", "alias": ["@staditche"]}]}\n```')
+    monkeypatch.setattr(openai, "OpenAI", _cliente_openai_falso(crudo, capturado))
+
+    grupos = venues_seed._llm_agrupar(["REY", "@staditche"])
+    assert [g["canonico"] for g in grupos] == ["Hake Al Rey", "Staditche"]
+    assert [g["alias"] for g in grupos] == [["REY"], ["@staditche"]]
+    # El prompt pide el objeto que el parser sí entiende, y la llamada lo exige.
+    assert '"grupos"' in capturado["messages"][0]["content"]
+    assert capturado["response_format"] == {"type": "json_object"}
+    assert capturado["max_tokens"] >= 2000
+
+
+def test_llm_agrupar_avisa_si_no_saca_grupos_habiendo_pendientes(monkeypatch, capsys) -> None:
+    """Un cero silencioso es lo que hizo que el bug sobreviviera; debe gritar."""
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", _cliente_openai_falso("no puedo ayudarte", {}))
+    assert venues_seed._llm_agrupar(["REY"]) == []
+    assert "ADVERTENCIA" in capsys.readouterr().out
+
+
+def test_llm_agrupar_sin_pendientes_no_llama_al_modelo(monkeypatch) -> None:
+    import openai
+
+    def _explota(**_):
+        raise AssertionError("no debe construirse el cliente sin pendientes")
+
+    monkeypatch.setattr(openai, "OpenAI", _explota)
+    assert venues_seed._llm_agrupar([]) == []
+
+
 def test_sembrar_deja_huerfano_lo_que_el_llm_no_agrupa(cx) -> None:
     bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
     _evento(cx, bid, "GRAL.MANUEL pm COVER M.DIEGUEZ #71")

@@ -34,7 +34,9 @@ Reglas:
   NO lo incluyas en ningún grupo.
 - Un texto que no puedas asignar con confianza, déjalo fuera.
 
-Devuelve SOLO un JSON: [{"canonico": "Nombre Limpio", "alias": ["texto1", ...]}]
+Devuelve SOLO un objeto JSON con esta forma exacta (la lista SIEMPRE va dentro
+de la clave "grupos", nunca suelta en la raíz):
+{"grupos": [{"canonico": "Nombre Limpio", "alias": ["texto1", "texto2"]}]}
 
 Textos:
 """
@@ -100,21 +102,45 @@ def agrupar_mecanico(lugares: list[str]) -> dict[str, list[str]]:
 
 
 def _llm_agrupar(pendientes: list[str]) -> list[dict[str, Any]]:
-    """UNA llamada a DeepSeek con todos los textos ambiguos."""
+    """UNA llamada a DeepSeek con todos los textos ambiguos.
+
+    El prompt pide un OBJETO `{"grupos": [...]}`, no un array suelto: el único
+    parser del proyecto es `parse_events.extraer_json`, que busca `\\{.*\\}` y
+    exige un dict. Un array de N objetos lo parsea como basura (`{...},{...}`
+    sin corchetes → None) y uno de un solo objeto pierde todos los grupos menos
+    el primero. Pedir el array haría que esta función devolviera [] SIEMPRE, en
+    silencio, indistinguible de "el LLM no agrupó nada".
+
+    Por eso también avisa a gritos si no obtiene grupos habiendo pendientes: un
+    cero silencioso aquí es un feature muerto que nadie nota.
+    """
     if not pendientes:
         return []
     from openai import OpenAI
+
     from src.parse_events import extraer_json
     client = OpenAI(api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL)
     resp = client.chat.completions.create(
         model=config.DEEPSEEK_MODEL,
         messages=[{"role": "user", "content": _PROMPT + "\n".join(pendientes)}],
-        temperature=0,
+        response_format={"type": "json_object"},
+        temperature=0,  # agrupación determinista, nada de creatividad
+        # ~50 grupos de salida: un truncamiento rompe el JSON y cae en el mismo
+        # agujero silencioso que este arreglo cierra.
+        max_tokens=4000,
     )
-    data = extraer_json(resp.choices[0].message.content or "")
-    if isinstance(data, dict):
-        data = data.get("grupos") or []
-    return data if isinstance(data, list) else []
+    crudo = resp.choices[0].message.content or ""
+    data = extraer_json(crudo)
+    grupos = data.get("grupos") if isinstance(data, dict) else None
+    if not isinstance(grupos, list):
+        print(f"venues_seed: ADVERTENCIA — la respuesta del LLM no trae 'grupos' "
+              f"parseables; {len(pendientes)} texto(s) se quedan sin agrupar. "
+              f"Respuesta cruda: {crudo[:300]!r}")
+        return []
+    if not grupos:
+        print(f"venues_seed: ADVERTENCIA — el LLM no agrupó ninguno de los "
+              f"{len(pendientes)} texto(s) pendientes.")
+    return grupos
 
 
 def _grupo_valido(grupo: Any) -> tuple[str, list[str]] | None:
