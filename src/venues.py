@@ -181,6 +181,40 @@ def desasignar_alias(cx, alias_id: int) -> None:
     db.update(cx, "venue_alias", alias_id, venue_id=None, origen="manual")
 
 
+def reresolver_eventos_de_alias(cx, alias_id: int) -> int:
+    """Reapunta `events.venue_id` de los eventos cuyo `lugar` cae en ese alias.
+
+    Cerrar el bucle de la curación: `asignar_alias` solo escribe en
+    `venue_alias`, así que hasta ahora curar 200 huérfanos en la GUI no movía
+    ni un evento — la agenda seguía igual hasta correr `--solo-backfill` desde
+    la terminal, y nada en la interfaz lo decía.
+
+    Sigue al alias a donde vaya: si quedó en NULL (desasignado o marcado
+    basura), los eventos vuelven a NULL. Nunca deja un `venue_id` viejo pegado.
+
+    Compara con `normalizar` en Python y no en SQL porque la normalización es
+    la de este módulo (paréntesis, genéricos, acentos) y reescribirla en SQLite
+    sería una segunda verdad que se desincroniza. La tabla es de cientos de
+    filas: barrerla al curar un alias es instantáneo.
+
+    `events.lugar` NO se toca: `venue_id` es una capa encima del texto crudo.
+    """
+    alias = db.get(cx, "venue_alias", alias_id)
+    if not alias:
+        return 0
+    destino = alias["venue_id"]
+    tocados = 0
+    for e in db.rows(cx, """
+        SELECT id, lugar, venue_id FROM events
+         WHERE lugar IS NOT NULL AND trim(lugar) != ''
+    """):
+        if normalizar(e["lugar"]) != alias["alias_norm"] or e["venue_id"] == destino:
+            continue
+        db.update(cx, "events", e["id"], venue_id=destino)
+        tocados += 1
+    return tocados
+
+
 def marcar_no_es_lugar(cx, alias_id: int) -> None:
     """Basura (nombre de banda, dirección): sale de la cola pero NO se borra,
     para que el mismo texto no vuelva a entrar en la próxima corrida."""

@@ -80,6 +80,91 @@ def test_fusionar_consigo_mismo_falla(cliente) -> None:
     assert db.get(cx, "venues", vid) is not None
 
 
+def _evento(cx, lugar, venue_id=None):
+    n = len(db.rows(cx, "SELECT id FROM bands"))
+    bid = db.insert(cx, "bands", nombre=f"B{n}", ig_handle=f"b{n}")
+    return db.insert(cx, "events", band_id=bid, tipo="flyer",
+                     fecha_evento="2026-08-23", lugar=lugar, venue_id=venue_id)
+
+
+def test_asignar_reapunta_los_eventos_de_ese_lugar(cliente) -> None:
+    """Curar en la GUI cambia la agenda YA, sin pasar por --solo-backfill."""
+    cli, cx = cliente
+    vid = db.insert(cx, "venues", nombre="Hake Al Rey")
+    eid = _evento(cx, "REY")
+    otro = _evento(cx, "Staditche")
+    aid = venues.registrar_desconocido(cx, "REY")
+    r = cli.post(f"/venues/alias/{aid}/asignar", data={"venue_id": str(vid)})
+    assert r.status_code == 200
+    assert db.get(cx, "events", eid)["venue_id"] == vid
+    assert db.get(cx, "events", otro)["venue_id"] is None
+    assert db.get(cx, "events", eid)["lugar"] == "REY"      # el texto NO se toca
+
+
+def test_crear_foro_reapunta_los_eventos_de_ese_lugar(cliente) -> None:
+    cli, cx = cliente
+    eid = _evento(cx, "Foro Nuevo")
+    aid = venues.registrar_desconocido(cx, "Foro Nuevo")
+    cli.post("/venues/nuevo", data={"nombre": "Foro Nuevo", "alias_id": str(aid)})
+    assert db.get(cx, "events", eid)["venue_id"] == venues.resolver(cx, "Foro Nuevo")
+
+
+def test_no_es_lugar_suelta_los_eventos_que_lo_usaban(cliente) -> None:
+    cli, cx = cliente
+    vid = db.insert(cx, "venues", nombre="Hake Al Rey")
+    aid = venues.asignar_alias(cx, vid, "siamesasperdidas")
+    eid = _evento(cx, "siamesasperdidas", venue_id=vid)
+    cli.post(f"/venues/alias/{aid}/no-es-lugar")
+    assert db.get(cx, "events", eid)["venue_id"] is None
+
+
+def _guardar(cli, eid, **campos):
+    datos = {"tipo": "fecha", "fecha_evento": "2026-08-23", "lugar": "",
+             "ciudad": "", "status": "nuevo", **campos}
+    return cli.post(f"/eventos/{eid}", data=datos)
+
+
+def test_editar_el_lugar_a_mano_re_resuelve_el_venue_id(cliente) -> None:
+    """Tercer camino que escribe events.lugar: no puede dejar el venue viejo."""
+    cli, cx = cliente
+    rey = db.insert(cx, "venues", nombre="Hake Al Rey")
+    stad = db.insert(cx, "venues", nombre="Staditche")
+    venues.asignar_alias(cx, rey, "Hake Al Rey")
+    venues.asignar_alias(cx, stad, "Staditche")
+    eid = _evento(cx, "Hake Al Rey", venue_id=rey)
+    r = _guardar(cli, eid, lugar="Staditche")
+    assert r.status_code == 200
+    assert db.get(cx, "events", eid)["venue_id"] == stad
+
+
+def test_editar_a_un_lugar_desconocido_deja_venue_id_en_null(cliente) -> None:
+    cli, cx = cliente
+    rey = db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.asignar_alias(cx, rey, "Hake Al Rey")
+    eid = _evento(cx, "Hake Al Rey", venue_id=rey)
+    _guardar(cli, eid, lugar="Foro Jamás Visto")
+    assert db.get(cx, "events", eid)["venue_id"] is None
+    assert [h["alias_visto"] for h in venues.huerfanos(cx)] == ["Foro Jamás Visto"]
+
+
+def test_borrar_el_lugar_a_mano_suelta_el_venue_id(cliente) -> None:
+    cli, cx = cliente
+    rey = db.insert(cx, "venues", nombre="Hake Al Rey")
+    venues.asignar_alias(cx, rey, "Hake Al Rey")
+    eid = _evento(cx, "Hake Al Rey", venue_id=rey)
+    _guardar(cli, eid, lugar="")
+    assert db.get(cx, "events", eid)["venue_id"] is None
+
+
+def test_guardar_sin_cambiar_el_lugar_conserva_el_venue_id(cliente) -> None:
+    """Editar la fecha no debe recalcular nada del foro."""
+    cli, cx = cliente
+    rey = db.insert(cx, "venues", nombre="Hake Al Rey")
+    eid = _evento(cx, "Hake Al Rey", venue_id=rey)   # sin alias: no resolvería
+    _guardar(cli, eid, lugar="Hake Al Rey", fecha_evento="2026-09-01")
+    assert db.get(cx, "events", eid)["venue_id"] == rey
+
+
 def test_asignar_a_foro_inexistente_falla(cliente) -> None:
     cli, cx = cliente
     aid = venues.registrar_desconocido(cx, "Foro X")

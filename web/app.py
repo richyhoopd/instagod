@@ -452,7 +452,9 @@ def venue_alias_asignar(alias_id: int, venue_id: int = Form(...)) -> Response:
             raise HTTPException(status_code=404, detail="alias no encontrado")
         if not db.get(cx, "venues", venue_id):
             raise HTTPException(status_code=404, detail="foro no encontrado")
-        venues_mod.asignar_alias(cx, venue_id, alias["alias_visto"])
+        aid = venues_mod.asignar_alias(cx, venue_id, alias["alias_visto"])
+        if aid is not None:
+            venues_mod.reresolver_eventos_de_alias(cx, aid)
         return Response(status_code=200)
     finally:
         cx.close()
@@ -466,6 +468,7 @@ def venue_alias_basura(alias_id: int) -> Response:
         if not db.get(cx, "venue_alias", alias_id):
             raise HTTPException(status_code=404, detail="alias no encontrado")
         venues_mod.marcar_no_es_lugar(cx, alias_id)
+        venues_mod.reresolver_eventos_de_alias(cx, alias_id)
         return Response(status_code=200)
     finally:
         cx.close()
@@ -481,11 +484,15 @@ def venue_nuevo(nombre: str = Form(...), alias_id: int | None = Form(None)) -> R
     cx = db.connect()
     try:
         vid = db.insert(cx, "venues", nombre=nombre)
-        venues_mod.asignar_alias(cx, vid, nombre)
+        aid = venues_mod.asignar_alias(cx, vid, nombre)
+        if aid is not None:
+            venues_mod.reresolver_eventos_de_alias(cx, aid)
         if alias_id:
             alias = db.get(cx, "venue_alias", alias_id)
             if alias:
-                venues_mod.asignar_alias(cx, vid, alias["alias_visto"])
+                aid = venues_mod.asignar_alias(cx, vid, alias["alias_visto"])
+                if aid is not None:
+                    venues_mod.reresolver_eventos_de_alias(cx, aid)
         return Response(status_code=200)
     finally:
         cx.close()
@@ -1046,14 +1053,26 @@ def eventos(request: Request, order: str = "nuevo", solo: str = "") -> HTMLRespo
 def guardar_evento(request: Request, event_id: int, tipo: str = Form("flyer"),
                    fecha_evento: str = Form(""), lugar: str = Form(""),
                    ciudad: str = Form(""), status: str = Form("nuevo")) -> HTMLResponse:
+    from src import venues as venues_mod
     cx = db.connect()
     try:
+        previo = db.get(cx, "events", event_id)
+        nuevo_lugar = lugar.strip() or None
         db.update(cx, "events", event_id,
                   tipo=tipo if tipo in ("fecha", "flyer", "release") else "flyer",
                   fecha_evento=fecha_evento.strip() or None,
-                  lugar=lugar.strip() or None,
+                  lugar=nuevo_lugar,
                   ciudad=ciudad.strip() or None,
                   status=status if status in ("nuevo", "anunciado", "pasado") else "nuevo")
+        # Tercer camino que escribe `events.lugar` (los otros dos son
+        # parse_events y detect_releases_ig): si el texto cambió, el venue_id
+        # viejo dejó de aplicar. Dejarlo pegado fusionaría el evento con el foro
+        # equivocado en la agenda — una corrección a mano haría desaparecer un show.
+        if previo and (previo.get("lugar") or None) != nuevo_lugar:
+            vid = venues_mod.resolver(cx, nuevo_lugar) if nuevo_lugar else None
+            db.update(cx, "events", event_id, venue_id=vid)
+            if nuevo_lugar and vid is None:
+                venues_mod.registrar_desconocido(cx, nuevo_lugar)
         evento = db.rows(cx, """
             SELECT e.*, b.nombre AS banda_nombre FROM events e
               JOIN bands b ON b.id = e.band_id WHERE e.id = ?
