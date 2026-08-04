@@ -22,6 +22,12 @@ from src import db, venues
 
 _TIPOS_VENUE = ("foro", "evento")
 
+# Orígenes que el batch NUNCA pisa: los tres salen de una decisión humana o de
+# una cuenta que Ricardo ya sigue, ninguno es una adivinanza del LLM ni del OCR.
+# 'no_es_lugar' incluido: sin él, la siembra revivía lo descartado y lo ligaba a
+# un foro real, fusionando en la agenda dos eventos que no tienen que ver.
+_PROTEGIDOS = ("manual", "semilla", "no_es_lugar")
+
 _PROMPT = """Eres un asistente que ordena nombres de foros y venues de la escena
 musical de Guadalajara. Te doy una lista de textos crudos extraídos por OCR de
 carteles de conciertos. Agrupa los que se refieran al MISMO lugar y dale a cada
@@ -45,22 +51,12 @@ Textos:
 def _asignar_alias_semilla(cx, venue_id: int, texto: str) -> None:
     """Liga un texto a un foro con origen='semilla' (cuenta que ya se sigue).
 
-    No reusa `venues.asignar_alias`: esa función es el contrato de curación
-    MANUAL de la Task 3 (ya cerrada, no se toca) y marca origen='manual' a
-    propósito — un humano decidiendo en la GUI. Este alias es automático (sale
-    de una cuenta que Ricardo ya sigue, no de un clic), así que necesita su
-    propio origen sin reabrir ese contrato. Igual que `asignar_alias`, nunca
-    pisa lo curado a mano: si el alias ya es 'manual', se deja intacto.
+    No usa `venues.asignar_alias`: ese es el contrato de curación MANUAL (un
+    humano decidiendo en la GUI, que pisa cualquier cosa). Este alias es
+    automático, así que va con su propio origen y respeta lo curado a mano.
     """
-    clave = venues.normalizar(texto)
-    filas = db.rows(cx, "SELECT id, origen FROM venue_alias WHERE alias_norm = ?", (clave,))
-    if filas:
-        if filas[0]["origen"] == "manual":
-            return
-        db.update(cx, "venue_alias", filas[0]["id"], venue_id=venue_id, origen="semilla")
-        return
-    db.insert(cx, "venue_alias", venue_id=venue_id, alias_norm=clave,
-             alias_visto=texto, origen="semilla")
+    venues.upsert_alias(cx, venue_id, texto, origen="semilla",
+                        protegidos=("manual", "no_es_lugar"))
 
 
 def sembrar_desde_bands(cx) -> int:
@@ -191,8 +187,13 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
     # escritura que ya fusionó `agrupar_mecanico`): son la misma clave, así que
     # ya son la misma info para el LLM — mandarlas todas sería gastar tokens
     # sin darle nada nuevo con qué decidir.
+    # Los alias ya curados (manual/semilla/no_es_lugar) quedan fuera aunque no
+    # resuelvan a ningún foro: preguntarle al LLM por algo que un humano ya
+    # descartó o desasignó es gastar tokens en una propuesta que el upsert va
+    # a rechazar de todos modos.
     pendientes = [textos[0] for clave, textos in grupos.items()
-                  if venues.resolver(cx, textos[0]) is None]
+                  if venues.resolver(cx, textos[0]) is None
+                  and venues.origen_alias(cx, textos[0]) not in _PROTEGIDOS]
 
     alias_nuevos = 0
     grupos_invalidos = 0
@@ -208,19 +209,9 @@ def sembrar(cx, *, _llm: Callable[[list[str]], list[dict]] | None = None) -> dic
             vid = db.insert(cx, "venues", nombre=canonico)
             creados += 1
         for texto in [canonico, *alias]:
-            clave = venues.normalizar(texto)
-            if not clave:
-                continue
-            filas = db.rows(cx, "SELECT id, origen FROM venue_alias WHERE alias_norm = ?",
-                            (clave,))
-            if filas and filas[0]["origen"] in ("manual", "semilla"):
-                continue          # el batch NUNCA pisa lo curado a mano ni lo sembrado
-            if filas:
-                db.update(cx, "venue_alias", filas[0]["id"], venue_id=vid, origen="llm")
-            else:
-                db.insert(cx, "venue_alias", venue_id=vid, alias_norm=clave,
-                          alias_visto=texto, origen="llm")
-            alias_nuevos += 1
+            if venues.upsert_alias(cx, vid, texto, origen="llm",
+                                   protegidos=_PROTEGIDOS) is not None:
+                alias_nuevos += 1
 
     # Lo que sigue sin resolver entra a la cola de curación.
     for clave, textos in grupos.items():

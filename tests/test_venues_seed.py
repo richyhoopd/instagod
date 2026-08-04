@@ -122,6 +122,54 @@ def test_sembrar_no_pisa_lo_sembrado_desde_bands(cx) -> None:
     assert venues.resolver(cx, "staditche") == foro
 
 
+def test_sembrar_no_revive_lo_marcado_como_no_es_lugar(cx) -> None:
+    """Lo descartado a mano no vuelve, y sobre todo NO se liga a un foro real:
+    ligarlo fusionaría en la agenda un evento con otro que no tiene que ver."""
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "siamesasperdidas")
+    aid = venues.registrar_desconocido(cx, "siamesasperdidas")
+    venues.marcar_no_es_lugar(cx, aid)
+
+    def _llm(pendientes):
+        return [{"canonico": "Hake Al Rey", "alias": ["siamesasperdidas"]}]
+
+    venues_seed.sembrar(cx, _llm=_llm)
+    fila = db.get(cx, "venue_alias", aid)
+    assert fila["origen"] == "no_es_lugar"
+    assert fila["venue_id"] is None
+    assert venues.huerfanos(cx) == []
+
+
+def test_sembrar_no_le_pregunta_al_llm_por_lo_ya_curado(cx) -> None:
+    """Ni tokens ni ruido: lo descartado y lo desasignado a mano no son pendientes."""
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "siamesasperdidas")
+    _evento(cx, bid, "C3 Rooftop")
+    _evento(cx, bid, "Foro Desconocido")
+    venues.marcar_no_es_lugar(cx, venues.registrar_desconocido(cx, "siamesasperdidas"))
+    venues.desasignar_alias(cx, venues.registrar_desconocido(cx, "C3 Rooftop"))
+    vistos = {}
+
+    def _llm(pendientes):
+        vistos["pendientes"] = list(pendientes)
+        return []
+
+    venues_seed.sembrar(cx, _llm=_llm)
+    assert vistos["pendientes"] == ["Foro Desconocido"]
+
+
+def test_sembrar_no_pisa_un_alias_desasignado_a_mano(cx) -> None:
+    """Desasignar es una decisión humana: el batch no puede deshacerla."""
+    bid = db.insert(cx, "bands", nombre="B", ig_handle="b")
+    _evento(cx, bid, "C3 Rooftop")
+    aid = venues.registrar_desconocido(cx, "C3 Rooftop")
+    venues.desasignar_alias(cx, aid)
+
+    venues_seed.sembrar(cx, _llm=lambda p: [{"canonico": "C3 Stage",
+                                             "alias": ["C3 Rooftop"]}])
+    assert db.get(cx, "venue_alias", aid)["venue_id"] is None
+
+
 def test_sembrar_descarta_grupo_que_no_es_dict(cx) -> None:
     """Si el LLM devuelve una lista de strings en vez de objetos, la siembra
     termina (no truena) y descarta cada elemento mal formado."""

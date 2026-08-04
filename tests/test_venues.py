@@ -194,6 +194,53 @@ def test_asignar_alias_marca_origen_manual(cx) -> None:
     assert db.get(cx, "venue_alias", aid)["origen"] == "manual"
 
 
+def test_upsert_alias_respeta_los_origenes_protegidos(cx) -> None:
+    """La política de "a quién no piso" vive en un solo lugar, parametrizada."""
+    curado = _venue(cx, "Mi Foro")
+    otro = _venue(cx, "Otro Foro")
+    venues.asignar_alias(cx, curado, "REY")          # origen='manual'
+    assert venues.upsert_alias(cx, otro, "REY", origen="llm",
+                               protegidos=("manual",)) is None
+    assert venues.resolver(cx, "REY") == curado
+    # Sin protección declarada, el mismo upsert sí escribe.
+    assert venues.upsert_alias(cx, otro, "REY", origen="llm") is not None
+    assert venues.resolver(cx, "REY") == otro
+
+
+def test_upsert_alias_ignora_texto_que_no_normaliza(cx) -> None:
+    vid = _venue(cx, "Cuerda")
+    assert venues.upsert_alias(cx, vid, "   ", origen="llm") is None
+    assert db.rows(cx, "SELECT * FROM venue_alias WHERE venue_id IS NULL") == []
+
+
+def test_asignar_alias_gana_sobre_cualquier_origen(cx) -> None:
+    """La curación manual no tiene protegidos: siempre gana (contrato intacto)."""
+    vid = _venue(cx, "Hake Al Rey")
+    aid = venues.registrar_desconocido(cx, "REY")
+    venues.marcar_no_es_lugar(cx, aid)
+    assert venues.asignar_alias(cx, vid, "REY") == aid
+    assert venues.resolver(cx, "REY") == vid
+    assert db.get(cx, "venue_alias", aid)["origen"] == "manual"
+
+
+def test_desasignar_alias_lo_devuelve_a_la_cola(cx) -> None:
+    vid = _venue(cx, "C3 Stage")
+    aid = venues.asignar_alias(cx, vid, "C3 Rooftop")
+    venues.desasignar_alias(cx, aid)
+    assert venues.resolver(cx, "C3 Rooftop") is None
+    assert [h["id"] for h in venues.huerfanos(cx)] == [aid]
+    assert db.get(cx, "venue_alias", aid)["origen"] == "manual"
+
+
+def test_origen_alias(cx) -> None:
+    vid = _venue(cx, "Cuerda", "Cuerda Cultura")
+    assert venues.origen_alias(cx, "cuerda cultura") == "semilla"
+    assert venues.origen_alias(cx, "Foro Que No Existe") is None
+    assert venues.origen_alias(cx, "") is None
+    venues.asignar_alias(cx, vid, "Cuerda Cultura")
+    assert venues.origen_alias(cx, "CUERDA CULTURA") == "manual"
+
+
 def test_marcar_no_es_lugar_lo_saca_de_la_cola(cx) -> None:
     aid = venues.registrar_desconocido(cx, "siamesasperdidas")
     venues.marcar_no_es_lugar(cx, aid)

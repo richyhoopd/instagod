@@ -120,16 +120,65 @@ def registrar_desconocido(cx, lugar: str) -> int | None:
                      alias_visto=lugar, origen="visto")
 
 
-def asignar_alias(cx, venue_id: int, texto: str) -> int:
-    """Liga un texto a un foro. Curación manual: gana sobre lo que hubiera."""
+def origen_alias(cx, texto: str | None) -> str | None:
+    """Origen del alias registrado para ese texto, o None si no hay alias.
+
+    Para que quien vaya a escribir pueda preguntar ANTES si el alias está
+    curado (y no gastar tokens del LLM en algo ya decidido).
+    """
     clave = normalizar(texto)
-    filas = db.rows(cx, "SELECT id FROM venue_alias WHERE alias_norm = ?", (clave,))
+    if not clave:
+        return None
+    filas = db.rows(cx, "SELECT origen FROM venue_alias WHERE alias_norm = ?", (clave,))
+    return filas[0]["origen"] if filas else None
+
+
+def upsert_alias(cx, venue_id: int | None, texto: str, *, origen: str,
+                 protegidos: tuple[str, ...] = ()) -> int | None:
+    """ÚNICO upsert de `venue_alias`. Devuelve el id, o None si no escribió.
+
+    Antes había tres copias de este upsert con tres políticas distintas de
+    "a quién no piso" (ninguna en la curación manual, solo 'manual' en la
+    siembra desde bands, 'manual'+'semilla' en la siembra del LLM). Esa
+    divergencia era el bug: 'no_es_lugar' no estaba en ninguna lista, así que
+    el batch revivía lo que Ricardo ya había descartado y lo ligaba a un foro
+    real — dos eventos distintos fusionados en la agenda, uno desaparecido.
+
+    La política va explícita en `protegidos` en vez de estar hardcodeada, para
+    que agregar un origen curado sea una línea en el llamador y no otra copia.
+    """
+    clave = normalizar(texto)
+    if not clave:
+        return None
+    filas = db.rows(cx, "SELECT id, origen FROM venue_alias WHERE alias_norm = ?", (clave,))
     if filas:
+        if filas[0]["origen"] in protegidos:
+            return None
         aid = int(filas[0]["id"])
-        db.update(cx, "venue_alias", aid, venue_id=venue_id, origen="manual")
+        db.update(cx, "venue_alias", aid, venue_id=venue_id, origen=origen)
         return aid
     return db.insert(cx, "venue_alias", venue_id=venue_id, alias_norm=clave,
-                     alias_visto=texto, origen="manual")
+                     alias_visto=texto, origen=origen)
+
+
+def asignar_alias(cx, venue_id: int, texto: str) -> int | None:
+    """Liga un texto a un foro. Curación manual: gana sobre lo que hubiera.
+
+    `protegidos=()` a propósito: un humano decidiendo en la GUI pisa cualquier
+    origen, incluido otro 'manual' anterior. None solo si el texto no
+    normaliza a nada (no había alias que escribir).
+    """
+    return upsert_alias(cx, venue_id, texto, origen="manual")
+
+
+def desasignar_alias(cx, alias_id: int) -> None:
+    """Devuelve un alias mal asignado a la cola de huérfanos.
+
+    origen='manual' con venue_id NULL: fue una decisión humana, así que el
+    batch tampoco la pisa. Sin esto un error del LLM (p.ej. meter 'C3 Stage' y
+    'C3 Rooftop' en el mismo grupo) no tenía arreglo desde la interfaz.
+    """
+    db.update(cx, "venue_alias", alias_id, venue_id=None, origen="manual")
 
 
 def marcar_no_es_lugar(cx, alias_id: int) -> None:
