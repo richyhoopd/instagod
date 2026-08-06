@@ -1,10 +1,19 @@
 name: refresh-token
 
-# Proceso C — refresca el long-lived token de Instagram (vence a 60 días).
-# Mensual: con margen de sobra antes del vencimiento.
+# Fallback MANUAL del refresh del token de Instagram (60 días).
+#
+# El mecanismo real es LOCAL: el LaunchAgent com.gdlscene.refresh-token corre
+# `python -m src.ig_token --aplicar` cada semana (ver
+# scripts/instalar_refresh_token.sh) y actualiza .env + el secret del repo.
+# Este workflow queda solo por si la Mac está muerta: refresca e imprime el
+# token enmascarado; sin secrets.GH_PAT no puede persistirlo (el GITHUB_TOKEN
+# de Actions no escribe secrets), así que habría que copiarlo a mano.
+#
+# HISTORIA: la versión anterior tenía `if: ${{ secrets.GH_PAT != '' }}` a nivel
+# de step — el contexto secrets no es válido ahí, GitHub marcaba el archivo
+# entero como inválido (startup_failure en cada push) y el schedule mensual
+# jamás corrió. El token venció el 1-ago-2026 y tumbó la publicación a IG.
 on:
-  schedule:
-    - cron: "0 6 1 * *"
   workflow_dispatch: {}
 
 jobs:
@@ -31,10 +40,13 @@ jobs:
           echo "::add-mask::$NEW_TOKEN"
           echo "token=$NEW_TOKEN" >> "$GITHUB_OUTPUT"
 
-      # Requiere un PAT con permiso de secrets (secrets.GH_PAT). Si no lo tienes,
-      # borra este paso y actualiza el secret IG_ACCESS_TOKEN a mano con el log.
+      # El contexto secrets no es válido en un `if` de step: el guard va en bash.
       - name: Actualizar el secret IG_ACCESS_TOKEN
-        if: ${{ secrets.GH_PAT != '' }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: gh secret set IG_ACCESS_TOKEN --body "${{ steps.refresh.outputs.token }}"
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "Sin GH_PAT: no puedo escribir el secret. Copia el token del paso anterior a mano."
+            exit 0
+          fi
+          gh secret set IG_ACCESS_TOKEN --repo "$GITHUB_REPOSITORY" --body "${{ steps.refresh.outputs.token }}"
