@@ -1,0 +1,130 @@
+"""Sourcing multi-fuente: cascada de providers, dedup y providers locales."""
+from __future__ import annotations
+
+from src import db
+from src import image_sources as isrc
+
+
+class _Fake:
+    def __init__(self, nombre, resultados):
+        self.nombre = nombre
+        self.resultados = resultados  # hint → list[ImagenCandidata]
+        self.llamadas = []
+
+    def buscar(self, hint, n=3):
+        self.llamadas.append(hint)
+        return self.resultados.get(hint, [])
+
+
+def _cand(ruta, source="pexels"):
+    return isrc.ImagenCandidata(ruta_o_url=ruta, source=source)
+
+
+def test_resolver_usa_primer_provider_con_resultado() -> None:
+    p1 = _Fake("banco", {})
+    p2 = _Fake("pexels", {"cafe": [_cand("/tmp/a.jpg")]})
+    out = isrc.resolver(["cafe"], ["banco", "pexels"],
+                        providers={"banco": p1, "pexels": p2})
+    assert out[0].ruta_o_url == "/tmp/a.jpg"
+    assert p1.llamadas == ["cafe"]  # se intentó primero
+
+
+def test_resolver_none_si_nadie_tiene() -> None:
+    out = isrc.resolver(["x"], ["pexels"], providers={"pexels": _Fake("pexels", {})})
+    assert out == [None]
+
+
+def test_resolver_no_repite_imagen_en_el_set() -> None:
+    p = _Fake("pexels", {"a": [_cand("/tmp/1.jpg"), _cand("/tmp/2.jpg")],
+                         "b": [_cand("/tmp/1.jpg"), _cand("/tmp/3.jpg")]})
+    out = isrc.resolver(["a", "b"], ["pexels"], providers={"pexels": p})
+    assert out[0].ruta_o_url == "/tmp/1.jpg"
+    assert out[1].ruta_o_url == "/tmp/3.jpg"  # la 1 ya estaba usada
+
+
+def test_resolver_fuente_desconocida_se_ignora() -> None:
+    p = _Fake("pexels", {"a": [_cand("/tmp/1.jpg")]})
+    out = isrc.resolver(["a"], ["noexiste", "pexels"], providers={"pexels": p})
+    assert out[0].ruta_o_url == "/tmp/1.jpg"
+
+
+def test_provider_que_lanza_no_tumba_resolver() -> None:
+    class _Roto:
+        nombre = "roto"
+
+        def buscar(self, hint, n=3):
+            raise RuntimeError("boom")
+
+    p = _Fake("pexels", {"a": [_cand("/tmp/1.jpg")]})
+    out = isrc.resolver(["a"], ["roto", "pexels"],
+                        providers={"roto": _Roto(), "pexels": p})
+    assert out[0].ruta_o_url == "/tmp/1.jpg"
+
+
+def _db_con_fotos(tmp_path):
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    bid = db.insert(cx, "bands", nombre="Kabala", ig_handle="kabala_oficial",
+                    activa=1)
+    db.insert(cx, "photos", band_id=bid, path="/tmp/kabala1.jpg",
+              source_post_id="p1", usable_meme=1, usada=0, descartada=0,
+              nitidez=90.0)
+    db.insert(cx, "photos", band_id=bid, path="/tmp/kabala2.jpg",
+              source_post_id="p2", usable_meme=1, usada=1, descartada=0,
+              nitidez=99.0)  # usada: no debe salir
+    return cx, bid
+
+
+def test_banco_provider_matchea_por_nombre(tmp_path) -> None:
+    cx, _ = _db_con_fotos(tmp_path)
+    out = isrc.BancoProvider(cx).buscar("kabala")
+    assert [c.ruta_o_url for c in out] == ["/tmp/kabala1.jpg"]
+    assert out[0].source == "banco"
+
+
+def test_banco_provider_sin_match(tmp_path) -> None:
+    cx, _ = _db_con_fotos(tmp_path)
+    assert isrc.BancoProvider(cx).buscar("mountain sunset") == []
+
+
+def test_covers_provider_matchea_titulo(tmp_path, monkeypatch) -> None:
+    cx, bid = _db_con_fotos(tmp_path)
+    db.insert(cx, "events", band_id=bid, tipo="release", fecha_evento="2026-08-01",
+              titulo="Disco Lunar (álbum)", cover_url="https://cdn/x.jpg")
+    monkeypatch.setattr(isrc.covers, "asegurar_cover",
+                        lambda url, **kw: tmp_path / "cover.jpg")
+    out = isrc.CoversProvider(cx).buscar("lunar")
+    assert out and out[0].source == "covers"
+
+
+def test_descargar_cache_valida_magia(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(isrc, "SOURCING_DIR", tmp_path)
+
+    class _Resp:
+        status_code = 200
+        content = b"\xff\xd8\xff" + b"x" * 100  # JPEG mágico
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(isrc.requests, "get", lambda *a, **kw: _Resp())
+    p = isrc._descargar_cache("https://img/x.jpg")
+    assert p is not None and p.exists()
+    # segunda llamada: cache hit, sin red
+    monkeypatch.setattr(isrc.requests, "get",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("red")))
+    assert isrc._descargar_cache("https://img/x.jpg") == p
+
+
+def test_descargar_cache_rechaza_no_imagen(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(isrc, "SOURCING_DIR", tmp_path)
+
+    class _Resp:
+        status_code = 200
+        content = b"<html>not found</html>"
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(isrc.requests, "get", lambda *a, **kw: _Resp())
+    assert isrc._descargar_cache("https://img/y.jpg") is None
