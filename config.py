@@ -215,6 +215,24 @@ FORMATO_PESOS_COLDSTART = {
     "dato_falso": 1.0, "comunicado": 0.9, "otro": 1.0,
 }
 
+# Motor de slideshows -------------------------------------------------------
+# Paleta con nombre (contrato estilo reel.farm: text_color es un nombre, no un hex).
+SLIDESHOW_PALETA = {
+    "blanco": "#ffffff",
+    "negro": "#111111",
+    "verde": "#1b5e3f",
+    "crema": "#f5efe0",
+    "rojo": "#c0392b",
+    "amarillo": "#f1c40f",
+}
+# Catálogo de fuentes disponibles → archivo en templates/assets/fonts/.
+SLIDESHOW_FUENTES = {
+    "Anton-Regular": "Anton-Regular.ttf",
+    "Poppins-Bold": "Poppins-Bold.ttf",
+    "Poppins-SemiBold": "Poppins-SemiBold.ttf",
+    "Tinos-Bold": "Tinos-Bold.ttf",
+    "Tinos-Regular": "Tinos-Regular.ttf",
+}
 
 # Slot de alto tráfico por defecto por segmento (cold-start: hasta que IG
 # online_followers tenga datos). (dow 0=lun..6=dom, hora 24h local).
