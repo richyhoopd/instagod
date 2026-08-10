@@ -35,6 +35,9 @@ def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
     imagenes[i] corresponde a guion["slides"][i]; acepta cualquier objeto con
     .ruta_o_url y .source (ImagenCandidata de image_sources), o None →
     slide de fondo sólido sin overlay.
+
+    Registra el estilo usado en brief para que contexto_slide pueda recuperar
+    el fondo correcto del preset.
     """
     preset = config.SLIDESHOW_ESTILOS[estilo]  # KeyError si no existe: a propósito
     slides: list[Slide] = []
@@ -52,9 +55,12 @@ def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
             background_opacity=preset["background_opacity"] if img else 0.0,
             source=img.source if img else "manual",
         ))
+    # Registra estilo en brief para que contexto_slide lo recupere
+    brief_final = dict(brief or {})
+    brief_final.setdefault("estilo", estilo)
     return Slideshow(title=guion["hook"], aspect_ratio=aspect_ratio,
                      slides=slides, caption=guion.get("caption", ""),
-                     brief=brief or {}, formato=formato,
+                     brief=brief_final, formato=formato,
                      account_slug=account_slug)
 
 
@@ -78,10 +84,13 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
             "anchor": t.text_anchor,
             "v_anchor": t.text_vertical_anchor,
         })
+    # Obtiene fondo del preset registrado en brief
+    preset = config.SLIDESHOW_ESTILOS.get(s.brief.get("estilo", ""), {})
+    fondo = preset.get("fondo", "negro")
     return {
         "width": width,
         "height": height,
-        "bg_color": config.SLIDESHOW_PALETA["negro"],
+        "bg_color": config.SLIDESHOW_PALETA[fondo],
         "image_srcs": [_to_src(u) for u in sl.image_urls],
         "grid_cols": cols,
         "grid_rows": rows,

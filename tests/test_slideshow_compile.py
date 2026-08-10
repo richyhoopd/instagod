@@ -84,3 +84,24 @@ def test_contexto_slide_fondo_solido_sin_overlay() -> None:
     assert ctx["image_srcs"] == []
     assert ctx["overlay_opacity"] == 0.0
     assert ctx["bg_color"] == config.SLIDESHOW_PALETA["negro"]
+
+
+def test_contexto_slide_fondo_del_preset() -> None:
+    """Fondo sólido compilado con estilo=editorial → bg_color=crema (no negro)."""
+    s = sc.compilar(_guion(), estilo="editorial", imagenes=[None] * 3)
+    ctx = sc.contexto_slide(s, 0)
+    assert ctx["image_srcs"] == []
+    assert ctx["overlay_opacity"] == 0.0
+    assert ctx["bg_color"] == config.SLIDESHOW_PALETA["crema"]
+
+
+def test_compilar_registra_estilo_en_brief() -> None:
+    """compilar registra estilo usado en brief para que contexto_slide lo recupere."""
+    imgs = [_Img("/tmp/a.jpg")] * 3
+    s = sc.compilar(_guion(), estilo="editorial", imagenes=imgs)
+    assert s.brief["estilo"] == "editorial"
+    # setdefault: si brief ya tiene estilo, no lo pisa
+    s2 = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=imgs,
+                     brief={"tema": "test", "estilo": "editorial"})
+    assert s2.brief["estilo"] == "editorial"  # respeta el existente
+    assert s2.brief["tema"] == "test"  # preserva otros campos
