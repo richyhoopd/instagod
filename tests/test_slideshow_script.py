@@ -84,3 +84,17 @@ def test_generar_guion_agota_intentos(monkeypatch) -> None:
 def test_generar_guion_formato_desconocido() -> None:
     with pytest.raises(ValueError):
         ss.generar_guion("café", formato="inexistente")
+
+
+def test_generar_guion_n_slides_arriba_de_10_no_llama_llm(monkeypatch) -> None:
+    monkeypatch.setattr(ss, "_llamar_llm",
+                        lambda prompt: (_ for _ in ()).throw(AssertionError("no debió llamarse")))
+    with pytest.raises(ValueError):
+        ss.generar_guion("x", n_slides=11)
+
+
+def test_generar_guion_n_slides_cero_no_llama_llm(monkeypatch) -> None:
+    monkeypatch.setattr(ss, "_llamar_llm",
+                        lambda prompt: (_ for _ in ()).throw(AssertionError("no debió llamarse")))
+    with pytest.raises(ValueError):
+        ss.generar_guion("x", n_slides=0)

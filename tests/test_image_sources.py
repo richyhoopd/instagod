@@ -241,3 +241,30 @@ def test_pinterest_circuit_breaker(monkeypatch) -> None:
     assert p.buscar("a") == []
     assert p.buscar("b") == []  # segundo hint: NO vuelve a pegarle a la red
     assert contador["n"] == 1
+
+
+def test_pinterest_circuit_breaker_con_resultados_malformados(monkeypatch) -> None:
+    """Un item no-dict en 'results' debe apagar el provider, no escapar como excepción."""
+    monkeypatch.setattr(isrc.config, "SOURCING_PINTEREST", True)
+    contador = {"n": 0}
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"resource_response": {"data": {"results": [
+                {"images": None}, "basura",
+            ]}}}
+
+    def _get(url, **kw):
+        contador["n"] += 1
+        return _Resp()
+
+    monkeypatch.setattr(isrc.requests, "get", _get)
+    p = isrc.PinterestProvider()
+    assert p.buscar("a") == []
+    assert p.buscar("b") == []  # segunda llamada: NO pega a la red
+    assert contador["n"] == 1

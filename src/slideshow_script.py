@@ -154,6 +154,11 @@ def generar_guion(tema: str, *, formato: str = "listicle", n_slides: int = 6,
     if formato not in config.SLIDESHOW_FORMATOS:
         raise ValueError(f"Formato desconocido: {formato!r}. "
                          f"Opciones: {list(config.SLIDESHOW_FORMATOS)}")
+    if not 1 <= n_slides <= 10:
+        raise ValueError(
+            f"n_slides debe ser 1-10, llegó {n_slides}. El tope de 10 viene del "
+            "carrusel de IG/Telegram (approval.py e instagram.py truncan en 10): "
+            "pedir más slides quema llamadas al LLM condenadas a truncarse en silencio.")
     errores: list[str] = []
     for _ in range(3):
         prompt = _build_user_prompt(tema, formato, n_slides, contexto,

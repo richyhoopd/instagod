@@ -37,7 +37,11 @@ def _carousel_urls(image_url: str) -> list[str]:
 
 
 def _es_agenda(row: dict) -> bool:
-    """¿La fila es una agenda/música-nueva? (tema_semilla o carrusel)."""
+    """¿La fila es una agenda/música-nueva? (tema_semilla o carrusel).
+
+    Nota: cualquier carrusel JSON-list (incluidos los slideshows) cae aquí
+    también, a propósito — es solo cuestión de orden de publicación, no de
+    tratarlos como agenda en ningún otro sentido (aceptado en v1)."""
     tema = str(row.get("tema_semilla", "")).lower()
     return (any(k in tema for k in ("agenda", "shows", "música nueva", "musica nueva",
                                     "releases")) or bool(_carousel_urls(row.get("imagen_compuesta_url", ""))))

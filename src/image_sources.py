@@ -54,7 +54,17 @@ def _descargar_cache(url: str) -> Path | None:
 
 
 class BancoProvider:
-    """Fotos reales del banco propio: match del hint contra nombre/handle."""
+    """Fotos reales del banco propio: match del hint contra nombre/handle.
+
+    LIMITACIÓN v1: las fotos elegidas para slideshows NO se marcan `usada`
+    (eso solo pasa con memes vía approval.aprobar, que marca el photo_id
+    único del meme); la anti-repetición solo aplica dentro de un mismo set
+    (dedup de resolver()). Consecuencia: la misma foto top-nitidez de un
+    hint puede volver a elegirse en cada slideshow futuro. El contrato
+    slideshow_json ya persiste ruta y source de cada slide, así que un
+    marcado retroactivo es posible; el fix real llega con multi-cuenta
+    Fase B.
+    """
 
     nombre = "banco"
 
@@ -169,20 +179,20 @@ class PinterestProvider:
             r.raise_for_status()
             resultados = (r.json().get("resource_response", {})
                           .get("data", {}).get("results", []))
-        except (requests.RequestException, ValueError) as e:
+            out = []
+            for res in resultados:
+                url = ((res.get("images") or {}).get("orig") or {}).get("url")
+                if not url:
+                    continue
+                ruta = _descargar_cache(url)
+                if ruta:
+                    out.append(ImagenCandidata(str(ruta), "pinterest"))
+                if len(out) >= n:
+                    break
+        except (requests.RequestException, ValueError, AttributeError, TypeError) as e:
             print(f"[image_sources] pinterest falló, se apaga esta corrida: {e}")
             self._muerto = True
             return []
-        out = []
-        for res in resultados:
-            url = ((res.get("images") or {}).get("orig") or {}).get("url")
-            if not url:
-                continue
-            ruta = _descargar_cache(url)
-            if ruta:
-                out.append(ImagenCandidata(str(ruta), "pinterest"))
-            if len(out) >= n:
-                break
         return out
 
 
