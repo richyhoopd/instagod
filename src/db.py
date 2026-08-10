@@ -59,6 +59,9 @@ TABLES: dict[str, set[str]] = {
         "evento_ids",
         # Historial de captions rechazados con 🔄 (flujo asíncrono).
         "rechazados",
+        # Motor de slideshows: contrato completo del set (JSON) para
+        # regenerar/re-estilar y para el futuro export a video.
+        "slideshow_json",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -158,6 +161,9 @@ _MIGRATIONS = {
         # que el LLM no los repita (equivalente al `rechazados` en memoria del
         # flujo interactivo de bot.py).
         "rechazados": "TEXT",
+        # Motor de slideshows: contrato completo del set (JSON) para
+        # regenerar/re-estilar y para el futuro export a video.
+        "slideshow_json": "TEXT",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
@@ -182,6 +188,74 @@ _MIGRATIONS = {
 }
 
 
+def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
+    """Ensancha el CHECK(tipo) de content_queue para admitir 'slideshow'.
+
+    SQLite no soporta ALTER de un CHECK ya creado: hay que reconstruir la
+    tabla (procedimiento oficial de sqlite.org "Making Other Kinds Of Table
+    Schema Changes"). Idempotente: solo corre si el CHECK viejo (sin
+    'slideshow') sigue en sqlite_master; en DBs nuevas ya sale de schema.sql
+    con el CHECK correcto y esto es un no-op.
+    """
+    row = cx.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_queue'"
+    ).fetchone()
+    # OJO: no basta con buscar "slideshow" a secas — la columna slideshow_json
+    # (agregada arriba vía ALTER TABLE ADD COLUMN) ya deja esa subcadena en el
+    # sql guardado aunque el CHECK siga viejo. Hay que buscar el literal
+    # exacto del CHECK IN (...).
+    if row is None or "'slideshow'" in row[0]:
+        return
+    cx.executescript("""
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        CREATE TABLE content_queue_new (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo               TEXT    NOT NULL DEFAULT 'meme',
+            band_id            INTEGER REFERENCES bands(id)  ON DELETE CASCADE,
+            member_id          INTEGER REFERENCES members(id) ON DELETE SET NULL,
+            photo_id           INTEGER REFERENCES photos(id)  ON DELETE SET NULL,
+            event_id           INTEGER REFERENCES events(id)  ON DELETE SET NULL,
+            tema_semilla       TEXT,
+            status             TEXT    NOT NULL DEFAULT 'borrador',
+            scheduled_datetime TEXT,
+            sheet_row_id       TEXT,
+            created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+            meme_url           TEXT,
+            account_id         INTEGER NOT NULL DEFAULT 1,
+            template           TEXT,
+            formato_patron     TEXT,
+            aprobacion         TEXT,
+            caption            TEXT,
+            imagen_url         TEXT,
+            evento_ids         TEXT,
+            rechazados         TEXT,
+            slideshow_json     TEXT,
+            CHECK (tipo   IN ('meme','anuncio','slideshow')),
+            CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))
+        );
+        INSERT INTO content_queue_new (id, tipo, band_id, member_id, photo_id, event_id,
+            tema_semilla, status, scheduled_datetime, sheet_row_id, created_at, updated_at,
+            meme_url, account_id, template, formato_patron, aprobacion, caption, imagen_url,
+            evento_ids, rechazados, slideshow_json)
+        SELECT id, tipo, band_id, member_id, photo_id, event_id,
+            tema_semilla, status, scheduled_datetime, sheet_row_id, created_at, updated_at,
+            meme_url, account_id, template, formato_patron, aprobacion, caption, imagen_url,
+            evento_ids, rechazados, slideshow_json
+        FROM content_queue;
+        DROP TABLE content_queue;
+        ALTER TABLE content_queue_new RENAME TO content_queue;
+        CREATE INDEX IF NOT EXISTS idx_queue_status ON content_queue(status);
+        CREATE INDEX IF NOT EXISTS idx_queue_band   ON content_queue(band_id);
+        CREATE TRIGGER IF NOT EXISTS trg_queue_updated
+            AFTER UPDATE ON content_queue FOR EACH ROW
+            BEGIN UPDATE content_queue SET updated_at = datetime('now') WHERE id = OLD.id; END;
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+    """)
+
+
 def init_db(cx: sqlite3.Connection) -> None:
     """Crea/actualiza el esquema. Idempotente: seguro de correr varias veces."""
     cx.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -191,6 +265,7 @@ def init_db(cx: sqlite3.Connection) -> None:
         for col, ddl in cols.items():
             if col not in existentes:
                 cx.execute(f"ALTER TABLE {tabla} ADD COLUMN {col} {ddl}")
+    _migrar_check_tipo_queue(cx)
     # Multi-cuenta Fase A: seed de la cuenta original e índices post-migración
     # (los índices van aquí y no en schema.sql: en DBs viejas la columna
     # account_id no existe todavía cuando corre executescript).
