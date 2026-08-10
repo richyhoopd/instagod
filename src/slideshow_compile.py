@@ -1,0 +1,92 @@
+"""Compilador determinista: guion semántico + preset de estilo → Slideshow.
+
+La cosmética (fuentes, colores, tamaños, anchors) vive en
+config.SLIDESHOW_ESTILOS; re-estilar un set = recompilar el MISMO guion con
+otro preset, sin volver a llamar al LLM.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import config
+from src.compose import FONTS_DIR, _to_src
+from src.slideshow_model import ASPECT_RATIOS, IMAGE_LAYOUTS, Slide, Slideshow, TextItem
+
+# Tamaño con nombre → px sobre diseño de 1080 de ancho (se escala por aspect).
+_FONT_PX = {"extra_extra_small": 36, "extra_small": 48, "small": 60,
+            "medium": 76, "large": 96, "extra_large": 128}
+
+# Color de la caja detrás del texto (text_style=background) según el color
+# del texto: texto claro → caja oscura y viceversa.
+_COLORES_CLAROS = {"blanco", "crema", "amarillo"}
+
+
+def _caja_para(color_nombre: str) -> str:
+    if color_nombre in _COLORES_CLAROS:
+        return config.SLIDESHOW_PALETA["negro"]
+    return config.SLIDESHOW_PALETA["blanco"]
+
+
+def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
+             aspect_ratio: str = "4:5", brief: dict | None = None,
+             formato: str = "", account_slug: str = "gdlscene") -> Slideshow:
+    """guion + estilo + una imagen (o None) por slide → contrato completo.
+
+    imagenes[i] corresponde a guion["slides"][i]; acepta cualquier objeto con
+    .ruta_o_url y .source (ImagenCandidata de image_sources), o None →
+    slide de fondo sólido sin overlay.
+    """
+    preset = config.SLIDESHOW_ESTILOS[estilo]  # KeyError si no existe: a propósito
+    slides: list[Slide] = []
+    for sl, img in zip(guion["slides"], imagenes):
+        rol = sl.get("rol", "punto")
+        r = preset["roles"].get(rol, preset["roles"]["punto"])
+        item = TextItem(text=sl["text"], font=r["font"], font_size=r["font_size"],
+                        text_color=preset["texto"], text_style=r["text_style"],
+                        text_vertical_anchor=r["text_vertical_anchor"])
+        slides.append(Slide(
+            image_urls=[img.ruta_o_url] if img else [],
+            image_layout="single",
+            text_items=[item],
+            is_cta=(rol == "cta"),
+            background_opacity=preset["background_opacity"] if img else 0.0,
+            source=img.source if img else "manual",
+        ))
+    return Slideshow(title=guion["hook"], aspect_ratio=aspect_ratio,
+                     slides=slides, caption=guion.get("caption", ""),
+                     brief=brief or {}, formato=formato,
+                     account_slug=account_slug)
+
+
+def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
+    """Contexto Jinja2 de UN slide para templates/slide.html. PURO."""
+    sl = s.slides[idx]
+    width, height = ASPECT_RATIOS[s.aspect_ratio]
+    cols, rows = IMAGE_LAYOUTS[sl.image_layout]
+    escala = width / 1080
+    items = []
+    for t in sl.text_items:
+        items.append({
+            "text": t.text,
+            "font": t.font,
+            "px": round(_FONT_PX[t.font_size] * escala),
+            "color": config.SLIDESHOW_PALETA[t.text_color],
+            "caja": _caja_para(t.text_color),
+            "estilo": t.text_style,
+            "width_pct": round(t.text_width * 100),
+            "align": t.text_align,
+            "anchor": t.text_anchor,
+            "v_anchor": t.text_vertical_anchor,
+        })
+    return {
+        "width": width,
+        "height": height,
+        "bg_color": config.SLIDESHOW_PALETA["negro"],
+        "image_srcs": [_to_src(u) for u in sl.image_urls],
+        "grid_cols": cols,
+        "grid_rows": rows,
+        "overlay_opacity": sl.background_opacity,
+        "font_faces": [{"name": nombre, "url": (FONTS_DIR / archivo).as_uri()}
+                       for nombre, archivo in config.SLIDESHOW_FUENTES.items()],
+        "items": items,
+    }

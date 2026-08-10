@@ -255,6 +255,33 @@ SLIDESHOW_FORMATOS = {
     ),
 }
 
+# Presets de estilo del compilador: cosmética por ROL del slide. El LLM nunca
+# decide estilos; re-estilar = recompilar el mismo guion con otro preset.
+SLIDESHOW_ESTILOS = {
+    "tiktok_bold": {
+        "texto": "blanco", "fondo": "negro", "background_opacity": 0.35,
+        "roles": {
+            "hook": {"font": "Anton-Regular", "font_size": "extra_large",
+                     "text_style": "background", "text_vertical_anchor": "center"},
+            "punto": {"font": "Poppins-Bold", "font_size": "large",
+                      "text_style": "background", "text_vertical_anchor": "center"},
+            "cta": {"font": "Poppins-Bold", "font_size": "medium",
+                    "text_style": "background", "text_vertical_anchor": "bottom"},
+        },
+    },
+    "editorial": {
+        "texto": "negro", "fondo": "crema", "background_opacity": 0.2,
+        "roles": {
+            "hook": {"font": "Tinos-Bold", "font_size": "extra_large",
+                     "text_style": "background", "text_vertical_anchor": "top"},
+            "punto": {"font": "Tinos-Bold", "font_size": "large",
+                      "text_style": "background", "text_vertical_anchor": "center"},
+            "cta": {"font": "Poppins-SemiBold", "font_size": "medium",
+                    "text_style": "background", "text_vertical_anchor": "bottom"},
+        },
+    },
+}
+
 # Slot de alto tráfico por defecto por segmento (cold-start: hasta que IG
 # online_followers tenga datos). (dow 0=lun..6=dom, hora 24h local).
 TIMING_DEFAULTS = {
