@@ -188,14 +188,59 @@ _MIGRATIONS = {
 }
 
 
+# DDL "de destino" de content_queue tras el rebuild del CHECK(tipo) — congelada
+# en el momento de escribir esta migración (no es schema.sql: es un punto fijo
+# en el tiempo). _CONTENT_QUEUE_REBUILD_COLS es la lista de columnas que ESTE
+# DDL conoce, en orden. Si content_queue gana una columna nueva más adelante
+# (otra entrada en _MIGRATIONS), hay que agregarla TAMBIÉN aquí a mano — si no,
+# _migrar_check_tipo_queue revienta a propósito (ver el raise abajo) en vez de
+# dropear esa columna en silencio durante el rebuild.
+_CONTENT_QUEUE_REBUILD_DDL = """
+    CREATE TABLE content_queue_new (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo               TEXT    NOT NULL DEFAULT 'meme',
+        band_id            INTEGER REFERENCES bands(id)  ON DELETE CASCADE,
+        member_id          INTEGER REFERENCES members(id) ON DELETE SET NULL,
+        photo_id           INTEGER REFERENCES photos(id)  ON DELETE SET NULL,
+        event_id           INTEGER REFERENCES events(id)  ON DELETE SET NULL,
+        tema_semilla       TEXT,
+        status             TEXT    NOT NULL DEFAULT 'borrador',
+        scheduled_datetime TEXT,
+        sheet_row_id       TEXT,
+        created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+        meme_url           TEXT,
+        account_id         INTEGER NOT NULL DEFAULT 1,
+        template           TEXT,
+        formato_patron     TEXT,
+        aprobacion         TEXT,
+        caption            TEXT,
+        imagen_url         TEXT,
+        evento_ids         TEXT,
+        rechazados         TEXT,
+        slideshow_json     TEXT,
+        CHECK (tipo   IN ('meme','anuncio','slideshow')),
+        CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))
+    )
+"""
+_CONTENT_QUEUE_REBUILD_COLS = (
+    "id", "tipo", "band_id", "member_id", "photo_id", "event_id",
+    "tema_semilla", "status", "scheduled_datetime", "sheet_row_id",
+    "created_at", "updated_at", "meme_url", "account_id", "template",
+    "formato_patron", "aprobacion", "caption", "imagen_url", "evento_ids",
+    "rechazados", "slideshow_json",
+)
+
+
 def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     """Ensancha el CHECK(tipo) de content_queue para admitir 'slideshow'.
 
     SQLite no soporta ALTER de un CHECK ya creado: hay que reconstruir la
     tabla (procedimiento oficial de sqlite.org "Making Other Kinds Of Table
-    Schema Changes"). Idempotente: solo corre si el CHECK viejo (sin
-    'slideshow') sigue en sqlite_master; en DBs nuevas ya sale de schema.sql
-    con el CHECK correcto y esto es un no-op.
+    Schema Changes", incluye el PRAGMA foreign_key_check antes del commit).
+    Idempotente: solo corre si el CHECK viejo (sin 'slideshow') sigue en
+    sqlite_master; en DBs nuevas ya sale de schema.sql con el CHECK correcto
+    y esto es un no-op.
     """
     row = cx.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_queue'"
@@ -206,54 +251,60 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     # exacto del CHECK IN (...).
     if row is None or "'slideshow'" in row[0]:
         return
-    cx.executescript("""
-        PRAGMA foreign_keys=OFF;
-        BEGIN TRANSACTION;
-        CREATE TABLE content_queue_new (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            tipo               TEXT    NOT NULL DEFAULT 'meme',
-            band_id            INTEGER REFERENCES bands(id)  ON DELETE CASCADE,
-            member_id          INTEGER REFERENCES members(id) ON DELETE SET NULL,
-            photo_id           INTEGER REFERENCES photos(id)  ON DELETE SET NULL,
-            event_id           INTEGER REFERENCES events(id)  ON DELETE SET NULL,
-            tema_semilla       TEXT,
-            status             TEXT    NOT NULL DEFAULT 'borrador',
-            scheduled_datetime TEXT,
-            sheet_row_id       TEXT,
-            created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-            updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-            meme_url           TEXT,
-            account_id         INTEGER NOT NULL DEFAULT 1,
-            template           TEXT,
-            formato_patron     TEXT,
-            aprobacion         TEXT,
-            caption            TEXT,
-            imagen_url         TEXT,
-            evento_ids         TEXT,
-            rechazados         TEXT,
-            slideshow_json     TEXT,
-            CHECK (tipo   IN ('meme','anuncio','slideshow')),
-            CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))
-        );
-        INSERT INTO content_queue_new (id, tipo, band_id, member_id, photo_id, event_id,
-            tema_semilla, status, scheduled_datetime, sheet_row_id, created_at, updated_at,
-            meme_url, account_id, template, formato_patron, aprobacion, caption, imagen_url,
-            evento_ids, rechazados, slideshow_json)
-        SELECT id, tipo, band_id, member_id, photo_id, event_id,
-            tema_semilla, status, scheduled_datetime, sheet_row_id, created_at, updated_at,
-            meme_url, account_id, template, formato_patron, aprobacion, caption, imagen_url,
-            evento_ids, rechazados, slideshow_json
-        FROM content_queue;
-        DROP TABLE content_queue;
-        ALTER TABLE content_queue_new RENAME TO content_queue;
-        CREATE INDEX IF NOT EXISTS idx_queue_status ON content_queue(status);
-        CREATE INDEX IF NOT EXISTS idx_queue_band   ON content_queue(band_id);
-        CREATE TRIGGER IF NOT EXISTS trg_queue_updated
-            AFTER UPDATE ON content_queue FOR EACH ROW
-            BEGIN UPDATE content_queue SET updated_at = datetime('now') WHERE id = OLD.id; END;
-        COMMIT;
-        PRAGMA foreign_keys=ON;
-    """)
+
+    # Columnas de la tabla VIEJA (ya con todo lo que _MIGRATIONS le haya
+    # agregado arriba vía ALTER). Si trae alguna que el DDL de destino no
+    # conoce, NO la dropeamos en silencio: reventamos con un mensaje claro
+    # para que quien agregó esa columna actualice también esta migración.
+    viejas = {r["name"] for r in cx.execute("PRAGMA table_info(content_queue)")}
+    nuevas = set(_CONTENT_QUEUE_REBUILD_COLS)
+    huerfanas = viejas - nuevas
+    if huerfanas:
+        raise RuntimeError(
+            "_migrar_check_tipo_queue no conoce estas columnas de la "
+            f"content_queue vieja: {sorted(huerfanas)}. Actualiza "
+            "_CONTENT_QUEUE_REBUILD_DDL y _CONTENT_QUEUE_REBUILD_COLS en "
+            "db.py antes de correr esta migración — si no, el rebuild las "
+            "dropearía en silencio."
+        )
+    cols_copiar = [c for c in _CONTENT_QUEUE_REBUILD_COLS if c in viejas]
+    col_list = ", ".join(cols_copiar)
+
+    # foreign_keys solo se puede tocar FUERA de una transacción — por eso va
+    # antes del BEGIN y se restaura en el finally pase lo que pase.
+    cx.execute("PRAGMA foreign_keys=OFF")
+    try:
+        cx.execute("BEGIN")
+        cx.execute(_CONTENT_QUEUE_REBUILD_DDL)
+        cx.execute(
+            f"INSERT INTO content_queue_new ({col_list}) "
+            f"SELECT {col_list} FROM content_queue"
+        )
+        cx.execute("DROP TABLE content_queue")
+        cx.execute("ALTER TABLE content_queue_new RENAME TO content_queue")
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON content_queue(status)")
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_queue_band   ON content_queue(band_id)")
+        cx.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_queue_updated
+                AFTER UPDATE ON content_queue FOR EACH ROW
+                BEGIN UPDATE content_queue SET updated_at = datetime('now') WHERE id = OLD.id; END
+        """)
+        # Paso final del procedimiento de sqlite.org: con foreign_keys=OFF
+        # nada valida las FK del rebuild solas — hay que chequearlas a mano
+        # antes del commit.
+        violaciones = cx.execute("PRAGMA foreign_key_check").fetchall()
+        if violaciones:
+            raise RuntimeError(f"foreign_key_check falló tras el rebuild de "
+                               f"content_queue: {[tuple(v) for v in violaciones]}")
+        cx.execute("COMMIT")
+    except BaseException:
+        try:
+            cx.execute("ROLLBACK")
+        except sqlite3.OperationalError:
+            pass  # sin transacción activa (p. ej. el propio BEGIN falló) — ignora
+        raise
+    finally:
+        cx.execute("PRAGMA foreign_keys=ON")
 
 
 def init_db(cx: sqlite3.Connection) -> None:
