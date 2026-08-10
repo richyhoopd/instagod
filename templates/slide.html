@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  {% for f in font_faces %}
+  @font-face { font-family:'{{ f.name }}'; src:url('{{ f.url }}') format('truetype'); }
+  {% endfor %}
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  .card {
+    width:{{ width }}px; height:{{ height }}px; position:relative;
+    overflow:hidden; background:{{ bg_color }};
+  }
+
+  /* Grilla de imágenes de fondo (image_layout del contrato). */
+  .bg {
+    position:absolute; inset:0; display:grid; gap:6px;
+    grid-template-columns:repeat({{ grid_cols }}, 1fr);
+    grid-template-rows:repeat({{ grid_rows }}, 1fr);
+  }
+  .bg img { width:100%; height:100%; object-fit:cover; display:block; }
+
+  .overlay { position:absolute; inset:0; background:#000; opacity:{{ overlay_opacity }}; }
+
+  /* Tres zonas verticales apiladas; cada text_item cae en la suya. */
+  .zonas {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    justify-content:space-between; padding:{{ (height * 0.06) | round | int }}px 0;
+  }
+  .zona { display:flex; flex-direction:column; width:100%; }
+  .zona.top { justify-content:flex-start; }
+  .zona.center { flex:1; justify-content:center; }
+  .zona.bottom { justify-content:flex-end; }
+
+  .txt { line-height:1.22; }
+  .txt.a-left { align-self:flex-start; margin-left:4%; }
+  .txt.a-center { align-self:center; }
+  .txt.a-right { align-self:flex-end; margin-right:4%; }
+
+  .txt.estilo-outline span.linea {
+    -webkit-text-stroke:0.055em #000;
+    paint-order:stroke fill;
+    text-shadow:0 2px 12px rgba(0,0,0,.45);
+  }
+  .txt.estilo-background span.linea {
+    box-decoration-break:clone; -webkit-box-decoration-break:clone;
+    padding:0.08em 0.34em; border-radius:0.12em;
+  }
+  .txt.estilo-text span.linea { text-shadow:0 2px 14px rgba(0,0,0,.55); }
+</style>
+</head>
+<body>
+  <div class="card">
+    {% if image_srcs %}
+    <div class="bg">
+      {% for src in image_srcs %}<img src="{{ src }}">{% endfor %}
+    </div>
+    <div class="overlay"></div>
+    {% endif %}
+    <div class="zonas">
+      {% for zona in ["top", "center", "bottom"] %}
+      <div class="zona {{ zona }}">
+        {% for it in items if it.v_anchor == zona %}
+        <div class="txt a-{{ it.anchor }} estilo-{{ it.estilo }}"
+             style="font-family:'{{ it.font }}'; font-size:{{ it.px }}px;
+                    color:{{ it.color }}; max-width:{{ it.width_pct }}%;
+                    text-align:{{ it.align }};
+                    {% if it.estilo == 'background' %}--caja:{{ it.caja }};{% endif %}">
+          <span class="linea"
+                {% if it.estilo == 'background' %}style="background:{{ it.caja }};"{% endif %}
+          >{{ it.text }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <script>
+    // Auto-fit por text_item: encoge la fuente hasta caber en su zona,
+    // mismo patrón que fitCaption de meme.html.
+    function fitAll() {
+      const card = document.querySelector('.card');
+      document.querySelectorAll('.txt').forEach(el => {
+        let size = parseFloat(getComputedStyle(el).fontSize);
+        const minSize = 24;
+        const maxH = card.clientHeight * 0.62;
+        while ((el.scrollHeight > maxH || el.scrollWidth > el.clientWidth + 2)
+               && size > minSize) {
+          size -= 2; el.style.fontSize = size + 'px';
+        }
+      });
+      window.__captionFitted = true;
+    }
+    document.fonts.ready.then(() =>
+      requestAnimationFrame(() => requestAnimationFrame(fitAll)));
+  </script>
+</body>
+</html>
