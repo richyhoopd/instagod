@@ -100,12 +100,45 @@ class CoversProvider:
         return out
 
 
+class PexelsProvider:
+    """Búsqueda en Pexels (API oficial, licencia limpia para uso comercial)."""
+
+    nombre = "pexels"
+
+    def buscar(self, hint: str, n: int = 3) -> list[ImagenCandidata]:
+        if not config.PEXELS_API_KEY:
+            return []
+        try:
+            r = requests.get(
+                "https://api.pexels.com/v1/search",
+                params={"query": hint, "per_page": n, "orientation": "portrait"},
+                headers={"Authorization": config.PEXELS_API_KEY},
+                timeout=20,
+            )
+            r.raise_for_status()
+            fotos = r.json().get("photos", [])
+        except (requests.RequestException, ValueError) as e:
+            print(f"[image_sources] pexels falló: {e}")
+            return []
+        out = []
+        for f in fotos[:n]:
+            url = (f.get("src") or {}).get("large2x") or (f.get("src") or {}).get("large")
+            if not url:
+                continue
+            ruta = _descargar_cache(url)
+            if ruta:
+                out.append(ImagenCandidata(str(ruta), "pexels",
+                                           credito=f.get("photographer")))
+        return out
+
+
 def providers_default(cx=None) -> dict:
     """Providers disponibles. banco/covers requieren conexión a la DB."""
     out: dict = {}
     if cx is not None:
         out["banco"] = BancoProvider(cx)
         out["covers"] = CoversProvider(cx)
+    out["pexels"] = PexelsProvider()
     return out
 
 

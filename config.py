@@ -43,6 +43,9 @@ CLOUD_NAME = _get("CLOUD_NAME")
 CLOUDINARY_API_KEY = _get("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = _get("CLOUDINARY_API_SECRET")
 
+# ---------- Sourcing externo (motor de slideshows) ----------
+PEXELS_API_KEY = _get("PEXELS_API_KEY")
+
 # ---------- Telegram ----------
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _get("TELEGRAM_CHAT_ID")

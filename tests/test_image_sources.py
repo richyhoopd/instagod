@@ -128,3 +128,62 @@ def test_descargar_cache_rechaza_no_imagen(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(isrc.requests, "get", lambda *a, **kw: _Resp())
     assert isrc._descargar_cache("https://img/y.jpg") is None
+
+
+def test_pexels_sin_api_key_devuelve_vacio(monkeypatch) -> None:
+    monkeypatch.setattr(isrc.config, "PEXELS_API_KEY", None)
+    assert isrc.PexelsProvider().buscar("coffee") == []
+
+
+def test_pexels_parsea_respuesta(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(isrc.config, "PEXELS_API_KEY", "k123")
+    monkeypatch.setattr(isrc, "SOURCING_DIR", tmp_path)
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"photos": [
+                {"src": {"large2x": "https://img/1.jpg"},
+                 "photographer": "Ana"},
+                {"src": {"large2x": "https://img/2.jpg"},
+                 "photographer": "Luis"},
+            ]}
+
+    llamadas = {}
+
+    def _get(url, **kw):
+        if "api.pexels.com" in url:
+            llamadas["headers"] = kw.get("headers")
+            return _Resp()
+        # descarga de la imagen
+
+        class _Img:
+            status_code = 200
+            content = b"\xff\xd8\xff" + b"x" * 50
+
+            def raise_for_status(self):
+                pass
+
+        return _Img()
+
+    monkeypatch.setattr(isrc.requests, "get", _get)
+    out = isrc.PexelsProvider().buscar("coffee", n=2)
+    assert len(out) == 2
+    assert out[0].source == "pexels"
+    assert out[0].credito == "Ana"
+    assert out[0].ruta_o_url.endswith(".jpg")  # ruta local del cache
+    assert llamadas["headers"]["Authorization"] == "k123"
+
+
+def test_pexels_error_http_devuelve_vacio(monkeypatch) -> None:
+    monkeypatch.setattr(isrc.config, "PEXELS_API_KEY", "k123")
+
+    def _get(url, **kw):
+        raise isrc.requests.RequestException("timeout")
+
+    monkeypatch.setattr(isrc.requests, "get", _get)
+    assert isrc.PexelsProvider().buscar("coffee") == []
