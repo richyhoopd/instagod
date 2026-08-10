@@ -61,6 +61,8 @@ def validar_guion(data: dict[str, Any], *, n_slides: int) -> list[str]:
     if not isinstance(slides, list) or not 1 <= len(slides) <= 20:
         errores.append(f"slides: deben ser 1-20, hay {len(slides)}")
         return errores
+    if len(slides) != n_slides:
+        errores.append(f"slides: se pidieron {n_slides}, llegaron {len(slides)}")
     for i, sl in enumerate(slides):
         if not isinstance(sl, dict):
             errores.append(f"slide {i}: no es objeto")

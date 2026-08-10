@@ -62,6 +62,11 @@ def test_validar_guion_slide_sin_image_hint() -> None:
     assert ss.validar_guion(g, n_slides=3)
 
 
+def test_validar_guion_numero_de_slides_equivocado() -> None:
+    g = _guion_ok(n=3)
+    assert any("slides" in e and "pidieron" in e for e in ss.validar_guion(g, n_slides=5))
+
+
 def test_generar_guion_reintenta_y_devuelve(monkeypatch) -> None:
     """1er intento: basura; 2o: guion válido → lo devuelve sin agotar intentos."""
     respuestas = iter(["esto no es json", json.dumps(_guion_ok())])
