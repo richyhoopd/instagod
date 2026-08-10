@@ -45,6 +45,8 @@ CLOUDINARY_API_SECRET = _get("CLOUDINARY_API_SECRET")
 
 # ---------- Sourcing externo (motor de slideshows) ----------
 PEXELS_API_KEY = _get("PEXELS_API_KEY")
+# Pinterest es scraping best-effort (sin API oficial): apagado por default.
+SOURCING_PINTEREST = (_get("SOURCING_PINTEREST", "0") or "0") == "1"
 
 # ---------- Telegram ----------
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN")

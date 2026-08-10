@@ -132,6 +132,60 @@ class PexelsProvider:
         return out
 
 
+class PinterestProvider:
+    """Búsqueda en Pinterest vía su endpoint JSON interno (SIN API oficial).
+
+    Best-effort detrás del flag SOURCING_PINTEREST: cualquier fallo apaga el
+    provider por el resto de la corrida (circuit breaker) y la cascada cae al
+    siguiente (pexels). Las imágenes pueden tener copyright de terceros: la
+    proveniencia queda marcada (source="pinterest") para auditar/bajar.
+    """
+
+    nombre = "pinterest"
+
+    def __init__(self):
+        self._muerto = False
+
+    def buscar(self, hint: str, n: int = 3) -> list[ImagenCandidata]:
+        if not config.SOURCING_PINTEREST or self._muerto:
+            return []
+        import json as json_mod
+        try:
+            r = requests.get(
+                "https://www.pinterest.com/resource/BaseSearchResource/get/",
+                params={
+                    "source_url": f"/search/pins/?q={hint}",
+                    "data": json_mod.dumps(
+                        {"options": {"query": hint, "scope": "pins"}, "context": {}}),
+                },
+                headers={
+                    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/126.0 Safari/537.36"),
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+                timeout=20,
+            )
+            r.raise_for_status()
+            resultados = (r.json().get("resource_response", {})
+                          .get("data", {}).get("results", []))
+        except (requests.RequestException, ValueError) as e:
+            print(f"[image_sources] pinterest falló, se apaga esta corrida: {e}")
+            self._muerto = True
+            return []
+        out = []
+        for res in resultados:
+            url = ((res.get("images") or {}).get("orig") or {}).get("url")
+            if not url:
+                continue
+            ruta = _descargar_cache(url)
+            if ruta:
+                out.append(ImagenCandidata(str(ruta), "pinterest"))
+            if len(out) >= n:
+                break
+        return out
+
+
 def providers_default(cx=None) -> dict:
     """Providers disponibles. banco/covers requieren conexión a la DB."""
     out: dict = {}
@@ -139,6 +193,7 @@ def providers_default(cx=None) -> dict:
         out["banco"] = BancoProvider(cx)
         out["covers"] = CoversProvider(cx)
     out["pexels"] = PexelsProvider()
+    out["pinterest"] = PinterestProvider()
     return out
 
 

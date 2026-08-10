@@ -187,3 +187,57 @@ def test_pexels_error_http_devuelve_vacio(monkeypatch) -> None:
 
     monkeypatch.setattr(isrc.requests, "get", _get)
     assert isrc.PexelsProvider().buscar("coffee") == []
+
+
+def test_pinterest_apagado_por_flag(monkeypatch) -> None:
+    monkeypatch.setattr(isrc.config, "SOURCING_PINTEREST", False)
+    assert isrc.PinterestProvider().buscar("coffee") == []
+
+
+def test_pinterest_parsea_resultados(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(isrc.config, "SOURCING_PINTEREST", True)
+    monkeypatch.setattr(isrc, "SOURCING_DIR", tmp_path)
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"resource_response": {"data": {"results": [
+                {"images": {"orig": {"url": "https://i.pinimg.com/a.jpg"}}},
+            ]}}}
+
+    def _get(url, **kw):
+        if "pinterest.com" in url:
+            return _Resp()
+
+        class _Img:
+            status_code = 200
+            content = b"\xff\xd8\xff" + b"x" * 50
+
+            def raise_for_status(self):
+                pass
+
+        return _Img()
+
+    monkeypatch.setattr(isrc.requests, "get", _get)
+    out = isrc.PinterestProvider().buscar("coffee")
+    assert out and out[0].source == "pinterest"
+
+
+def test_pinterest_circuit_breaker(monkeypatch) -> None:
+    """Tras un fallo, el provider queda muerto en la corrida: no reintenta."""
+    monkeypatch.setattr(isrc.config, "SOURCING_PINTEREST", True)
+    contador = {"n": 0}
+
+    def _get(url, **kw):
+        contador["n"] += 1
+        raise isrc.requests.RequestException("403")
+
+    monkeypatch.setattr(isrc.requests, "get", _get)
+    p = isrc.PinterestProvider()
+    assert p.buscar("a") == []
+    assert p.buscar("b") == []  # segundo hint: NO vuelve a pegarle a la red
+    assert contador["n"] == 1
