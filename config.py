@@ -233,6 +233,27 @@ SLIDESHOW_FUENTES = {
     "Tinos-Bold": "Tinos-Bold.ttf",
     "Tinos-Regular": "Tinos-Regular.ttf",
 }
+# Temperatura del guion de slides (más bajo que memes: estructura > locura).
+SLIDESHOW_TEMPERATURE = float(_get("SLIDESHOW_TEMPERATURE", "1.0") or "1.0")
+# Formatos editoriales del motor (presets de instrucciones; el motor es genérico).
+SLIDESHOW_FORMATOS = {
+    "listicle": (
+        "LISTICLE: el hook promete N cosas ('5 señales de que…', '7 formas de…'). "
+        "Cada slide intermedio es UNA idea numerada (1., 2., …), corta y rematada."
+    ),
+    "todo_lo_que_sabemos": (
+        "TODO LO QUE SABEMOS: hook = 'Todo lo que sabemos de {tema}' (o variante). "
+        "Cada slide intermedio es un 'dato' deadpan estilo nota seria; mezcla datos "
+        "reales del contexto con absurdos evidentes si el tono lo pide."
+    ),
+    "perfil": (
+        "PERFIL: el hook presenta al sujeto ('Conoce a X'). Cada slide intermedio "
+        "revela un dato de su vida/carrera tratado con gravedad periodística."
+    ),
+    "libre": (
+        "LIBRE: hook fuerte, UNA sola idea por slide, remate claro al final."
+    ),
+}
 
 # Slot de alto tráfico por defecto por segmento (cold-start: hasta que IG
 # online_followers tenga datos). (dow 0=lun..6=dom, hora 24h local).
