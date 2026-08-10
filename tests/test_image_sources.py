@@ -268,3 +268,22 @@ def test_pinterest_circuit_breaker_con_resultados_malformados(monkeypatch) -> No
     assert p.buscar("a") == []
     assert p.buscar("b") == []  # segunda llamada: NO pega a la red
     assert contador["n"] == 1
+
+
+def test_banco_provider_nombre_de_banda_contenido_en_hint(tmp_path) -> None:
+    """Los hints del LLM traen el sujeto + contexto ("kabala band on stage"):
+    el provider debe matchear cuando el NOMBRE está contenido en el hint."""
+    cx, _ = _db_con_fotos(tmp_path)
+    out = isrc.BancoProvider(cx).buscar("kabala band on stage")
+    assert [c.ruta_o_url for c in out] == ["/tmp/kabala1.jpg"]
+
+
+def test_banco_provider_nombre_corto_sin_falso_positivo(tmp_path) -> None:
+    """Nombres de <4 chars ("edu") no deben matchear por estar contenidos
+    en palabras del hint ("education")."""
+    cx, _ = _db_con_fotos(tmp_path)
+    bid = db.insert(cx, "bands", nombre="edu", ig_handle="edu_mx", activa=1)
+    db.insert(cx, "photos", band_id=bid, path="/tmp/edu1.jpg",
+              source_post_id="e1", usable_meme=1, usada=0, descartada=0,
+              nitidez=80.0)
+    assert isrc.BancoProvider(cx).buscar("coffee education poster") == []

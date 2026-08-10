@@ -53,6 +53,18 @@ def _descargar_cache(url: str) -> Path | None:
     return destino
 
 
+def _nombre_en_hint(nombre: str | None, hint: str) -> bool:
+    """¿El nombre de la banda aparece como palabra dentro del hint? PURO.
+
+    Nombres de <4 chars se descartan para no matchear por substring accidental
+    ("edu" dentro de "education").
+    """
+    nom = (nombre or "").strip().lower()
+    if len(nom) < 4:
+        return False
+    return f" {nom} " in f" {hint.strip().lower()} "
+
+
 class BancoProvider:
     """Fotos reales del banco propio: match del hint contra nombre/handle.
 
@@ -81,6 +93,24 @@ class BancoProvider:
               AND p.usable_meme = 1 AND p.usada = 0 AND p.descartada = 0
             ORDER BY p.nitidez DESC LIMIT ?
         """, (like, like, n))
+        if filas:
+            return [ImagenCandidata(f["path"], "banco") for f in filas]
+        # Dirección inversa: los hints del LLM traen el sujeto + contexto
+        # ("kabala band on stage") — matchear cuando el NOMBRE/handle de la
+        # banda está contenido como palabra dentro del hint.
+        bandas = db.rows(self.cx, "SELECT id, nombre, ig_handle FROM bands")
+        ids = [b["id"] for b in bandas
+               if _nombre_en_hint(b["nombre"], hint)
+               or _nombre_en_hint(b["ig_handle"], hint)]
+        if not ids:
+            return []
+        marcas = ",".join("?" * len(ids))
+        filas = db.rows(self.cx, f"""
+            SELECT p.path FROM photos p
+            WHERE p.band_id IN ({marcas})
+              AND p.usable_meme = 1 AND p.usada = 0 AND p.descartada = 0
+            ORDER BY p.nitidez DESC LIMIT ?
+        """, (*ids, n))
         return [ImagenCandidata(f["path"], "banco") for f in filas]
 
 
