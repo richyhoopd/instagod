@@ -35,8 +35,8 @@ guardar).
 (los bancos de imagen responden mejor en inglés). Concreta y visual: \
 "vintage guitar closeup", no "music concept". Si el tema trata de un sujeto \
 específico (una banda, persona, lugar o producto con nombre propio), INCLUYE \
-ese nombre EXACTO tal cual (sin traducirlo) en el image_hint de los slides \
-donde ese sujeto sea el foco: "kabala band on stage".
+ese nombre EXACTO tal cual (sin traducirlo) en el image_hint de TODOS los \
+slides del set: "kabala band on stage", "kabala rehearsal candid".
 - "caption": pie del post, 1-2 frases + una pregunta que invite a comentar.
 - Español de México, sin emojis en los slides (en el caption sí se permiten).
 - El texto de cada slide debe funcionar SOLO, en pantalla, en letra grande."""

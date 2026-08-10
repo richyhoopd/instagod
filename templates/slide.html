@@ -35,6 +35,10 @@
   .zona.bottom { justify-content:flex-end; }
 
   .txt { line-height:1.22; }
+  /* Con cajas por línea, la caja de la línea siguiente pinta ENCIMA de los
+     descendentes de la anterior (orden de pintado por line box): más aire
+     para que cada descendente viva dentro de su propia caja. */
+  .txt.estilo-background { line-height:1.42; }
   .txt.a-left { align-self:flex-start; margin-left:4%; }
   .txt.a-center { align-self:center; }
   .txt.a-right { align-self:flex-end; margin-right:4%; }
