@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Slideshows</h2>
+
+<p class="muted" style="max-width:760px;">
+  Motor genérico de slideshows: guion (LLM) + compilador de imágenes por preset
+  de estilo. Genera el guion, lo manda a <strong>Telegram</strong> para aprobar
+  y, una vez aprobado, compila y publica.
+</p>
+
+<form hx-post="/slideshows/generar" hx-target="#resultado" hx-swap="innerHTML"
+      style="display:flex; flex-direction:column; gap:10px; max-width:520px; margin:14px 0;">
+  <label>Tema
+    <input name="tema" required placeholder="p.ej. cafeterías de especialidad en GDL">
+  </label>
+  <label>Formato
+    <select name="formato">
+      {% for f in formatos %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Estilo
+    <select name="estilo">
+      {% for e in estilos %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Fuentes (orden, separadas por coma)
+    <input name="fuentes" value="pexels" placeholder="banco,covers,pexels,pinterest">
+  </label>
+  <label>Slides <input name="n_slides" type="number" value="6" min="2" max="10"></label>
+  <label>Contexto/voz (opcional)
+    <input name="contexto" placeholder="tono, marca, reglas extra para el guion">
+  </label>
+  <button type="submit">▶ Generar y mandar a Telegram</button>
+</form>
+<div id="resultado" class="muted"></div>
+{% endblock %}

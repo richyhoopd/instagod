@@ -1490,3 +1490,29 @@ def deezer_purgar() -> RedirectResponse:
     aviso = (f"Purga: {res['bandas']} bandas des-ligadas, {res['releases']} releases "
              "de Deezer borrados. Corre el match preciso de nuevo.")
     return RedirectResponse(f"/deezer?aviso={quote(aviso)}", status_code=303)
+
+
+@app.get("/slideshows", response_class=HTMLResponse)
+def slideshows_vista(request: Request) -> HTMLResponse:
+    """Form para generar un slideshow (motor genérico, spec 2026-08-09)."""
+    return templates.TemplateResponse(request, "slideshows.html", {
+        "formatos": sorted(config.SLIDESHOW_FORMATOS),
+        "estilos": sorted(config.SLIDESHOW_ESTILOS),
+    })
+
+
+@app.post("/slideshows/generar", response_class=HTMLResponse)
+def slideshows_generar(tema: str = Form(...), formato: str = Form("listicle"),
+                       estilo: str = Form("tiktok_bold"),
+                       fuentes: str = Form("pexels"),
+                       n_slides: int = Form(6),
+                       contexto: str = Form("")) -> HTMLResponse:
+    """Lanza el generador de slideshows detached; llega a Telegram a aprobar."""
+    args = ["--tema", tema, "--formato", formato, "--estilo", estilo,
+            "--fuentes", fuentes, "--n-slides", str(n_slides)]
+    if contexto.strip():
+        args += ["--contexto", contexto.strip()]
+    bloqueo = _lanzar_sesion("src.generate_slideshow", *args)
+    if bloqueo:
+        return bloqueo
+    return HTMLResponse("⏳ Generando slideshow… llegará a Telegram para aprobar.")
