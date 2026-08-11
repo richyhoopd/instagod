@@ -18,7 +18,7 @@ _FONT_PX = {"extra_extra_small": 36, "extra_small": 48, "small": 60,
 
 # Color de la caja detrás del texto (text_style=background) según el color
 # del texto: texto claro → caja oscura y viceversa.
-_COLORES_CLAROS = {"blanco", "crema", "amarillo"}
+_COLORES_CLAROS = {"blanco", "crema", "amarillo", "oro"}
 
 
 def _caja_para(color_nombre: str) -> str:
@@ -29,17 +29,25 @@ def _caja_para(color_nombre: str) -> str:
 
 def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
              aspect_ratio: str = "4:5", brief: dict | None = None,
-             formato: str = "", account_slug: str = "gdlscene") -> Slideshow:
+             formato: str = "", account_slug: str = "gdlscene",
+             estilos: dict | None = None) -> Slideshow:
     """guion + estilo + una imagen (o None) por slide → contrato completo.
 
     imagenes[i] corresponde a guion["slides"][i]; acepta cualquier objeto con
     .ruta_o_url y .source (ImagenCandidata de image_sources), o None →
     slide de fondo sólido sin overlay.
 
+    estilos: catálogo de presets a usar (marca+global); None → config
+    .SLIDESHOW_ESTILOS. Permite compilar con presets de marca que no viven
+    en config (p.ej. resueltos dinámicamente por cuenta).
+
     Registra el estilo usado en brief para que contexto_slide pueda recuperar
-    el fondo correcto del preset.
+    el fondo correcto del preset; sella también "fondo" y "chrome" para que
+    el contrato sea AUTOCONTENIDO (el render no necesita volver a buscar el
+    preset de marca, que puede no vivir en config).
     """
-    preset = config.SLIDESHOW_ESTILOS[estilo]  # KeyError si no existe: a propósito
+    catalogo = estilos if estilos is not None else config.SLIDESHOW_ESTILOS
+    preset = catalogo[estilo]  # KeyError si no existe: a propósito
     slides: list[Slide] = []
     for sl, img in zip(guion["slides"], imagenes):
         rol = sl.get("rol", "punto")
@@ -58,6 +66,8 @@ def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
     # Registra estilo en brief para que contexto_slide lo recupere
     brief_final = dict(brief or {})
     brief_final.setdefault("estilo", estilo)
+    brief_final.setdefault("fondo", preset.get("fondo", "negro"))
+    brief_final.setdefault("chrome", preset.get("chrome"))
     return Slideshow(title=guion["hook"], aspect_ratio=aspect_ratio,
                      slides=slides, caption=guion.get("caption", ""),
                      brief=brief_final, formato=formato,
@@ -84,9 +94,18 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
             "anchor": t.text_anchor,
             "v_anchor": t.text_vertical_anchor,
         })
-    # Obtiene fondo del preset registrado en brief
-    preset = config.SLIDESHOW_ESTILOS.get(s.brief.get("estilo", ""), {})
-    fondo = preset.get("fondo", "negro")
+    # Fondo: sale del brief (contrato autocontenido); filas viejas
+    # (pre-multi-marca) no lo tienen → lookup en config como antes.
+    fondo = s.brief.get("fondo")
+    if not fondo:
+        preset_cfg = config.SLIDESHOW_ESTILOS.get(s.brief.get("estilo", ""), {})
+        fondo = preset_cfg.get("fondo", "negro")
+    chrome_brief = s.brief.get("chrome") or None
+    chrome = None
+    if chrome_brief:
+        logo = chrome_brief.get("logo")
+        chrome = {"handle": chrome_brief.get("handle", ""),
+                  "logo_src": _to_src(logo) if logo else None}
     return {
         "width": width,
         "height": height,
@@ -95,7 +114,10 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
         "grid_cols": cols,
         "grid_rows": rows,
         "overlay_opacity": sl.background_opacity,
-        "font_faces": [{"name": nombre, "url": (FONTS_DIR / archivo).as_uri()}
+        "chrome": chrome,
+        "font_faces": [{"name": nombre,
+                        "url": (FONTS_DIR / archivo).as_uri(),
+                        "fmt": "woff2" if archivo.endswith(".woff2") else "truetype"}
                        for nombre, archivo in config.SLIDESHOW_FUENTES.items()],
         "items": items,
     }

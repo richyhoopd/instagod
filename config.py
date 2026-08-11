@@ -229,6 +229,11 @@ SLIDESHOW_PALETA = {
     "crema": "#f5efe0",
     "rojo": "#c0392b",
     "amarillo": "#f1c40f",
+    # Pensión+ (conversión aproximada de los OKLCH de tulanaya/DESIGN.md):
+    "cobalto": "#2F52D9",
+    "navy": "#1A2142",
+    "oro": "#EAC366",
+    "oro_profundo": "#A57D2A",
 }
 # Catálogo de fuentes disponibles → archivo en templates/assets/fonts/.
 SLIDESHOW_FUENTES = {
@@ -237,6 +242,8 @@ SLIDESHOW_FUENTES = {
     "Poppins-SemiBold": "Poppins-SemiBold.ttf",
     "Tinos-Bold": "Tinos-Bold.ttf",
     "Tinos-Regular": "Tinos-Regular.ttf",
+    "Erode-Semibold": "erode-600.woff2",
+    "Erode-Bold": "erode-700.woff2",
 }
 # Temperatura del guion de slides (más bajo que memes: estructura > locura).
 SLIDESHOW_TEMPERATURE = float(_get("SLIDESHOW_TEMPERATURE", "1.0") or "1.0")

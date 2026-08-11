@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <style>
   {% for f in font_faces %}
-  @font-face { font-family:'{{ f.name }}'; src:url('{{ f.url }}') format('truetype'); }
+  @font-face { font-family:'{{ f.name }}'; src:url('{{ f.url }}') format('{{ f.fmt }}'); }
   {% endfor %}
 
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -27,7 +27,9 @@
   /* Tres zonas verticales apiladas; cada text_item cae en la suya. */
   .zonas {
     position:absolute; inset:0; display:flex; flex-direction:column;
-    justify-content:space-between; padding:{{ (height * 0.06) | round | int }}px 0;
+    justify-content:space-between;
+    padding:{{ (height * 0.06) | round | int }}px 0
+            {{ (height * (0.10 if chrome else 0.06)) | round | int }}px 0;
   }
   .zona { display:flex; flex-direction:column; width:100%; }
   .zona.top { justify-content:flex-start; }
@@ -53,6 +55,16 @@
     padding:0.08em 0.34em; border-radius:0.12em;
   }
   .txt.estilo-text span.linea { text-shadow:0 2px 14px rgba(0,0,0,.55); }
+
+  .chrome {
+    position:absolute; left:0; right:0; bottom:{{ (height * 0.025) | round | int }}px;
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    font-family:'Poppins-SemiBold',sans-serif;
+    font-size:{{ (width * 0.028) | round | int }}px;
+    color:rgba(255,255,255,.92); letter-spacing:.04em; z-index:10;
+    text-shadow:0 1px 8px rgba(0,0,0,.5);
+  }
+  .chrome img { height:{{ (width * 0.04) | round | int }}px; display:block; }
 </style>
 </head>
 <body>
@@ -80,6 +92,12 @@
       </div>
       {% endfor %}
     </div>
+    {% if chrome %}
+    <div class="chrome">
+      {% if chrome.logo_src %}<img src="{{ chrome.logo_src }}">{% endif %}
+      <span>{{ chrome.handle }}</span>
+    </div>
+    {% endif %}
   </div>
   <script>
     // Auto-fit por text_item: encoge la fuente hasta caber en su zona,

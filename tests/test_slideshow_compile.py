@@ -105,3 +105,42 @@ def test_compilar_registra_estilo_en_brief() -> None:
                      brief={"tema": "test", "estilo": "editorial"})
     assert s2.brief["estilo"] == "editorial"  # respeta el existente
     assert s2.brief["tema"] == "test"  # preserva otros campos
+
+
+def test_compilar_acepta_estilos_de_marca() -> None:
+    estilos = {"pensionmas": {"texto": "blanco", "fondo": "navy",
+                              "background_opacity": 0.3,
+                              "chrome": {"handle": "@pensionmas", "logo": None},
+                              "roles": {"hook": {"font": "Erode-Bold",
+                                                 "font_size": "extra_large",
+                                                 "text_style": "background",
+                                                 "text_vertical_anchor": "center"},
+                                        "punto": {"font": "Erode-Semibold",
+                                                  "font_size": "large",
+                                                  "text_style": "background",
+                                                  "text_vertical_anchor": "center"},
+                                        "cta": {"font": "Poppins-SemiBold",
+                                                "font_size": "medium",
+                                                "text_style": "background",
+                                                "text_vertical_anchor": "bottom"}}}}
+    s = sc.compilar(_guion(), estilo="pensionmas", imagenes=[None] * 3,
+                    estilos=estilos, account_slug="pensionmas")
+    assert s.brief["fondo"] == "navy"
+    assert s.brief["chrome"]["handle"] == "@pensionmas"
+    assert s.slides[0].text_items[0].font == "Erode-Bold"
+    import config as cfg
+    ctx = sc.contexto_slide(s, 0)
+    assert ctx["bg_color"] == cfg.SLIDESHOW_PALETA["navy"]
+    assert ctx["chrome"] == {"handle": "@pensionmas", "logo_src": None}
+
+
+def test_contexto_slide_sin_chrome_es_none() -> None:
+    s = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=[None] * 3)
+    assert sc.contexto_slide(s, 0)["chrome"] is None
+
+
+def test_font_faces_declaran_formato() -> None:
+    s = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=[None] * 3)
+    faces = {f["name"]: f["fmt"] for f in sc.contexto_slide(s, 0)["font_faces"]}
+    assert faces["Erode-Bold"] == "woff2"
+    assert faces["Anton-Regular"] == "truetype"

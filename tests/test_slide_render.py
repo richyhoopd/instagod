@@ -41,3 +41,27 @@ def test_render_slide_cta_estilo_editorial(tmp_path) -> None:
     ctx = sc.contexto_slide(show, 2)
     png = compose.render_card("slide.html", ctx, out_path=tmp_path / "s2.png")
     assert png.exists() and png.stat().st_size > 10_000
+
+
+def test_render_slide_con_chrome(tmp_path) -> None:
+    """El pie de marca (handle) rinde sin romper el auto-fit."""
+    estilos = {"pensionmas": {"texto": "blanco", "fondo": "navy",
+                              "background_opacity": 0.3,
+                              "chrome": {"handle": "@pensionmas", "logo": None},
+                              "roles": {"hook": {"font": "Erode-Bold",
+                                                 "font_size": "extra_large",
+                                                 "text_style": "background",
+                                                 "text_vertical_anchor": "center"},
+                                        "punto": {"font": "Erode-Semibold",
+                                                  "font_size": "large",
+                                                  "text_style": "background",
+                                                  "text_vertical_anchor": "center"},
+                                        "cta": {"font": "Poppins-SemiBold",
+                                                "font_size": "medium",
+                                                "text_style": "background",
+                                                "text_vertical_anchor": "bottom"}}}}
+    show = sc.compilar(_guion(), estilo="pensionmas", imagenes=[None] * 3,
+                       estilos=estilos)
+    png = compose.render_card("slide.html", sc.contexto_slide(show, 0),
+                              out_path=tmp_path / "chrome.png")
+    assert png.exists() and png.stat().st_size > 10_000
