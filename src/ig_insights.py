@@ -154,8 +154,13 @@ def link_bands(cx, sheet_rows: list[dict[str, Any]]) -> int:
         media_id = str(row.get("ig_post_id", "")).strip()
         if not media_id:
             continue
+        # account_id = 1 (gdlscene): los ids de fila del Sheet son
+        # auto-incrementales POR HOJA, así que un sheet_row_id de otra marca
+        # puede colisionar con uno de gdlscene. sync_posts (todo este módulo)
+        # solo lee el Sheet de gdlscene en v1, así que cruzar sin filtrar por
+        # cuenta ligaría posts de IG a la banda equivocada de otra marca.
         queue = cx.execute(
-            "SELECT id, band_id FROM content_queue WHERE sheet_row_id = ?",
+            "SELECT id, band_id FROM content_queue WHERE sheet_row_id = ? AND account_id = 1",
             (str(row.get("id", "")),)).fetchone()
         if not queue or queue["band_id"] is None:
             continue

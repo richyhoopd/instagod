@@ -101,10 +101,16 @@ def pull_status(cx=None) -> int:
     own = cx is None
     cx = cx or db.connect()
     try:
+        # account_id = 1 (gdlscene): los ids de fila del Sheet son
+        # auto-incrementales POR HOJA, así que un sheet_row_id de otra marca
+        # puede colisionar con uno de gdlscene. pull_status solo lee el Sheet
+        # de gdlscene (v1), así que cruzar sheet_row_id sin filtrar por cuenta
+        # contaminaría filas de otras marcas con el status equivocado.
         enviadas = db.rows(cx, """
             SELECT id, photo_id, sheet_row_id, status FROM content_queue
              WHERE sheet_row_id IS NOT NULL
                AND status IN (?, ?)
+               AND account_id = 1
         """, (db.QUEUE_EN_SHEET, db.QUEUE_PUBLICADO))
         if not enviadas:
             print("No hay filas enviadas al Sheet que rastrear.")

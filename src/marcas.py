@@ -60,11 +60,16 @@ def _json_o(default, crudo, *, slug: str, campo: str):
 def _fila_a_marca(fila: dict) -> Marca:
     slug = fila["slug"]
     slots_raw = (fila.get("posting_slots") or "").strip()
+    ig_handle = (fila.get("ig_handle") or "").strip()
+    if ig_handle:
+        # El seed de Fase A (gdlscene) guardó ig_handle sin "@"; normaliza
+        # aquí para que todos los consumidores vean el mismo formato.
+        ig_handle = "@" + ig_handle.lstrip("@")
     return Marca(
         id=fila["id"],
         slug=slug,
         nombre=fila.get("nombre") or slug,
-        ig_handle=fila.get("ig_handle") or "",
+        ig_handle=ig_handle,
         color_marca=fila.get("color_marca") or "#1b5e3f",
         voz=(fila.get("voz") or "").strip(),
         fuentes=_json_o(["pexels"], fila.get("fuentes_imagen"),

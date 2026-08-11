@@ -28,6 +28,13 @@ jobs:
       FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
       CROSSPOST_X: ${{ vars.CROSSPOST_X || '1' }}
       CROSSPOST_FB: ${{ vars.CROSSPOST_FB || '1' }}
+      # Multi-marca: credenciales con sufijo __<SLUG>. GitHub Actions no
+      # exporta secrets automáticamente, hay que mapearlos uno a uno aquí
+      # para que marcas_en_env() los vea en el worker. Mientras el secret no
+      # exista queda como cadena vacía y publicar_marca salta esa marca.
+      SHEET_ID__PENSIONMAS: ${{ secrets.SHEET_ID__PENSIONMAS }}
+      IG_USER_ID__PENSIONMAS: ${{ secrets.IG_USER_ID__PENSIONMAS }}
+      IG_ACCESS_TOKEN__PENSIONMAS: ${{ secrets.IG_ACCESS_TOKEN__PENSIONMAS }}
     steps:
       - uses: actions/checkout@v4
 

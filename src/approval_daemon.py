@@ -180,10 +180,13 @@ def construir_app(token: str, chat_id: str, slug: str,
     """
     app = Application.builder().token(token).build()
     app.bot_data["slug"] = slug
-    solo_tu = filters.Chat(int(chat_id))
     app.add_handler(CallbackQueryHandler(on_aprobacion, pattern=r"^(aprobar|rechazar):"))
     app.add_handler(CallbackQueryHandler(on_recomponer, pattern=r"^(regenerar|plantilla):"))
     if interactivo:
+        # int(chat_id) vive aquí adentro (único uso): un TELEGRAM_CHAT_ID no
+        # numérico en una marca no-interactiva ya no revienta el arranque de
+        # TODAS las marcas.
+        solo_tu = filters.Chat(int(chat_id))
         app.add_handler(MessageHandler(filters.PHOTO & solo_tu, bot.on_photo))
         app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & solo_tu, bot.on_reply))
         app.add_handler(CallbackQueryHandler(bot.on_callback,

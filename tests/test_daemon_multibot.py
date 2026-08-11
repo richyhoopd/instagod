@@ -28,6 +28,18 @@ def test_marcas_con_bot_filtra_y_avisa(capsys) -> None:
     assert "TELEGRAM_BOT_TOKEN__PENSIONMAS" in capsys.readouterr().out
 
 
+def test_construir_app_no_interactivo_chat_id_no_numerico_no_truena() -> None:
+    # pensionmas u otra marca no-interactiva no necesita chat_id numérico:
+    # int(chat_id) solo se evalúa si interactivo=True (único uso real).
+    app = ad.construir_app("123:AAA", "@canal", "pensionmas", interactivo=False)
+    assert app.bot_data["slug"] == "pensionmas"
+
+
+def test_construir_app_interactivo_chat_id_no_numerico_lanza() -> None:
+    with pytest.raises(ValueError):
+        ad.construir_app("123:AAA", "@canal", "gdlscene", interactivo=True)
+
+
 @dataclass
 class _FakeUpdater:
     running: bool = False

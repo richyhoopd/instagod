@@ -299,9 +299,14 @@ def reagendar_publicados(year: int, month: int, desde: date | None = None) -> di
 
     cx = db.connect()
     try:
+        # account_id = 1 (gdlscene): los ids de fila del Sheet son
+        # auto-incrementales POR HOJA, así que un sheet_row_id de otra marca
+        # puede colisionar con uno de gdlscene. reagendar_publicados solo
+        # escribe al Sheet de gdlscene (v1); sin este filtro reagendaría (y
+        # empujaría a sheets.update_row) filas de otras marcas por accidente.
         posts = db.rows(cx, """
             SELECT id, sheet_row_id FROM content_queue
-             WHERE status = ? ORDER BY scheduled_datetime
+             WHERE status = ? AND account_id = 1 ORDER BY scheduled_datetime
         """, (db.QUEUE_PUBLICADO,))
         n = 0
         for post, slot in zip(posts, slots):

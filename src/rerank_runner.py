@@ -114,7 +114,16 @@ def main() -> int:
             print(f"\n  ({len(cambios)} cambio(s) — usa --no-dry-run para aplicar)")
             return 0
 
-        # Aplicar: actualiza DB y Sheet
+        # Aplicar: actualiza DB y Sheet. Guard: el Sheet al que escribimos
+        # (sheets.update_row) es SIEMPRE el de gdlscene en v1 — los ids de
+        # fila son auto-incrementales por hoja, así que escribir con un
+        # sheet_row_id de otra cuenta pisaría una fila ajena por colisión de
+        # ids. Aborta ANTES de tocar nada si la cuenta pedida no es gdlscene.
+        if account_id != 1:
+            print(f"❌ rerank solo soporta gdlscene en v1 (pediste --cuenta {args.cuenta!r}); "
+                  "abortando antes de escribir al Sheet.")
+            return 1
+
         from src import sheets
         for qid, sid, _, nuevo_slot in cambios:
             db.update(cx, "content_queue", qid, scheduled_datetime=nuevo_slot)
