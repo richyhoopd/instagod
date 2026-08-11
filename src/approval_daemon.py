@@ -1,33 +1,42 @@
 """Daemon de aprobación: el ÚNICO poller de Telegram (reemplaza correr bot.py
 y los generate_* a mano para resolver).
 
-Dos flujos conviven sobre un solo polling:
+Multi-marca: una Application PTB por marca (con bot propio en .env),
+todas corriendo en un solo event loop (`correr`). Sigue siendo el ÚNICO
+poller — ahora con N bots en vez de uno.
+
+Dos flujos conviven sobre cada polling:
 
   1. Flujo ASÍNCRONO (motor de segmentos): los generadores encolan propuestas con
      `approval.encolar_pendiente` y las mandan con `approval.enviar_a_telegram`
      (botones `aprobar:{qid}` / `rechazar:{qid}`). Este daemon los resuelve:
      aprobar → `approval.aprobar` (slot de alto tráfico, Sheet approved, en_sheet);
-     rechazar → `approval.rechazar`.
+     rechazar → `approval.rechazar`. Estos handlers están en TODAS las marcas.
 
   2. Flujo INTERACTIVO (memes a mano): se REUSAN tal cual los handlers de `bot.py`
      (foto → genera → ✅/❌/🔄/🎨). No se mueve su lógica para no romper el flujo
      vivo; el daemon solo los registra. Sus callbacks usan prefijos distintos
      (`approve`/`reject`/`regen`/`tpl`) así que no chocan con `aprobar`/`rechazar`.
+     Este flujo es SOLO de gdlscene (la marca original).
 
 Guardia: un lock por archivo evita arrancar dos daemons (que compitan por el
-mismo getUpdates). `run_polling()`.
+mismo getUpdates).
 
 Verificación manual (no hay test del poller, sí de sus helpers puros en
-tests/test_approval.py):
+tests/test_approval.py y del ciclo de vida en tests/test_daemon_multibot.py):
   1. Asegúrate de que NO esté corriendo bot.py ni otro daemon.
   2. `.venv/bin/python -m src.approval_daemon`
-  3. Manda una foto al bot → debe responder y generar (flujo interactivo intacto).
-  4. Encola una propuesta desde un generador → llega el mensaje con Aprobar/Rechazar;
-     al tocar Aprobar, la fila pasa a en_sheet con slot, y aparece la confirmación.
+  3. Manda una foto al bot de gdlscene → debe responder y generar (flujo
+     interactivo intacto, solo esa marca).
+  4. Encola una propuesta desde un generador de cualquier marca → llega el
+     mensaje con Aprobar/Rechazar al bot de esa marca; al tocar Aprobar, la
+     fila pasa a en_sheet con slot, y aparece la confirmación.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import signal
 import sys
 
 from telegram import Update
@@ -42,6 +51,7 @@ from telegram.ext import (
 import bot  # se REUSAN sus handlers (no se mueve su lógica)
 import config
 from src import approval, audience, daemon_health, db, poller_lock
+from src import marcas as marcas_mod
 
 
 def _pretty(slot_iso: str) -> str:
@@ -144,60 +154,114 @@ async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await _resolver_msg(query, "❌ Rechazado")
 
 
-async def _latido_loop(app: Application) -> None:
-    """Escribe el latido cada N segundos SÓLO si el updater está corriendo.
+def marcas_con_bot(lista, creds_de=None):
+    """PURO: (marca, creds) de las que tienen bot completo; avisa las que no."""
+    creds_de = creds_de or config.account_creds
+    pares = []
+    for m in lista:
+        creds = creds_de(m.slug)
+        if creds.get("TELEGRAM_BOT_TOKEN") and creds.get("TELEGRAM_CHAT_ID"):
+            pares.append((m, creds))
+        else:
+            faltan = [f"TELEGRAM_BOT_TOKEN__{m.slug.upper()}"
+                      if not creds.get("TELEGRAM_BOT_TOKEN") else None,
+                      f"TELEGRAM_CHAT_ID__{m.slug.upper()}"
+                      if not creds.get("TELEGRAM_CHAT_ID") else None]
+            print(f"[daemon] marca {m.slug} sin bot: faltan "
+                  + ", ".join(v for v in faltan if v))
+    return pares
 
-    Si el loop se congela, esta corrutina deja de correr → latido viejo. Si el
-    updater muere pero el loop vive, el guard `updater.running` omite la escritura
-    → latido viejo. En ambos casos el watchdog externo reinicia el daemon.
+
+def construir_app(token: str, chat_id: str, slug: str,
+                  *, interactivo: bool = False) -> Application:
+    """Una Application PTB por marca, con los mismos handlers de aprobación.
+
+    Los handlers interactivos de bot.py (foto→meme, replies) son gdlscene-only.
     """
-    # Latido inicial inmediato: cubre la ventana de arranque (antes de que el
-    # updater levante) para que el watchdog no reinicie un daemon sano recién
-    # nacido. Si el updater NUNCA levanta (bootstrap atascado), este latido
-    # envejece y el watchdog reinicia — correcto.
-    daemon_health.escribir_latido()
+    app = Application.builder().token(token).build()
+    app.bot_data["slug"] = slug
+    solo_tu = filters.Chat(int(chat_id))
+    app.add_handler(CallbackQueryHandler(on_aprobacion, pattern=r"^(aprobar|rechazar):"))
+    app.add_handler(CallbackQueryHandler(on_recomponer, pattern=r"^(regenerar|plantilla):"))
+    if interactivo:
+        app.add_handler(MessageHandler(filters.PHOTO & solo_tu, bot.on_photo))
+        app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & solo_tu, bot.on_reply))
+        app.add_handler(CallbackQueryHandler(bot.on_callback,
+                                             pattern=r"^(approve|reject|regen|tpl):"))
+    app.add_error_handler(bot.on_error)
+    return app
+
+
+def _todos_corriendo(apps) -> bool:
+    return all(getattr(a.updater, "running", False) for a in apps)
+
+
+async def _latido_loop_multi(apps) -> None:
+    """Latido SOLO si TODOS los updaters corren: un bot caído = latido viejo →
+    el watchdog reinicia el daemon completo (todas las marcas)."""
+    daemon_health.escribir_latido()  # latido inicial: cubre el arranque
     while True:
         try:
-            if app.updater is not None and app.updater.running:
+            if _todos_corriendo(apps):
                 daemon_health.escribir_latido()
-        except Exception as e:  # el latido jamás debe tumbar el daemon
+        except Exception as e:  # el latido jamás tumba el daemon
             print(f"WARNING latido: {e}", file=sys.stderr)
         await asyncio.sleep(daemon_health.LATIDO_INTERVALO_SEG)
 
 
-async def _post_init(app: Application) -> None:
-    app.create_task(_latido_loop(app))
+async def _esperar_senal() -> None:
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+
+async def correr(apps) -> None:
+    """Ciclo de vida de N Applications en un solo loop."""
+    for app in apps:
+        await app.initialize()
+    for app in apps:
+        await app.start()
+    for app in apps:
+        # bootstrap_retries=-1: parpadeo de red al arrancar reintenta indefinido
+        await app.updater.start_polling(drop_pending_updates=True,
+                                        bootstrap_retries=-1)
+    latido = asyncio.create_task(_latido_loop_multi(apps))
+    try:
+        await _esperar_senal()
+    finally:
+        latido.cancel()
+        for app in reversed(apps):
+            with contextlib.suppress(Exception):
+                await app.updater.stop()
+        for app in reversed(apps):
+            with contextlib.suppress(Exception):
+                await app.stop()
+        for app in reversed(apps):
+            with contextlib.suppress(Exception):
+                await app.shutdown()
 
 
 def main() -> None:
-    if not config.TELEGRAM_CHAT_ID:
-        raise RuntimeError("Falta TELEGRAM_CHAT_ID en el .env")
     poller_lock.adquirir()
-
-    app = (Application.builder()
-           .token(config.TELEGRAM_BOT_TOKEN)
-           .post_init(_post_init)
-           .build())
-    solo_tu = filters.Chat(int(config.TELEGRAM_CHAT_ID))
-
-    # Flujo asíncrono (motor): aprobar/rechazar + regenerar/plantilla (patrones
-    # estrictos para no tragarse los callbacks del flujo interactivo de bot.py).
-    app.add_handler(CallbackQueryHandler(on_aprobacion, pattern=r"^(aprobar|rechazar):"))
-    app.add_handler(CallbackQueryHandler(on_recomponer, pattern=r"^(regenerar|plantilla):"))
-
-    # Flujo interactivo REUSADO de bot.py (foto + approve/reject/regen/tpl +
-    # replies 'texto:'/'feedback:' sobre la foto generada).
-    app.add_handler(MessageHandler(filters.PHOTO & solo_tu, bot.on_photo))
-    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & solo_tu, bot.on_reply))
-    app.add_handler(CallbackQueryHandler(bot.on_callback,
-                                         pattern=r"^(approve|reject|regen|tpl):"))
-    app.add_error_handler(bot.on_error)
-
-    print("Daemon de aprobación (único poller) escuchando. Ctrl+C para salir.")
-    # bootstrap_retries=-1: un parpadeo de red al ARRANCAR reintenta indefinido
-    # en vez de tumbar el poller (fue el gatillo del incidente 14/jul). El
-    # watchdog (com.gdlscene.daemon-watchdog) cubre las caídas ya en marcha.
-    app.run_polling(drop_pending_updates=True, bootstrap_retries=-1)
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        lista = marcas_mod.listar(cx)
+    finally:
+        cx.close()
+    pares = marcas_con_bot(lista)
+    if not pares:
+        raise RuntimeError("Ninguna marca tiene TELEGRAM_BOT_TOKEN/CHAT_ID: "
+                           "no hay bots que polear")
+    apps = [construir_app(creds["TELEGRAM_BOT_TOKEN"], creds["TELEGRAM_CHAT_ID"],
+                          m.slug, interactivo=(m.slug == "gdlscene"))
+            for m, creds in pares]
+    print(f"Daemon multi-bot: {len(apps)} marca(s) — "
+          + ", ".join(m.slug for m, _ in pares))
+    asyncio.run(correr(apps))
 
 
 if __name__ == "__main__":
