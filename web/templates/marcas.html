@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h2>Marcas</h2>
+
+{% if mensaje %}<p class="muted">{{ mensaje }}</p>{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th>Nombre</th><th>Slug</th><th>Handle</th><th>Activa</th>
+      <th>Credenciales</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for fila in filas %}
+    <tr class="{{ '' if fila.m.activa else 'inactiva' }}">
+      <td>{{ fila.m.nombre }}</td>
+      <td>{{ fila.m.slug }}</td>
+      <td>{{ fila.m.ig_handle }}</td>
+      <td>{{ '✅' if fila.m.activa else '—' }}</td>
+      <td>
+        {% if fila.faltan %}
+          {% for var in fila.faltan %}<span class="chip" style="background:#fbeaea;color:#b23c3c;">{{ var }}</span>{% endfor %}
+        {% else %}
+          <span class="chip">✅ credenciales completas</span>
+        {% endif %}
+      </td>
+      <td><a href="/marcas?slug={{ fila.m.slug }}">editar</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3>Alta / edición de marca</h3>
+<p class="muted" style="max-width:640px;">
+  Los tokens van en .env con sufijo __SLUG — esta pantalla nunca los guarda.
+</p>
+
+<form hx-post="/marcas/guardar" hx-target="#resultado-marca" hx-swap="innerHTML"
+      style="display:flex; flex-direction:column; gap:10px; max-width:520px; margin:14px 0;">
+  <label>Slug <input name="slug" required placeholder="pensionmas" value="{{ editar.slug if editar else '' }}"></label>
+  <label>Nombre <input name="nombre" placeholder="PensionMás" value="{{ editar.nombre if editar else '' }}"></label>
+  <label>Handle IG <input name="ig_handle" placeholder="@pensionmas" value="{{ editar.ig_handle if editar else '' }}"></label>
+  <label>Color de marca <input name="color_marca" placeholder="#1b5e3f" value="{{ editar.color_marca if editar else '' }}"></label>
+  <label>Voz <textarea name="voz" rows="3" placeholder="tono, reglas de estilo">{{ editar.voz if editar else '' }}</textarea></label>
+  <label>Fuentes de imagen (CSV) <input name="fuentes_imagen" placeholder="pexels,pinterest" value="{{ editar.fuentes|join(',') if editar else '' }}"></label>
+  <label>Formatos (CSV) <input name="formatos" placeholder="listicle,libre" value="{{ editar.formatos|join(',') if editar else '' }}"></label>
+  <label>Posting slots (CSV) <input name="posting_slots" placeholder="09:00,14:00,19:00" value="{{ editar.posting_slots|join(',') if editar and editar.posting_slots else '' }}"></label>
+  <label>Logo path <input name="logo_path" placeholder="assets/logos/marca.png" value="{{ editar.logo_path if editar and editar.logo_path else '' }}"></label>
+  <label>Estilos (JSON) <textarea name="estilos_json" rows="4" placeholder="{}">{{ editar.estilos|tojson if editar and editar.estilos else '' }}</textarea></label>
+  <label>Activa
+    <select name="activa">
+      <option value="1" {{ 'selected' if not editar or editar.activa else '' }}>Sí</option>
+      <option value="0" {{ 'selected' if editar and not editar.activa else '' }}>No</option>
+    </select>
+  </label>
+  <button type="submit">Guardar</button>
+</form>
+<div id="resultado-marca" class="muted"></div>
+{% endblock %}

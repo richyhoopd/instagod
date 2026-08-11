@@ -13,18 +13,25 @@
   <label>Tema
     <input name="tema" required placeholder="p.ej. cafeterías de especialidad en GDL">
   </label>
+  <label>Marca
+    <select name="marca">
+      {% for m in marcas_activas %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+    </select>
+  </label>
   <label>Formato
     <select name="formato">
+      <option value="">(default del perfil)</option>
       {% for f in formatos %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
     </select>
   </label>
   <label>Estilo
     <select name="estilo">
+      <option value="">(default del perfil)</option>
       {% for e in estilos %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
     </select>
   </label>
-  <label>Fuentes (orden, separadas por coma)
-    <input name="fuentes" value="pexels" placeholder="banco,covers,pexels,pinterest">
+  <label>Fuentes (orden, separadas por coma; vacío = default del perfil)
+    <input name="fuentes" placeholder="banco,covers,pexels,pinterest">
   </label>
   <label>Slides <input name="n_slides" type="number" value="6" min="2" max="10"></label>
   <label>Contexto/voz (opcional)

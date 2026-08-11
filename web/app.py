@@ -1492,24 +1492,106 @@ def deezer_purgar() -> RedirectResponse:
     return RedirectResponse(f"/deezer?aviso={quote(aviso)}", status_code=303)
 
 
+@app.get("/marcas", response_class=HTMLResponse)
+def marcas_vista(request: Request) -> HTMLResponse:
+    """Marcas registradas + checklist de credenciales de .env por marca."""
+    from src import marcas as marcas_mod
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        lista = marcas_mod.listar(cx, solo_activas=False)
+        slug_editar = request.query_params.get("slug", "")
+        editar = None
+        if slug_editar:
+            try:
+                editar = marcas_mod.cargar(cx, slug_editar)
+            except ValueError:
+                editar = None
+    finally:
+        cx.close()
+    filas = [{"m": m, "faltan": marcas_mod.creds_faltantes(m.slug)}
+             for m in lista]
+    return templates.TemplateResponse(request, "marcas.html", {
+        "filas": filas, "mensaje": request.query_params.get("msg", ""),
+        "editar": editar,
+    })
+
+
+@app.post("/marcas/guardar", response_class=HTMLResponse)
+def marcas_guardar(slug: str = Form(...), nombre: str = Form(""),
+                   ig_handle: str = Form(""), color_marca: str = Form(""),
+                   voz: str = Form(""), fuentes_imagen: str = Form(""),
+                   formatos: str = Form(""), posting_slots: str = Form(""),
+                   estilos_json: str = Form(""), logo_path: str = Form(""),
+                   activa: str = Form("1")) -> HTMLResponse:
+    """Upsert del PERFIL de la marca. Los secretos van en .env, nunca aquí."""
+    import json as json_mod
+    slug = slug.strip().lower()
+    if estilos_json.strip():
+        try:
+            json_mod.loads(estilos_json)
+        except ValueError as e:
+            return HTMLResponse(f"⚠️ estilos_json inválido: {e}")
+    campos = {
+        "nombre": nombre.strip() or slug,
+        "ig_handle": ig_handle.strip(),
+        "color_marca": color_marca.strip() or "#1b5e3f",
+        "voz": voz.strip(),
+        "fuentes_imagen": json_mod.dumps(
+            [f.strip() for f in fuentes_imagen.split(",") if f.strip()])
+            if fuentes_imagen.strip() else None,
+        "formatos": json_mod.dumps(
+            [f.strip() for f in formatos.split(",") if f.strip()])
+            if formatos.strip() else None,
+        "posting_slots": posting_slots.strip() or None,
+        "estilos_json": estilos_json.strip() or None,
+        "logo_path": logo_path.strip() or None,
+        "activa": 1 if activa == "1" else 0,
+    }
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        fila = db.rows(cx, "SELECT id FROM accounts WHERE slug = ?", (slug,))
+        if fila:
+            db.update(cx, "accounts", fila[0]["id"], **campos)
+        else:
+            db.insert(cx, "accounts", slug=slug, ciudad="", **campos)
+    finally:
+        cx.close()
+    return HTMLResponse(f"✅ Marca {slug} guardada. "
+                        '<a href="/marcas">volver</a>')
+
+
 @app.get("/slideshows", response_class=HTMLResponse)
 def slideshows_vista(request: Request) -> HTMLResponse:
     """Form para generar un slideshow (motor genérico, spec 2026-08-09)."""
+    from src import marcas as marcas_mod
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        marcas_activas = [m.slug for m in marcas_mod.listar(cx, solo_activas=True)]
+    finally:
+        cx.close()
     return templates.TemplateResponse(request, "slideshows.html", {
         "formatos": sorted(config.SLIDESHOW_FORMATOS),
         "estilos": sorted(config.SLIDESHOW_ESTILOS),
+        "marcas_activas": marcas_activas,
     })
 
 
 @app.post("/slideshows/generar", response_class=HTMLResponse)
-def slideshows_generar(tema: str = Form(...), formato: str = Form("listicle"),
-                       estilo: str = Form("tiktok_bold"),
-                       fuentes: str = Form("pexels"),
-                       n_slides: int = Form(6),
+def slideshows_generar(tema: str = Form(...), marca: str = Form("gdlscene"),
+                       formato: str = Form(""), estilo: str = Form(""),
+                       fuentes: str = Form(""), n_slides: int = Form(6),
                        contexto: str = Form("")) -> HTMLResponse:
     """Lanza el generador de slideshows detached; llega a Telegram a aprobar."""
-    args = ["--tema", tema, "--formato", formato, "--estilo", estilo,
-            "--fuentes", fuentes, "--n-slides", str(n_slides)]
+    args = ["--tema", tema, "--marca", marca, "--n-slides", str(n_slides)]
+    if formato.strip():
+        args += ["--formato", formato.strip()]
+    if estilo.strip():
+        args += ["--estilo", estilo.strip()]
+    if fuentes.strip():
+        args += ["--fuentes", fuentes.strip()]
     if contexto.strip():
         args += ["--contexto", contexto.strip()]
     bloqueo = _lanzar_sesion("src.generate_slideshow", *args)
