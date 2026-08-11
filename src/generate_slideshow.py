@@ -14,7 +14,6 @@ import argparse
 import json
 import time
 
-import config
 from src import (
     approval,
     compose,
@@ -27,13 +26,28 @@ from src import (
 )
 
 
-def generar(cx, tema: str, *, formato: str = "listicle",
-            estilo: str = "tiktok_bold", fuentes: tuple[str, ...] = ("pexels",),
+def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = None,
+            estilo: str | None = None, fuentes: tuple[str, ...] | None = None,
             n_slides: int = 6, aspect: str = "4:5", contexto: str | None = None,
             dry_run: bool = False) -> int | None:
-    """Genera el set completo; queue_id, o None en dry-run."""
+    """Genera el set con el PERFIL de la marca; queue_id o None en dry-run."""
+    from src import marcas as marcas_mod
+    m = marcas_mod.cargar(cx, marca)
+    formato = formato or (m.formatos[0] if m.formatos else "listicle")
+    if formato not in m.formatos:
+        raise ValueError(f"La marca {m.slug} no tiene habilitado el formato "
+                         f"{formato!r} (permitidos: {m.formatos})")
+    catalogo = marcas_mod.estilos_de(m)
+    estilo = estilo or (next(iter(m.estilos)) if m.estilos else "tiktok_bold")
+    if estilo not in catalogo:
+        raise ValueError(f"Estilo {estilo!r} no existe para {m.slug} "
+                         f"(disponibles: {sorted(catalogo)})")
+    fuentes = tuple(fuentes) if fuentes else tuple(m.fuentes)
+    contexto_full = "\n\n".join(x for x in (m.voz, contexto) if x) or None
+
     guion = slideshow_script.generar_guion(tema, formato=formato,
-                                           n_slides=n_slides, contexto=contexto)
+                                           n_slides=n_slides,
+                                           contexto=contexto_full)
     hints = [sl["image_hint"] for sl in guion["slides"]]
     imagenes = image_sources.resolver(hints, list(fuentes), cx=cx)
     sin_imagen = sum(1 for i in imagenes if i is None)
@@ -42,10 +56,11 @@ def generar(cx, tema: str, *, formato: str = "listicle",
               "(fondo sólido)")
     brief = {"tema": tema, "formato": formato, "estilo": estilo,
              "fuentes": list(fuentes), "n_slides": n_slides,
-             "contexto": contexto, "aspect": aspect}
+             "contexto": contexto, "aspect": aspect, "marca": m.slug}
     show = slideshow_compile.compilar(guion, estilo=estilo, imagenes=imagenes,
                                       aspect_ratio=aspect, brief=brief,
-                                      formato=formato)
+                                      formato=formato, account_slug=m.slug,
+                                      estilos=catalogo)
     errores = slideshow_model.validar(show)
     if errores:
         raise RuntimeError(f"Contrato inválido, no se encola: {errores}")
@@ -66,23 +81,24 @@ def generar(cx, tema: str, *, formato: str = "listicle",
     qid = approval.encolar_pendiente(
         cx, tipo="slideshow", caption=show.caption,
         imagen_url=json.dumps(urls), template=estilo,
-        tema_semilla=f"slideshow {formato}: {tema}")
+        tema_semilla=f"slideshow {formato}: {tema}", account_id=m.id)
     db.update(cx, "content_queue", qid,
               slideshow_json=slideshow_model.a_json(show))
-    approval.enviar_a_telegram(show.caption, json.dumps(urls), qid)
-    print(f"[slideshow] q{qid} enviado a Telegram ({len(urls)} slides)")
+    approval.enviar_a_telegram(show.caption, json.dumps(urls), qid,
+                               account_slug=m.slug)
+    print(f"[slideshow] q{qid} ({m.slug}) enviado a Telegram ({len(urls)} slides)")
     return qid
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Genera un slideshow y lo manda a aprobación")
     ap.add_argument("--tema", required=True)
-    ap.add_argument("--formato", default="listicle",
-                    choices=sorted(config.SLIDESHOW_FORMATOS))
-    ap.add_argument("--estilo", default="tiktok_bold",
-                    choices=sorted(config.SLIDESHOW_ESTILOS))
-    ap.add_argument("--fuentes", default="pexels",
-                    help="orden de fuentes separado por comas: banco,covers,pexels,pinterest")
+    ap.add_argument("--marca", default="gdlscene")
+    ap.add_argument("--formato", default=None)
+    ap.add_argument("--estilo", default=None)
+    ap.add_argument("--fuentes", default=None,
+                    help="orden de fuentes separado por comas: banco,covers,pexels,pinterest"
+                         " (default: perfil de la marca)")
     ap.add_argument("--n-slides", type=int, default=6)
     ap.add_argument("--aspect", default="4:5",
                     choices=sorted(slideshow_model.ASPECT_RATIOS))
@@ -94,8 +110,10 @@ def main() -> None:
     cx = db.connect()
     try:
         db.init_db(cx)
-        generar(cx, args.tema, formato=args.formato, estilo=args.estilo,
-                fuentes=tuple(f.strip() for f in args.fuentes.split(",") if f.strip()),
+        fuentes = (tuple(f.strip() for f in args.fuentes.split(",") if f.strip())
+                   if args.fuentes else None)
+        generar(cx, args.tema, marca=args.marca, formato=args.formato,
+                estilo=args.estilo, fuentes=fuentes,
                 n_slides=args.n_slides, aspect=args.aspect,
                 contexto=args.contexto, dry_run=args.dry_run)
     finally:
