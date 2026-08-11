@@ -39,7 +39,8 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             ventana_trafico: str = "meme", audiencia: list[dict[str, Any]] | None = None,
             _escribir_sheet: Callable[..., int] | None = None,
             _publicar: Callable[[], None] | None = None,
-            _slot_meme: Callable[[datetime], datetime] | None = None) -> datetime:
+            _slot_meme: Callable[[datetime, str | None, list[str] | None], datetime] | None = None,
+            ) -> datetime:
     """Aprueba: elige slot o publica inmediato (anuncios), escribe Sheet, marca en_sheet."""
     # OJO timezone: usar la hora de la cuenta (config.TIMEZONE), NO datetime.now()
     # naive. La máquina puede estar en otro huso (+04) y el "inmediato" saldría
@@ -50,21 +51,31 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
         import config
         ahora = datetime.now(pytz.timezone(config.TIMEZONE))
     fila = db.get(cx, "content_queue", queue_id)
+    from src import marcas as marcas_mod
+    marca = marcas_mod.cargar_por_id(cx, fila.get("account_id") or 1)
+    creds = _creds_de(marca.slug)
+    sheet_id = creds.get("SHEET_ID")
+    if not sheet_id:
+        raise RuntimeError(f"Falta SHEET_ID__{marca.slug.upper()} en el .env")
+    # malla propia solo si la marca la define; None = malla global de gdlscene
+    slots = marca.posting_slots
     # Anuncios/agendas se publican de inmediato; memes van a la malla editorial
-    # (POSTING_SLOTS, 4/día contra el Sheet): N aprobaciones seguidas caen en N
-    # huecos DISTINTOS. timing.elegir_slot (un solo horario semanal) haría
-    # chocar todo un batch en el mismo datetime.
+    # (POSTING_SLOTS, 4/día contra el Sheet, o la malla propia de la marca):
+    # N aprobaciones seguidas caen en N huecos DISTINTOS. timing.elegir_slot
+    # (un solo horario semanal) haría chocar todo un batch en el mismo datetime.
     inmediato = fila.get("tipo") == "anuncio"
     if inmediato:
         slot = ahora
     else:
-        slot = (_slot_meme or _siguiente_hueco)(ahora)
+        slot = (_slot_meme or _siguiente_hueco)(ahora, sheet_id, slots)
     escribir = _escribir_sheet or _sheet_real
-    sheet_id = escribir(caption=fila.get("caption"),
-                        imagen=fila.get("imagen_url"),
-                        scheduled=slot.isoformat())
+    sheet_row = escribir(caption=fila.get("caption"),
+                         imagen=fila.get("imagen_url"),
+                         scheduled=slot.isoformat(),
+                         sheet_id=sheet_id,
+                         banda=marca.ig_handle or f"@{marca.slug}")
     db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
-              sheet_row_id=str(sheet_id), scheduled_datetime=slot.isoformat())
+              sheet_row_id=str(sheet_row), scheduled_datetime=slot.isoformat())
     # La foto del meme queda usada (mismo contrato que el plan mensual): no se
     # vuelve a sugerir aunque el clasificador la siga viendo usable.
     if fila.get("photo_id"):
@@ -80,10 +91,16 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     return slot
 
 
-def _siguiente_hueco(ahora: datetime) -> datetime:
-    """Próximo hueco libre de la malla 4/día (lee el Sheet). Import tardío: testeable."""
+def _creds_de(slug: str) -> dict:
+    import config as cfg
+    return cfg.account_creds(slug)
+
+
+def _siguiente_hueco(ahora: datetime, sheet_id: str | None = None,
+                     slots: list[str] | None = None) -> datetime:
+    """Próximo hueco libre de la malla de la marca (lee su Sheet). Import tardío: testeable."""
     from src import scheduler
-    return scheduler.next_free_slot(ahora)
+    return scheduler.next_free_slot(ahora, sheet_id=sheet_id, slots=slots)
 
 
 def _publicar_ahora() -> None:
@@ -106,12 +123,14 @@ def rechazar(cx, queue_id: int) -> None:
     db.update(cx, "content_queue", queue_id, aprobacion="rechazado", status="descartado")
 
 
-def _sheet_real(*, caption, imagen, scheduled) -> int:
-    """Escribe la fila approved en el Sheet (igual que generate_agenda)."""
+def _sheet_real(*, caption, imagen, scheduled, sheet_id=None,
+                banda="@gdlscene") -> int:
+    """Escribe la fila approved en el Sheet de la marca (igual que generate_agenda)."""
     from src import sheets
-    return sheets.append_row(banda="@gdlscene", caption_generado=caption,
+    return sheets.append_row(banda=banda, caption_generado=caption,
                              caption_final=caption, imagen_compuesta_url=imagen,
-                             status=sheets.STATUS_APPROVED, scheduled_datetime=scheduled)
+                             status=sheets.STATUS_APPROVED, scheduled_datetime=scheduled,
+                             sheet_id=sheet_id)
 
 
 # --------- Telegram: helpers PUROS + envío (sin poller) ---------
@@ -226,7 +245,8 @@ def _urls_de_imagen(imagen_url: str) -> list[str]:
 
 
 def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
-                      *, regenerable: bool = False) -> None:
+                      *, regenerable: bool = False,
+                      account_slug: str = "gdlscene") -> None:
     """Manda la propuesta a Telegram con botones Aprobar/Rechazar (y 🔄/🎨 si
     es un meme individual regenerable).
 
@@ -241,10 +261,16 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
 
     import requests
 
-    import config
-
-    base_url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
-    chat_id = config.TELEGRAM_CHAT_ID
+    creds = _creds_de(account_slug)
+    token = creds.get("TELEGRAM_BOT_TOKEN")
+    chat_id = creds.get("TELEGRAM_CHAT_ID")
+    if not token:
+        raise RuntimeError(
+            f"Falta TELEGRAM_BOT_TOKEN__{account_slug.upper()} en el .env")
+    if not chat_id:
+        raise RuntimeError(
+            f"Falta TELEGRAM_CHAT_ID__{account_slug.upper()} en el .env")
+    base_url = f"https://api.telegram.org/bot{token}"
     botones = {"inline_keyboard": construir_botones(queue_id, regenerable=regenerable)}
     urls = _urls_de_imagen(imagen_url)
 

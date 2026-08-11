@@ -22,10 +22,11 @@ def test_encolar_pendiente(tmp_path) -> None:
     assert fila["caption"] == "hola" and fila["imagen_url"] == "http://x/y.jpg"
 
 
-def test_aprobar_meme_toma_hueco_de_la_malla(tmp_path) -> None:
+def test_aprobar_meme_toma_hueco_de_la_malla(tmp_path, monkeypatch) -> None:
     """Memes aprobados → siguiente hueco libre de POSTING_SLOTS (no el slot
     semanal de timing, que haría chocar un batch entero en el mismo datetime).
     La foto queda usada (mismo contrato que el plan mensual)."""
+    monkeypatch.setenv("SHEET_ID", "SHEET-TEST")  # gdlscene (account_id=1 default)
     cx = _cx(tmp_path)
     bid = db.insert(cx, "bands", nombre="Kabala")
     pid = db.insert(cx, "photos", band_id=bid, path="x.jpg")
@@ -34,7 +35,7 @@ def test_aprobar_meme_toma_hueco_de_la_malla(tmp_path) -> None:
     hueco = datetime(2026, 6, 11, 19, 0)
     slot = approval.aprobar(cx, qid, ahora=datetime(2026, 6, 10, 10, 0),
                             _escribir_sheet=lambda **k: 99,  # doble: no toca Sheet real
-                            _slot_meme=lambda ahora: hueco)  # doble: no lee el Sheet
+                            _slot_meme=lambda ahora, sheet_id, slots: hueco)  # doble: no lee el Sheet
     fila = db.get(cx, "content_queue", qid)
     assert fila["aprobacion"] == "aprobado" and fila["status"] == "en_sheet"
     assert fila["sheet_row_id"] == "99"
@@ -52,6 +53,7 @@ def test_rechazar(tmp_path) -> None:
 
 def test_aprobar_inmediato_publica_ahora(tmp_path, monkeypatch):
     from src import approval, db
+    monkeypatch.setenv("SHEET_ID", "SHEET-TEST")  # gdlscene (account_id=1 default)
     cx = db.connect(tmp_path / "t.db"); db.init_db(cx)
     qid = approval.encolar_pendiente(cx, tipo="anuncio", caption="x", imagen_url="u")
     llamado = {}
@@ -64,12 +66,13 @@ def test_aprobar_inmediato_publica_ahora(tmp_path, monkeypatch):
     assert slot.year == 2026 and slot.hour == 2 and llamado.get("pub")
 
 
-def test_aprobar_default_ahora_es_aware_en_tz_de_la_cuenta(tmp_path) -> None:
+def test_aprobar_default_ahora_es_aware_en_tz_de_la_cuenta(tmp_path, monkeypatch) -> None:
     """Regresión: sin `ahora`, el slot inmediato debe salir en config.TIMEZONE
     (aware), no en hora-máquina naive — si no, get_due_rows nunca lo ve vencido."""
     import pytz
 
     import config
+    monkeypatch.setenv("SHEET_ID", "SHEET-TEST")  # gdlscene (account_id=1 default)
     cx = _cx(tmp_path)
     qid = approval.encolar_pendiente(cx, tipo="anuncio", caption="x", imagen_url="u")
     slot = approval.aprobar(cx, qid, _escribir_sheet=lambda **k: 7,
@@ -79,9 +82,10 @@ def test_aprobar_default_ahora_es_aware_en_tz_de_la_cuenta(tmp_path) -> None:
     assert slot.utcoffset() == esperado
 
 
-def test_aprobar_marca_eventos_anunciado(tmp_path) -> None:
+def test_aprobar_marca_eventos_anunciado(tmp_path, monkeypatch) -> None:
     """Al aprobar, los events de evento_ids quedan status='anunciado'."""
     import json
+    monkeypatch.setenv("SHEET_ID", "SHEET-TEST")  # gdlscene (account_id=1 default)
     cx = _cx(tmp_path)
     bid = db.insert(cx, "bands", nombre="SilentNoir")
     e1 = db.insert(cx, "events", band_id=bid, tipo="release", fecha_evento="2026-06-01")
