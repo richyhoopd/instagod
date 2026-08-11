@@ -24,6 +24,7 @@ TABLES: dict[str, set[str]] = {
     "accounts": {
         "slug", "ig_handle", "nombre", "ciudad", "timezone",
         "voz_extra", "color_marca", "activa",
+        "fuentes_imagen", "estilos_json", "voz", "formatos", "logo_path", "posting_slots",
     },
     "bands": {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
@@ -184,6 +185,15 @@ _MIGRATIONS = {
         # sobrevive un reproceso aunque sus firmas desaparezcan (dedup, fotos
         # descartadas) — el batch nunca pisa lo manual.
         "centroide": "BLOB",
+    },
+    "accounts": {
+        # Multi-marca (spec 2026-08-10): perfil completo de la marca.
+        "fuentes_imagen": "TEXT",   # JSON: orden de sourcing ["pinterest","pexels"]
+        "estilos_json": "TEXT",     # JSON: presets de slideshow propios (+chrome)
+        "voz": "TEXT",              # system-prompt de marca (tono/compliance/imágenes)
+        "formatos": "TEXT",         # JSON: formatos habilitados
+        "logo_path": "TEXT",        # asset local en data/brands/<slug>/
+        "posting_slots": "TEXT",    # "HH:MM,HH:MM" propio; NULL → global
     },
 }
 

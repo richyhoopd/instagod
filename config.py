@@ -361,7 +361,8 @@ def resolve_ig_session_path() -> Path:
 
 # Claves de credenciales que existen POR CUENTA de escena (multi-cuenta Fase A).
 _ACCOUNT_CRED_KEYS = ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
-                      "IG_SCRAPER_UA", "SHEET_ID")
+                      "IG_SCRAPER_UA", "SHEET_ID",
+                      "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
 
 def account_creds(slug: str) -> dict[str, str | None]:
