@@ -365,6 +365,21 @@ _ACCOUNT_CRED_KEYS = ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
                       "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
 
 
+def marcas_en_env() -> list[str]:
+    """Slugs de marcas visibles para el worker: gdlscene + sufijos SHEET_ID__*.
+
+    El worker de Actions NO tiene la SQLite (data/ gitignored): el entorno es
+    la fuente de verdad de qué marcas publica.
+    """
+    out = ["gdlscene"]
+    for k in sorted(os.environ):
+        if k.startswith("SHEET_ID__"):
+            slug = k.removeprefix("SHEET_ID__").lower()
+            if slug and slug not in out:
+                out.append(slug)
+    return out
+
+
 def account_creds(slug: str) -> dict[str, str | None]:
     """Credenciales de una cuenta: env con sufijo __SLUG (en mayúsculas).
 

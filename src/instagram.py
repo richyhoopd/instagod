@@ -19,49 +19,61 @@ def _base() -> str:
     return f"{config.IG_GRAPH_BASE.rstrip('/')}/{config.IG_API_VERSION}"
 
 
-def _create_container(image_url: str, caption: str) -> str:
-    url = f"{_base()}/{config.IG_USER_ID}/media"
+def _c(creds: dict | None) -> tuple[str, str]:
+    """(user_id, token) de las creds inyectadas o de config (gdlscene)."""
+    if creds:
+        return creds["user_id"], creds["token"]
+    return config.IG_USER_ID, config.IG_ACCESS_TOKEN
+
+
+def _create_container(image_url: str, caption: str, creds: dict | None = None) -> str:
+    user_id, token = _c(creds)
+    url = f"{_base()}/{user_id}/media"
     resp = requests.post(
         url,
-        data={"image_url": image_url, "caption": caption, "access_token": config.IG_ACCESS_TOKEN},
+        data={"image_url": image_url, "caption": caption, "access_token": token},
         timeout=_TIMEOUT,
     )
     _raise_for_graph(resp)
     return resp.json()["id"]
 
 
-def _create_carousel_item(image_url: str) -> str:
+def _create_carousel_item(image_url: str, creds: dict | None = None) -> str:
     """Container hijo de un carrusel (sin caption, con is_carousel_item)."""
-    url = f"{_base()}/{config.IG_USER_ID}/media"
+    user_id, token = _c(creds)
+    url = f"{_base()}/{user_id}/media"
     resp = requests.post(
         url,
         data={"image_url": image_url, "is_carousel_item": "true",
-              "access_token": config.IG_ACCESS_TOKEN},
+              "access_token": token},
         timeout=_TIMEOUT,
     )
     _raise_for_graph(resp)
     return resp.json()["id"]
 
 
-def _create_carousel_container(children: list[str], caption: str) -> str:
-    url = f"{_base()}/{config.IG_USER_ID}/media"
+def _create_carousel_container(children: list[str], caption: str, creds: dict | None = None) -> str:
+    user_id, token = _c(creds)
+    url = f"{_base()}/{user_id}/media"
     resp = requests.post(
         url,
         data={"media_type": "CAROUSEL", "children": ",".join(children),
-              "caption": caption, "access_token": config.IG_ACCESS_TOKEN},
+              "caption": caption, "access_token": token},
         timeout=_TIMEOUT,
     )
     _raise_for_graph(resp)
     return resp.json()["id"]
 
 
-def _wait_until_ready(creation_id: str, *, attempts: int = 10, delay: float = 3.0) -> None:
+def _wait_until_ready(creation_id: str, *, attempts: int = 10, delay: float = 3.0,
+                       creds: dict | None = None) -> None:
     """Espera a que el container esté FINISHED antes de publicar."""
+    _, token = _c(creds)
     url = f"{_base()}/{creation_id}"
     for _ in range(attempts):
         resp = requests.get(
             url,
-            params={"fields": "status_code,status", "access_token": config.IG_ACCESS_TOKEN},
+            params={"fields": "status_code,status", "access_token": token},
             timeout=_TIMEOUT,
         )
         _raise_for_graph(resp)
@@ -74,32 +86,34 @@ def _wait_until_ready(creation_id: str, *, attempts: int = 10, delay: float = 3.
     # Algunos containers de imagen nunca reportan status; intentamos publicar igual.
 
 
-def _publish(creation_id: str) -> str:
-    url = f"{_base()}/{config.IG_USER_ID}/media_publish"
+def _publish(creation_id: str, creds: dict | None = None) -> str:
+    user_id, token = _c(creds)
+    url = f"{_base()}/{user_id}/media_publish"
     resp = requests.post(
         url,
-        data={"creation_id": creation_id, "access_token": config.IG_ACCESS_TOKEN},
+        data={"creation_id": creation_id, "access_token": token},
         timeout=_TIMEOUT,
     )
     _raise_for_graph(resp)
     return resp.json()["id"]
 
 
-def publish(image_url: str, caption: str, *, retries: int = 3) -> str:
+def publish(image_url: str, caption: str, *, retries: int = 3, creds: dict | None = None) -> str:
     """Publica una imagen y devuelve el `ig_post_id`. Reintenta con backoff."""
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
-            creation_id = _create_container(image_url, caption)
-            _wait_until_ready(creation_id)
-            return _publish(creation_id)
+            creation_id = _create_container(image_url, caption, creds)
+            _wait_until_ready(creation_id, creds=creds)
+            return _publish(creation_id, creds)
         except Exception as exc:  # noqa: BLE001
             last_err = exc
             time.sleep(2 ** attempt)
     raise RuntimeError(f"Falló la publicación tras {retries} intentos: {last_err}")
 
 
-def publish_carousel(image_urls: list[str], caption: str, *, retries: int = 3) -> str:
+def publish_carousel(image_urls: list[str], caption: str, *, retries: int = 3,
+                      creds: dict | None = None) -> str:
     """Publica un carrusel (2-10 imágenes) y devuelve el `ig_post_id`.
 
     Flujo IG: un container hijo por imagen → un container CAROUSEL con los hijos →
@@ -107,17 +121,17 @@ def publish_carousel(image_urls: list[str], caption: str, *, retries: int = 3) -
     """
     urls = [u for u in image_urls if u]
     if len(urls) <= 1:
-        return publish(urls[0], caption) if urls else ""
+        return publish(urls[0], caption, creds=creds) if urls else ""
     urls = urls[:10]  # IG topa el carrusel en 10
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
-            children = [_create_carousel_item(u) for u in urls]
+            children = [_create_carousel_item(u, creds) for u in urls]
             for c in children:
-                _wait_until_ready(c)
-            parent = _create_carousel_container(children, caption)
-            _wait_until_ready(parent)
-            return _publish(parent)
+                _wait_until_ready(c, creds=creds)
+            parent = _create_carousel_container(children, caption, creds)
+            _wait_until_ready(parent, creds=creds)
+            return _publish(parent, creds)
         except Exception as exc:  # noqa: BLE001
             last_err = exc
             time.sleep(2 ** attempt)

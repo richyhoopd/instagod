@@ -47,7 +47,16 @@ def _es_agenda(row: dict) -> bool:
                                     "releases")) or bool(_carousel_urls(row.get("imagen_compuesta_url", ""))))
 
 
-def publish_row(row: dict) -> tuple[bool, list[str]]:
+def _plataformas_de(slug: str) -> list[tuple]:
+    """Redes que aplican a la marca: IG siempre; FB/X solo gdlscene (flags)."""
+    if slug == "gdlscene":
+        return PLATFORMS
+    return [p for p in PLATFORMS if p[1] == "ig"]
+
+
+def publish_row(row: dict, *, slug: str = "gdlscene",
+                 sheet_id: str | None = None, ig_creds: dict | None = None
+                 ) -> tuple[bool, list[str]]:
     """Publica una fila en las redes habilitadas que aún no tengan post id.
 
     Escribe cada id al Sheet INMEDIATAMENTE (si el job muere a medias no hay
@@ -60,15 +69,16 @@ def publish_row(row: dict) -> tuple[bool, list[str]]:
 
     errores: list[str] = []
     todas_listas = True
-    for col, tag, mod, enabled in PLATFORMS:
+    for col, tag, mod, enabled in _plataformas_de(slug):
         if not enabled:
             continue
         if str(row.get(col, "")).strip():
             continue  # ya publicada en esta red (reintento parcial)
         try:
-            post_id = (mod.publish_carousel(urls, caption) if urls
-                       else mod.publish(image_url, caption))
-            sheets.update_row(row_id, **{col: post_id})
+            kwargs = {"creds": ig_creds} if (tag == "ig" and ig_creds) else {}
+            post_id = (mod.publish_carousel(urls, caption, **kwargs) if urls
+                       else mod.publish(image_url, caption, **kwargs))
+            sheets.update_row(row_id, sheet_id=sheet_id, **{col: post_id})
             print(f"  ✅ {tag}: {post_id}")
         except Exception as exc:  # noqa: BLE001
             todas_listas = False
@@ -77,8 +87,22 @@ def publish_row(row: dict) -> tuple[bool, list[str]]:
     return todas_listas, errores
 
 
-def main() -> None:
-    due = sheets.get_due_rows()
+def publicar_marca(slug: str) -> None:
+    """Publica las filas due del Sheet de `slug` con sus creds propias."""
+    creds = config.account_creds(slug)
+    sheet_id = creds.get("SHEET_ID")
+    if not sheet_id:
+        print(f"⏭ {slug}: falta SHEET_ID__{slug.upper()} en el entorno")
+        return
+    if not (creds.get("IG_USER_ID") and creds.get("IG_ACCESS_TOKEN")):
+        print(f"⏭ {slug}: falta IG_USER_ID__{slug.upper()} o "
+              f"IG_ACCESS_TOKEN__{slug.upper()} en el entorno")
+        return
+    ig_creds = ({"user_id": creds["IG_USER_ID"], "token": creds["IG_ACCESS_TOKEN"]}
+                if slug != "gdlscene" else None)  # gdlscene usa globals (igual que hoy)
+    row_sheet_id = None if slug == "gdlscene" else sheet_id
+
+    due = sheets.get_due_rows(sheet_id=row_sheet_id)
     if not due:
         print("No hay nada por publicar ahora.")
         return
@@ -89,18 +113,27 @@ def main() -> None:
     for row in due:
         row_id = row.get("id")
         if not row.get("imagen_compuesta_url", ""):
-            sheets.update_row(row_id, status=sheets.STATUS_ERROR, notas="sin imagen_compuesta_url")
+            sheets.update_row(row_id, sheet_id=row_sheet_id, status=sheets.STATUS_ERROR,
+                               notas="sin imagen_compuesta_url")
             print(f"⚠️  id={row_id} sin imagen_compuesta_url → error")
             continue
         print(f"id={row_id}:")
-        todas_listas, errores = publish_row(row)
+        todas_listas, errores = publish_row(row, slug=slug, sheet_id=row_sheet_id,
+                                             ig_creds=ig_creds)
         if todas_listas:
-            sheets.update_row(row_id, status=sheets.STATUS_PUBLISHED, notas="")
+            sheets.update_row(row_id, sheet_id=row_sheet_id, status=sheets.STATUS_PUBLISHED,
+                               notas="")
             print(f"✅ id={row_id} publicado en todas las redes habilitadas")
         else:
             # Sigue approved: el cron siguiente reintenta solo las columnas vacías.
-            sheets.update_row(row_id, notas=" | ".join(errores)[:400])
+            sheets.update_row(row_id, sheet_id=row_sheet_id, notas=" | ".join(errores)[:400])
             print(f"⏳ id={row_id} parcial; reintento en el siguiente cron")
+
+
+def main() -> None:
+    for slug in config.marcas_en_env():
+        print(f"— marca: {slug}")
+        publicar_marca(slug)
 
 
 if __name__ == "__main__":
