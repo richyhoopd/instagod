@@ -89,33 +89,40 @@ def _credentials():
     )
 
 
-@lru_cache(maxsize=1)
-def _worksheet() -> gspread.Worksheet:
+@lru_cache(maxsize=8)
+def _worksheet(sheet_id: str) -> gspread.Worksheet:
     client = gspread.authorize(_credentials())
-    return client.open_by_key(config.SHEET_ID).sheet1
+    return client.open_by_key(sheet_id).sheet1
 
 
-def ensure_headers() -> None:
+def _sheet(sheet_id: str | None) -> str:
+    sid = sheet_id or config.SHEET_ID
+    if not sid:
+        raise RuntimeError("Falta SHEET_ID en el .env (o el sufijo de la marca)")
+    return sid
+
+
+def ensure_headers(sheet_id: str | None = None) -> None:
     """Escribe la fila de encabezados si la hoja está vacía. Útil al inicializar."""
-    ws = _worksheet()
+    ws = _worksheet(_sheet(sheet_id))
     first_row = ws.row_values(1)
     if not first_row:
         ws.update("A1", [COLUMNS])
 
 
-def _records() -> list[dict[str, Any]]:
+def _records(sheet_id: str | None = None) -> list[dict[str, Any]]:
     """Todas las filas como dicts {columna: valor}, en orden de hoja.
 
     Adjunta `_row` (índice 1-based en la hoja) para localizar la celda al escribir.
     """
-    ws = _worksheet()
+    ws = _worksheet(_sheet(sheet_id))
     records = ws.get_all_records(expected_headers=COLUMNS)
     for i, rec in enumerate(records, start=2):  # fila 1 = encabezados
         rec["_row"] = i
     return records
 
 
-def get_pending_rows() -> list[dict[str, Any]]:
+def get_pending_rows(sheet_id: str | None = None) -> list[dict[str, Any]]:
     """Filas por procesar: status == pending, o status vacío en una fila con datos.
 
     Tratar el status vacío como pending evita que tengas que escribir "pending" a
@@ -123,7 +130,7 @@ def get_pending_rows() -> list[dict[str, Any]]:
     (señal de que la fila tiene contenido real, no está en blanco).
     """
     out = []
-    for r in _records():
+    for r in _records(sheet_id=sheet_id):
         status = str(r.get("status", "")).strip().lower()
         has_content = bool(str(r.get("foto_url", "")).strip())
         if status == STATUS_PENDING or (status == "" and has_content):
@@ -131,7 +138,7 @@ def get_pending_rows() -> list[dict[str, Any]]:
     return out
 
 
-def get_due_rows(now: datetime | None = None) -> list[dict[str, Any]]:
+def get_due_rows(now: datetime | None = None, *, sheet_id: str | None = None) -> list[dict[str, Any]]:
     """Filas approved cuyo scheduled_datetime ya venció (lo que el worker publica)."""
     tz = pytz.timezone(config.TIMEZONE)
     now = now or datetime.now(tz)
@@ -139,7 +146,7 @@ def get_due_rows(now: datetime | None = None) -> list[dict[str, Any]]:
         now = tz.localize(now)
 
     due: list[dict[str, Any]] = []
-    for r in _records():
+    for r in _records(sheet_id=sheet_id):
         if str(r.get("status", "")).strip() != STATUS_APPROVED:
             continue
         sched = _parse_dt(r.get("scheduled_datetime"), tz)
@@ -148,10 +155,10 @@ def get_due_rows(now: datetime | None = None) -> list[dict[str, Any]]:
     return due
 
 
-def append_row(**fields: Any) -> int:
+def append_row(*, sheet_id: str | None = None, **fields: Any) -> int:
     """Crea una fila nueva con id auto-incremental. Devuelve el id asignado."""
-    ws = _worksheet()
-    ids = [int(r["id"]) for r in _records() if str(r.get("id", "")).strip().isdigit()]
+    ws = _worksheet(_sheet(sheet_id))
+    ids = [int(r["id"]) for r in _records(sheet_id=sheet_id) if str(r.get("id", "")).strip().isdigit()]
     new_id = (max(ids) + 1) if ids else 1
     fields.setdefault("id", new_id)
     for key in fields:
@@ -162,10 +169,10 @@ def append_row(**fields: Any) -> int:
     return new_id
 
 
-def update_row(row_id: int | str, **fields: Any) -> None:
+def update_row(row_id: int | str, *, sheet_id: str | None = None, **fields: Any) -> None:
     """Escribe `fields` en la fila cuyo `id` coincide. Idempotente por id."""
-    ws = _worksheet()
-    target = next((r for r in _records() if str(r.get("id")) == str(row_id)), None)
+    ws = _worksheet(_sheet(sheet_id))
+    target = next((r for r in _records(sheet_id=sheet_id) if str(r.get("id")) == str(row_id)), None)
     if target is None:
         raise ValueError(f"No existe una fila con id={row_id}")
 

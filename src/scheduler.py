@@ -18,19 +18,19 @@ def _tz() -> "pytz.BaseTzInfo":
     return pytz.timezone(config.TIMEZONE)
 
 
-def _slot_times() -> list[time]:
+def _slot_times(slots: list[str] | None = None) -> list[time]:
     """POSTING_SLOTS (["19:00", ...]) → objetos time ordenados."""
     out = []
-    for s in config.POSTING_SLOTS:
+    for s in (slots or config.POSTING_SLOTS):
         hh, mm = s.split(":")
         out.append(time(int(hh), int(mm)))
     return sorted(out) or [time(19, 0)]
 
 
-def _taken_slots() -> set[str]:
+def _taken_slots(sheet_id: str | None = None) -> set[str]:
     """Conjunto de scheduled_datetime (ISO, minuto) ya ocupados."""
     taken: set[str] = set()
-    for r in sheets._records():
+    for r in sheets._records(sheet_id=sheet_id):
         status = str(r.get("status", "")).strip()
         if status not in (sheets.STATUS_APPROVED, sheets.STATUS_PUBLISHED):
             continue
@@ -40,19 +40,23 @@ def _taken_slots() -> set[str]:
     return taken
 
 
-def next_free_slot(now: datetime | None = None) -> datetime:
+def next_free_slot(now: datetime | None = None, *, sheet_id: str | None = None,
+                    slots: list[str] | None = None) -> datetime:
     """Calcula el próximo hueco libre a partir de mañana (o de `now`)."""
     tz = _tz()
     now = now or datetime.now(tz)
     if now.tzinfo is None:
         now = tz.localize(now)
 
-    slots = _slot_times()[: max(1, config.POSTS_PER_DAY)]
-    taken = _taken_slots()
+    horarios = _slot_times(slots)
+    # con malla propia el tope diario ES la malla; sin ella, POSTS_PER_DAY:
+    if slots is None:
+        horarios = horarios[: max(1, config.POSTS_PER_DAY)]
+    taken = _taken_slots(sheet_id=sheet_id)
 
     day = now.date() + timedelta(days=1)  # empezamos mañana
     for _ in range(365):
-        for slot in slots:
+        for slot in horarios:
             candidate = tz.localize(datetime.combine(day, slot))
             if candidate.strftime("%Y-%m-%dT%H:%M") not in taken and candidate > now:
                 return candidate
