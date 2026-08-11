@@ -219,20 +219,34 @@ async def _esperar_senal() -> None:
 
 
 async def correr(apps) -> None:
-    """Ciclo de vida de N Applications en un solo loop."""
-    for app in apps:
-        await app.initialize()
-    for app in apps:
-        await app.start()
-    for app in apps:
-        # bootstrap_retries=-1: parpadeo de red al arrancar reintenta indefinido
-        await app.updater.start_polling(drop_pending_updates=True,
-                                        bootstrap_retries=-1)
-    latido = asyncio.create_task(_latido_loop_multi(apps))
+    """Ciclo de vida de N Applications en un solo loop.
+
+    El `try` arranca ANTES de `initialize`: si una marca falla al arrancar
+    (token revocado, etc.), las que ya levantaron igual se apagan en el
+    `finally` — no queda un long-poll huérfano que choque (Conflict) en el
+    siguiente arranque. La excepción original se propaga tras apagar todo.
+
+    La task del latido se crea ANTES del bucle de `start_polling` (no después):
+    si el bootstrap de una marca se atasca (`bootstrap_retries=-1` + red caída),
+    el latido ya está corriendo y sigue cubriendo la ventana de arranque; el
+    guard `_todos_corriendo` evita que escriba un latido falso mientras alguna
+    marca todavía no levanta.
+    """
+    latido = None
     try:
+        for app in apps:
+            await app.initialize()
+        for app in apps:
+            await app.start()
+        latido = asyncio.create_task(_latido_loop_multi(apps))
+        for app in apps:
+            # bootstrap_retries=-1: parpadeo de red al arrancar reintenta indefinido
+            await app.updater.start_polling(drop_pending_updates=True,
+                                            bootstrap_retries=-1)
         await _esperar_senal()
     finally:
-        latido.cancel()
+        if latido is not None:
+            latido.cancel()
         for app in reversed(apps):
             with contextlib.suppress(Exception):
                 await app.updater.stop()
