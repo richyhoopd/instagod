@@ -43,7 +43,7 @@ def test_cargar_defaults_sin_json(tmp_path) -> None:
     cx = _cx(tmp_path)
     m = marcas.cargar(cx, "gdlscene")
     assert m.fuentes == ["pexels"]
-    assert m.formatos == sorted(config.SLIDESHOW_FORMATOS)
+    assert m.formatos == marcas._formatos_default()
     assert m.estilos == {}
     assert m.posting_slots is None
     assert m.voz == ""
@@ -60,7 +60,7 @@ def test_json_malformado_cae_a_default(tmp_path) -> None:
     _alta_pensionmas(cx, fuentes_imagen="esto no es json", formatos="[1,")
     m = marcas.cargar(cx, "pensionmas")
     assert m.fuentes == ["pexels"]
-    assert m.formatos == sorted(config.SLIDESHOW_FORMATOS)
+    assert m.formatos == marcas._formatos_default()
 
 
 def test_cargar_por_id_y_listar(tmp_path) -> None:

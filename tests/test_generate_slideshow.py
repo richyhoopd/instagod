@@ -150,3 +150,17 @@ def test_generar_sin_marca_sigue_siendo_gdlscene(monkeypatch, tmp_path) -> None:
     qid = gs.generar(cx, "café")
     assert db_mod.get(cx, "content_queue", qid)["account_id"] == 1
     assert enviados[-1][3].get("account_slug", "gdlscene") == "gdlscene"
+
+
+def test_generar_gdlscene_default_sigue_siendo_listicle(monkeypatch, tmp_path) -> None:
+    """gdlscene sin --formato explícito conserva el default histórico del motor v1."""
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    capturado = {}
+
+    def _guion_spy(tema, **kw):
+        capturado.update(kw)
+        return _guion()
+
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", _guion_spy)
+    gs.generar(cx, "café")
+    assert capturado["formato"] == "listicle"

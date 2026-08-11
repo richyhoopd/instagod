@@ -34,6 +34,16 @@ class Marca:
     activa: bool
 
 
+def _formatos_default() -> list[str]:
+    """Default de `formatos` cuando la marca no lo define (gdlscene incluida).
+
+    listicle primero: es el default editorial histórico del motor v1, y
+    generar() usa formatos[0] cuando no se pasa --formato explícito — el
+    resto se ordena alfabético, sin importancia de orden.
+    """
+    return ["listicle"] + sorted(f for f in config.SLIDESHOW_FORMATOS if f != "listicle")
+
+
 def _json_o(default, crudo, *, slug: str, campo: str):
     """Parsea JSON tolerante: vacío/malformado/tipo equivocado → default."""
     if not crudo:
@@ -59,7 +69,7 @@ def _fila_a_marca(fila: dict) -> Marca:
         voz=(fila.get("voz") or "").strip(),
         fuentes=_json_o(["pexels"], fila.get("fuentes_imagen"),
                         slug=slug, campo="fuentes_imagen"),
-        formatos=_json_o(sorted(config.SLIDESHOW_FORMATOS), fila.get("formatos"),
+        formatos=_json_o(_formatos_default(), fila.get("formatos"),
                          slug=slug, campo="formatos"),
         estilos=_json_o({}, fila.get("estilos_json"),
                         slug=slug, campo="estilos_json"),
