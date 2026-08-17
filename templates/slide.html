@@ -22,7 +22,7 @@
   }
   .bg img { width:100%; height:100%; object-fit:cover; display:block; }
 
-  .overlay { position:absolute; inset:0; background:#000; opacity:{{ overlay_opacity }}; }
+  .overlay { position:absolute; inset:0; background:{{ overlay_color }}; opacity:{{ overlay_opacity }}; }
 
   /* Tres zonas verticales apiladas; cada text_item cae en la suya. */
   .zonas {
@@ -59,7 +59,7 @@
   .chrome {
     position:absolute; left:0; right:0; bottom:{{ (height * 0.025) | round | int }}px;
     display:flex; align-items:center; justify-content:center; gap:14px;
-    font-family:'Poppins-SemiBold',sans-serif;
+    font-family:'{{ chrome.font if chrome else 'Poppins-SemiBold' }}',sans-serif;
     font-size:{{ (width * 0.028) | round | int }}px;
     color:rgba(255,255,255,.92); letter-spacing:.04em; z-index:10;
     text-shadow:0 1px 8px rgba(0,0,0,.5);

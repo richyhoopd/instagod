@@ -131,7 +131,8 @@ def test_compilar_acepta_estilos_de_marca() -> None:
     import config as cfg
     ctx = sc.contexto_slide(s, 0)
     assert ctx["bg_color"] == cfg.SLIDESHOW_PALETA["navy"]
-    assert ctx["chrome"] == {"handle": "@pensionmas", "logo_src": None}
+    assert ctx["chrome"] == {"handle": "@pensionmas", "logo_src": None,
+                             "font": "Poppins-SemiBold"}
 
 
 def test_contexto_slide_sin_chrome_es_none() -> None:
@@ -144,3 +145,48 @@ def test_font_faces_declaran_formato() -> None:
     faces = {f["name"]: f["fmt"] for f in sc.contexto_slide(s, 0)["font_faces"]}
     assert faces["Erode-Bold"] == "woff2"
     assert faces["Anton-Regular"] == "truetype"
+
+
+def _preset_mwrs():
+    return {"melaquecapital": {
+        "texto": "hueso", "fondo": "olivo", "background_opacity": 0.45,
+        "caja": "olivo", "overlay": "olivo",
+        "chrome": {"handle": "@melaquecapital", "logo": None,
+                   "font": "Archivo"},
+        "roles": {"hook": {"font": "Marcellus", "font_size": "extra_large",
+                           "text_style": "background",
+                           "text_vertical_anchor": "center"},
+                  "punto": {"font": "Marcellus", "font_size": "large",
+                            "text_style": "background",
+                            "text_vertical_anchor": "center"},
+                  "cta": {"font": "Archivo", "font_size": "medium",
+                          "text_style": "background",
+                          "text_vertical_anchor": "bottom"}}}}
+
+
+def test_preset_caja_y_overlay_de_marca_sellados_en_brief() -> None:
+    """Marcas que prohíben negro (MWRS: scrim verde) fijan caja/overlay."""
+    s = sc.compilar(_guion(), estilo="melaquecapital", imagenes=[_Img("/tmp/a.jpg")] * 3,
+                    estilos=_preset_mwrs(), account_slug="melaquecapital")
+    assert s.brief["caja"] == "olivo"
+    assert s.brief["overlay"] == "olivo"
+    ctx = sc.contexto_slide(s, 0)
+    assert ctx["items"][0]["caja"] == config.SLIDESHOW_PALETA["olivo"]
+    assert ctx["overlay_color"] == config.SLIDESHOW_PALETA["olivo"]
+    assert ctx["chrome"]["font"] == "Archivo"
+
+
+def test_preset_sin_caja_conserva_negro_para_texto_claro() -> None:
+    """Sin override, comportamiento histórico: texto claro → caja negra, overlay negro."""
+    s = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=[_Img("/tmp/a.jpg")] * 3)
+    ctx = sc.contexto_slide(s, 0)
+    assert ctx["items"][0]["caja"] == config.SLIDESHOW_PALETA["negro"]
+    assert ctx["overlay_color"] == "#000"
+    assert "caja" not in s.brief
+
+
+def test_font_faces_incluyen_marcellus_y_archivo() -> None:
+    s = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=[None] * 3)
+    faces = {f["name"]: f["fmt"] for f in sc.contexto_slide(s, 0)["font_faces"]}
+    assert faces["Marcellus"] == "woff2"
+    assert faces["Archivo"] == "woff2"

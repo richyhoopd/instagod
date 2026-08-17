@@ -17,8 +17,10 @@ _FONT_PX = {"extra_extra_small": 36, "extra_small": 48, "small": 60,
             "medium": 76, "large": 96, "extra_large": 128}
 
 # Color de la caja detrás del texto (text_style=background) según el color
-# del texto: texto claro → caja oscura y viceversa.
-_COLORES_CLAROS = {"blanco", "crema", "amarillo", "oro"}
+# del texto: texto claro → caja oscura y viceversa. Un preset puede fijar
+# "caja"/"overlay" (nombre de la paleta) para marcas que prohíben el negro
+# sobre foto (MWRS: scrim verde).
+_COLORES_CLAROS = {"blanco", "crema", "amarillo", "oro", "hueso", "laton"}
 
 
 def _caja_para(color_nombre: str) -> str:
@@ -68,6 +70,9 @@ def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
     brief_final.setdefault("estilo", estilo)
     brief_final.setdefault("fondo", preset.get("fondo", "negro"))
     brief_final.setdefault("chrome", preset.get("chrome"))
+    for clave in ("caja", "overlay"):
+        if preset.get(clave):
+            brief_final.setdefault(clave, preset[clave])
     return Slideshow(title=guion["hook"], aspect_ratio=aspect_ratio,
                      slides=slides, caption=guion.get("caption", ""),
                      brief=brief_final, formato=formato,
@@ -80,6 +85,7 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
     width, height = ASPECT_RATIOS[s.aspect_ratio]
     cols, rows = IMAGE_LAYOUTS[sl.image_layout]
     escala = width / 1080
+    caja_marca = s.brief.get("caja")
     items = []
     for t in sl.text_items:
         items.append({
@@ -87,7 +93,8 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
             "font": t.font,
             "px": round(_FONT_PX[t.font_size] * escala),
             "color": config.SLIDESHOW_PALETA[t.text_color],
-            "caja": _caja_para(t.text_color),
+            "caja": (config.SLIDESHOW_PALETA[caja_marca] if caja_marca
+                     else _caja_para(t.text_color)),
             "estilo": t.text_style,
             "width_pct": round(t.text_width * 100),
             "align": t.text_align,
@@ -105,7 +112,8 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
     if chrome_brief:
         logo = chrome_brief.get("logo")
         chrome = {"handle": chrome_brief.get("handle", ""),
-                  "logo_src": _to_src(logo) if logo else None}
+                  "logo_src": _to_src(logo) if logo else None,
+                  "font": chrome_brief.get("font") or "Poppins-SemiBold"}
     return {
         "width": width,
         "height": height,
@@ -114,6 +122,8 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
         "grid_cols": cols,
         "grid_rows": rows,
         "overlay_opacity": sl.background_opacity,
+        "overlay_color": (config.SLIDESHOW_PALETA[s.brief["overlay"]]
+                          if s.brief.get("overlay") else "#000"),
         "chrome": chrome,
         "font_faces": [{"name": nombre,
                         "url": (FONTS_DIR / archivo).as_uri(),

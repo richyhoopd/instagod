@@ -1,4 +1,5 @@
-"""Seeds de perfil de marca: gdlscene brandeado + Pensión+ (tulanaya).
+"""Seeds de perfil de marca: gdlscene brandeado + Pensión+ (tulanaya) +
+Melaque West Coast Real Estate (@melaquecapital, MWRS/brand).
 
 Idempotente y respetuoso: solo escribe campos de perfil que estén vacíos —
 lo editado a mano (GUI) nunca se pisa. CLI: python -m src.marcas_seed
@@ -39,6 +40,50 @@ ESTILOS_PENSIONMAS = {
     },
 }
 
+ESTILOS_MELAQUECAPITAL = {
+    "melaquecapital": {
+        # El verde ocupa la superficie; el latón es el único acento; nunca
+        # negro sobre foto (caja y overlay en olivo). Marcellus tiene un solo
+        # peso: la jerarquía la hace el tamaño.
+        "texto": "hueso", "fondo": "olivo", "background_opacity": 0.45,
+        "caja": "olivo", "overlay": "olivo",
+        "chrome": {"handle": "@melaquecapital",
+                   "logo": "data/brands/melaquecapital/mark.svg",
+                   "font": "Archivo"},
+        "roles": {
+            "hook": {"font": "Marcellus", "font_size": "extra_large",
+                     "text_style": "background", "text_vertical_anchor": "center"},
+            "punto": {"font": "Marcellus", "font_size": "large",
+                      "text_style": "background", "text_vertical_anchor": "center"},
+            "cta": {"font": "Archivo", "font_size": "medium",
+                    "text_style": "background", "text_vertical_anchor": "bottom"},
+        },
+    },
+}
+
+VOZ_MELAQUECAPITAL = (
+    "Marca: Melaque West Coast Real Estate (@melaquecapital, "
+    "melaquewcrealestate.com) — bienes raíces en Melaque, Barra de Navidad, "
+    "Cuastecomate y la Costalegre de Jalisco; también lotes en Sayula (Los "
+    "Olivos). Lo que se vende es TRANQUILIDAD LEGAL en una zona donde comprar "
+    "mal es fácil. "
+    "Audiencia: mayores de 55, mexicanos y extranjeros (muchos leen en inglés), "
+    "que buscan casa de playa o inversión con certeza jurídica. "
+    "TONO: informativo y concreto. Frases cortas, cifras exactas. Di el "
+    "régimen legal cuando lo sepas (ejido, escriturada, fideicomiso): es la "
+    "información que nadie más publica. "
+    "PROHIBIDO: 'paraíso', 'oportunidad única', 'el sueño de tu vida', emojis "
+    "de fuego, cuentas regresivas falsas, urgencia artificial. "
+    "PRECIOS: casas en USD, lotes en pesos, SIEMPRE con la moneda escrita; "
+    "no inventes cifras — si no hay precio confirmado en el contexto, no lo "
+    "menciones. Una sola acción por pieza (WhatsApp o el sitio, no ambos). "
+    "IDIOMA: español en la imagen; si el pie va bilingüe, inglés en el pie, "
+    "nunca dos lenguas apiladas en el mismo slide. "
+    "IMÁGENES: playa, bahía, pangas, muelle, casas y lotes de la costa de "
+    "Jalisco a sangre, recorte vertical, luz natural; SIN gente reconocible "
+    "(nada de personas de stock), sin turquesa decorativo ni fondos crema."
+)
+
 VOZ_PENSIONMAS = (
     "Marca: Pensión+ (pensionmas.com.mx) — asesoría y acompañamiento para el "
     "retiro parcial por desempleo de AFORE, cambios y mejora de afore. "
@@ -66,6 +111,14 @@ _PERFIL_PENSIONMAS = {
     "posting_slots": "10:00,18:00",
 }
 
+_PERFIL_MELAQUECAPITAL = {
+    "voz": VOZ_MELAQUECAPITAL,
+    "fuentes_imagen": json.dumps(["pexels", "pinterest"]),
+    "formatos": json.dumps(["listicle", "libre"]),
+    "estilos_json": json.dumps(ESTILOS_MELAQUECAPITAL, ensure_ascii=False),
+    "logo_path": "data/brands/melaquecapital/mark.svg",
+}
+
 _PERFIL_GDLSCENE = {
     "fuentes_imagen": json.dumps(["banco", "covers", "pexels"]),
     "estilos_json": json.dumps(ESTILOS_GDLSCENE, ensure_ascii=False),
@@ -89,7 +142,13 @@ def sembrar(cx) -> None:
             cx, "accounts", slug="pensionmas", ig_handle="@pensionmas",
             nombre="Pensión+", ciudad="CDMX", color_marca="#2F52D9", activa=1)
     _completar(cx, por_slug["pensionmas"], _PERFIL_PENSIONMAS)
-    print("Seeds de marca aplicados (gdlscene + pensionmas).")
+    if "melaquecapital" not in por_slug:
+        por_slug["melaquecapital"] = db.insert(
+            cx, "accounts", slug="melaquecapital", ig_handle="@melaquecapital",
+            nombre="Melaque West Coast Real Estate", ciudad="Melaque",
+            color_marca="#223124", activa=1)
+    _completar(cx, por_slug["melaquecapital"], _PERFIL_MELAQUECAPITAL)
+    print("Seeds de marca aplicados (gdlscene + pensionmas + melaquecapital).")
 
 
 if __name__ == "__main__":

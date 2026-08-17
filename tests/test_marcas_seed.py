@@ -40,3 +40,20 @@ def test_sembrar_es_idempotente_y_no_pisa_manual(tmp_path) -> None:
     assert marcas.cargar(cx, "pensionmas").voz == "VOZ EDITADA A MANO"
     assert len([m for m in marcas.listar(cx, solo_activas=False)
                 if m.slug == "pensionmas"]) == 1
+
+
+def test_sembrar_crea_melaquecapital_completo(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    marcas_seed.sembrar(cx)
+    m = marcas.cargar(cx, "melaquecapital")
+    assert m.ig_handle == "@melaquecapital"
+    assert m.color_marca == "#223124"
+    assert m.formatos == ["listicle", "libre"]
+    assert m.fuentes == ["pexels", "pinterest"]
+    p = m.estilos["melaquecapital"]
+    assert p["chrome"]["handle"] == "@melaquecapital"
+    assert p["caja"] == "olivo" and p["overlay"] == "olivo"
+    assert p["roles"]["hook"]["font"] == "Marcellus"
+    voz = m.voz.lower()
+    assert "moneda" in voz and "ejido" in voz          # reglas de copy
+    assert "sin gente" in voz or "personas reconocibles" in voz

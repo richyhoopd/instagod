@@ -234,6 +234,13 @@ SLIDESHOW_PALETA = {
     "navy": "#1A2142",
     "oro": "#EAC366",
     "oro_profundo": "#A57D2A",
+    # Melaque West Coast Real Estate (@melaquecapital), tokens de
+    # MWRS/brand/_base.css: el verde manda, el latón es el único acento.
+    "olivo": "#223124",
+    "olivo_surface": "#2e3e30",
+    "hueso": "#f9fbf7",
+    "laton": "#eac783",
+    "laton_profundo": "#a67739",
 }
 # Catálogo de fuentes disponibles → archivo en templates/assets/fonts/.
 SLIDESHOW_FUENTES = {
@@ -244,6 +251,8 @@ SLIDESHOW_FUENTES = {
     "Tinos-Regular": "Tinos-Regular.ttf",
     "Erode-Semibold": "erode-600.woff2",
     "Erode-Bold": "erode-700.woff2",
+    "Marcellus": "Marcellus-latin.woff2",
+    "Archivo": "Archivo-latin.woff2",
 }
 # Temperatura del guion de slides (más bajo que memes: estructura > locura).
 SLIDESHOW_TEMPERATURE = float(_get("SLIDESHOW_TEMPERATURE", "1.0") or "1.0")
