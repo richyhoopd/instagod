@@ -14,6 +14,7 @@ OJO de Meta: un token con menos de 24 horas de vida NO se puede refrescar
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -26,12 +27,30 @@ _REPO_GH = "richyhoopd/instagod"
 _TOKEN_JOVEN = "less than 24 hours"  # fragmento del error de Meta
 
 
-def refresh_long_lived_token() -> dict:
-    """Refresca el IG_ACCESS_TOKEN y devuelve el JSON de respuesta de Meta."""
+def _var_token(slug: str) -> str:
+    """Nombre de la var del token de la marca: sin sufijo SOLO para gdlscene."""
+    return "IG_ACCESS_TOKEN" if slug == "gdlscene" else f"IG_ACCESS_TOKEN__{slug.upper()}"
+
+
+def marcas_con_token() -> list[str]:
+    """gdlscene + slugs con IG_ACCESS_TOKEN__<SLUG> en el entorno (multi-marca)."""
+    out = ["gdlscene"]
+    for k in sorted(os.environ):
+        if k.startswith("IG_ACCESS_TOKEN__"):
+            slug = k.removeprefix("IG_ACCESS_TOKEN__").lower()
+            if slug and slug not in out:
+                out.append(slug)
+    return out
+
+
+def refresh_long_lived_token(token: str | None = None) -> dict:
+    """Refresca un token (default: IG_ACCESS_TOKEN de gdlscene) y devuelve el
+    JSON de respuesta de Meta."""
     url = f"{config.IG_GRAPH_BASE.rstrip('/')}/refresh_access_token"
     resp = requests.get(
         url,
-        params={"grant_type": "ig_refresh_token", "access_token": config.IG_ACCESS_TOKEN},
+        params={"grant_type": "ig_refresh_token",
+                "access_token": token or config.IG_ACCESS_TOKEN},
         timeout=60,
     )
     if resp.status_code >= 400:
@@ -50,38 +69,59 @@ def _gh_bin() -> str:
     raise RuntimeError("gh CLI no encontrado: el secret del repo no se puede actualizar")
 
 
-def aplicar_token(token: str, *, env_path=None, _run=subprocess.run) -> None:
-    """Escribe el token en .env (local) y en el secret IG_ACCESS_TOKEN (repo)."""
+def aplicar_token(token: str, *, slug: str = "gdlscene", env_path=None,
+                  _run=subprocess.run) -> None:
+    """Escribe el token en .env (local) y en el secret del repo, con la var
+    de la marca (IG_ACCESS_TOKEN o IG_ACCESS_TOKEN__<SLUG>)."""
     from dotenv import set_key
 
+    var = _var_token(slug)
     env_path = env_path or (config.BASE_DIR / ".env")
-    set_key(str(env_path), "IG_ACCESS_TOKEN", token)
-    _run([_gh_bin(), "secret", "set", "IG_ACCESS_TOKEN", "--repo", _REPO_GH,
+    set_key(str(env_path), var, token)
+    _run([_gh_bin(), "secret", "set", var, "--repo", _REPO_GH,
           "--body", token], check=True, capture_output=True, text=True, timeout=60)
 
 
-def refrescar_y_aplicar() -> bool:
-    """Refresca y persiste. True si aplicó; False si el token era muy joven."""
+def refrescar_y_aplicar(slug: str = "gdlscene") -> bool:
+    """Refresca y persiste el token de UNA marca. True si aplicó; False si el
+    token era muy joven o la marca no tiene token en el entorno."""
+    actual = config.account_creds(slug).get("IG_ACCESS_TOKEN")
+    if not actual:
+        print(f"[{slug}] sin {_var_token(slug)} en el entorno: nada que refrescar.")
+        return False
     try:
-        data = refresh_long_lived_token()
+        data = refresh_long_lived_token(actual)
     except RuntimeError as exc:
         if _TOKEN_JOVEN in str(exc):
-            print("Token con <24h de vida: Meta no lo refresca todavía. Nada que hacer.")
+            print(f"[{slug}] token con <24h de vida: Meta no lo refresca todavía.")
             return False
         raise
     token = data.get("access_token")
     if not token:
-        raise RuntimeError(f"Respuesta sin access_token: {data}")
-    aplicar_token(token)
-    dias = data.get("expires_in", 0) // 86400
-    print(f"Token refrescado y aplicado (.env + secret). Vence en ~{dias} días.")
+        raise RuntimeError(f"[{slug}] respuesta sin access_token: {data}")
+    aplicar_token(token, slug=slug)
+    dias = int(data.get("expires_in", 0)) // 86400
+    print(f"[{slug}] token refrescado y aplicado (.env + secret). Vence en ~{dias} días.")
     return True
+
+
+def refrescar_todas() -> None:
+    """Refresca todas las marcas con token; una que falle no bloquea a las
+    demás, pero al final se levanta el error (para que el launchd avise)."""
+    fallas = []
+    for slug in marcas_con_token():
+        try:
+            refrescar_y_aplicar(slug)
+        except Exception as exc:  # noqa: BLE001 — se reporta al final
+            fallas.append(f"{slug}: {exc}")
+    if fallas:
+        raise RuntimeError("Refresh falló en " + "; ".join(fallas))
 
 
 if __name__ == "__main__":
     if "--aplicar" in sys.argv:
         try:
-            refrescar_y_aplicar()
+            refrescar_todas()
         except Exception as exc:  # el log del launchd guarda el detalle
             from src.check_releases import avisar_telegram
 
