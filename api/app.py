@@ -5,8 +5,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import config
 from api.errors import ApiError, manejar_api_error
 from api.ratelimit import Limitador
 from api.routers import auth, brands, pruebas, secrets, system, users
@@ -30,6 +32,8 @@ def create_app() -> FastAPI:
     app.state.limite_email = Limitador(5, 3600)
     app.state.limite_ip = Limitador(5, 3600)
     app.add_exception_handler(ApiError, manejar_api_error)
+    app.add_middleware(CORSMiddleware, allow_origins=[config.APP_URL], allow_credentials=True,
+                       allow_methods=["*"], allow_headers=["*"])
 
     @app.exception_handler(RequestValidationError)
     async def _validacion(_, exc: RequestValidationError):

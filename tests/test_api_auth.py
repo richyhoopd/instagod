@@ -113,6 +113,16 @@ def test_usuario_inactivo_pierde_sesion(api_cliente) -> None:
     assert cli.get("/me").status_code == 401
 
 
+def test_cors_solo_app_url(api_cliente) -> None:
+    cli, _, _ = api_cliente
+    r = cli.options("/health", headers={"Origin": "http://front.test",
+                                        "Access-Control-Request-Method": "GET"})
+    assert r.headers.get("access-control-allow-origin") == "http://front.test"
+    r2 = cli.options("/health", headers={"Origin": "http://otro.test",
+                                         "Access-Control-Request-Method": "GET"})
+    assert "access-control-allow-origin" not in r2.headers
+
+
 def test_magic_link_ignora_header_host(api_cliente, monkeypatch) -> None:
     cli, _, H = api_cliente
     from api import mail
