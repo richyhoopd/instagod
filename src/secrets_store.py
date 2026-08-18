@@ -74,6 +74,8 @@ def borrar(cx: sqlite3.Connection, account_id: int, clave: str) -> bool:
 
 
 def leer(cx: sqlite3.Connection, account_id: int, clave: str) -> str | None:
+    if not habilitado():
+        return None
     fila = cx.execute("SELECT valor_cifrado FROM brand_secrets WHERE account_id=? AND clave=?",
                       (account_id, clave)).fetchone()
     return descifrar(fila[0]) if fila else None
@@ -81,6 +83,8 @@ def leer(cx: sqlite3.Connection, account_id: int, clave: str) -> str | None:
 
 def leer_todos(cx: sqlite3.Connection, account_id: int) -> dict[str, str]:
     """{clave: valor} de la marca. Un token indescifrable (llave rotada) se salta con aviso."""
+    if not habilitado():
+        return {}
     out: dict[str, str] = {}
     for f in db.rows(cx, "SELECT clave, valor_cifrado FROM brand_secrets WHERE account_id=?",
                      (account_id,)):
@@ -103,6 +107,11 @@ def listar_meta(cx: sqlite3.Connection, account_id: int) -> list[dict]:
         if not f:
             out.append({"clave": clave, "configurada": False, "ultimos4": None,
                         "updated_at": None})
+            continue
+        if not habilitado():
+            # Sin master key, mostrar que existe pero sin intentar descifrar
+            out.append({"clave": clave, "configurada": True, "ultimos4": None,
+                        "updated_at": f["updated_at"]})
             continue
         try:
             val = descifrar(f["valor_cifrado"])
@@ -139,3 +148,55 @@ def version_marcas(cx: sqlite3.Connection) -> dict[int, str]:
     """{account_id: max(updated_at)} — huella barata para detectar cambios."""
     return {int(f["account_id"]): f["v"] for f in db.rows(
         cx, "SELECT account_id, MAX(updated_at) AS v FROM brand_secrets GROUP BY account_id")}
+
+
+def actualizar_si_existe(slug: str, clave: str, valor: str) -> bool:
+    """Actualiza secreto de cuenta por slug. False si disabled, no account, o no row para clave.
+    Abre su propia conexión como creds_de_slug. Nunca lanza por errores sqlite (return False,
+    print aviso a stderr)."""
+    if not habilitado():
+        return False
+    try:
+        cx = db.connect()
+    except sqlite3.Error:
+        return False
+    try:
+        fila = cx.execute("SELECT id FROM accounts WHERE slug=?", (slug,)).fetchone()
+        if not fila:
+            return False
+        account_id = int(fila[0])
+        # Verificar que ya existe una fila para esta clave
+        existe = cx.execute(
+            "SELECT 1 FROM brand_secrets WHERE account_id=? AND clave=?",
+            (account_id, clave)).fetchone()
+        if not existe:
+            return False
+        guardar(cx, account_id, clave, valor)
+        return True
+    except sqlite3.Error as e:
+        print(f"[secretos] no pude actualizar {clave} de {slug}: {e}", file=sys.stderr)
+        return False
+    finally:
+        cx.close()
+
+
+def slugs_con_clave(clave: str) -> list[str]:
+    """Slugs de cuentas que tienen row para clave. [] si disabled o DB error, ordenados por account_id."""
+    if not habilitado():
+        return []
+    try:
+        cx = db.connect()
+    except sqlite3.Error:
+        return []
+    try:
+        filas = cx.execute(
+            "SELECT DISTINCT a.slug FROM accounts a "
+            "JOIN brand_secrets s ON a.id = s.account_id WHERE s.clave = ? "
+            "ORDER BY a.id",
+            (clave,)).fetchall()
+        return [f[0] for f in filas]
+    except sqlite3.Error as e:
+        print(f"[secretos] no pude listar slugs con {clave}: {e}", file=sys.stderr)
+        return []
+    finally:
+        cx.close()

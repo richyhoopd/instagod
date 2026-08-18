@@ -78,3 +78,45 @@ def test_version_marcas(cx) -> None:
     ss.guardar(cx, 2, "IG_USER_ID", "1")
     v = ss.version_marcas(cx)
     assert list(v) == [2] and v[2]
+
+
+def test_sin_master_key_lectura_degrada(cx, monkeypatch) -> None:
+    # Guardar con clave habilitada
+    ss.guardar(cx, 2, "TELEGRAM_BOT_TOKEN", "123456:ABCDEF")
+    assert ss.leer(cx, 2, "TELEGRAM_BOT_TOKEN") == "123456:ABCDEF"
+
+    # Deshabilitar master key
+    monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", None)
+
+    # Todas las lecturas degradan sin excepciones
+    assert ss.leer(cx, 2, "TELEGRAM_BOT_TOKEN") is None
+    assert ss.leer_todos(cx, 2) == {}
+
+    # listar_meta muestra que existe pero sin descifrar
+    meta = {m["clave"]: m for m in ss.listar_meta(cx, 2)}
+    assert meta["TELEGRAM_BOT_TOKEN"]["configurada"] is True
+    assert meta["TELEGRAM_BOT_TOKEN"]["ultimos4"] is None
+    assert meta["TELEGRAM_BOT_TOKEN"]["updated_at"] is not None
+    assert meta["IG_USER_ID"]["configurada"] is False
+
+
+def test_actualizar_si_existe_y_slugs_con_clave(cx, monkeypatch) -> None:
+    # Sin clave configurada: actualizar_si_existe retorna False
+    assert ss.actualizar_si_existe("pensionmas", "IG_ACCESS_TOKEN", "x") is False
+    assert ss.slugs_con_clave("IG_ACCESS_TOKEN") == []
+
+    # Guardar la clave
+    ss.guardar(cx, 2, "IG_ACCESS_TOKEN", "viejo")
+    assert ss.leer(cx, 2, "IG_ACCESS_TOKEN") == "viejo"
+
+    # Ahora actualizar_si_existe funciona
+    assert ss.actualizar_si_existe("pensionmas", "IG_ACCESS_TOKEN", "nuevo") is True
+    assert ss.leer(cx, 2, "IG_ACCESS_TOKEN") == "nuevo"
+
+    # slugs_con_clave retorna la lista
+    assert ss.slugs_con_clave("IG_ACCESS_TOKEN") == ["pensionmas"]
+
+    # Sin master key, ambas funciones retornan False / []
+    monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", None)
+    assert ss.actualizar_si_existe("pensionmas", "IG_ACCESS_TOKEN", "otro") is False
+    assert ss.slugs_con_clave("IG_ACCESS_TOKEN") == []
