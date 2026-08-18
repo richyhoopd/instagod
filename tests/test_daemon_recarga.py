@@ -37,7 +37,10 @@ def test_correr_devuelve_motivo_y_apaga(monkeypatch) -> None:
     assert "shutdown:a" in log
 
 
-def test_main_recarga_hasta_senal(monkeypatch) -> None:
+def test_main_recarga_hasta_senal(tmp_path, monkeypatch) -> None:
+    from src import db as db_mod
+
+    conectar_real = db_mod.connect  # capturado ANTES de monkeypatchear: ad.db es db_mod
     rondas = iter([
         [(_M("a"), {"TELEGRAM_BOT_TOKEN": "1", "TELEGRAM_CHAT_ID": "x"})],
         [(_M("a"), {"TELEGRAM_BOT_TOKEN": "1", "TELEGRAM_CHAT_ID": "x"}),
@@ -46,6 +49,8 @@ def test_main_recarga_hasta_senal(monkeypatch) -> None:
     construidas: list = []
     motivos = iter(["recarga", "senal"])
     monkeypatch.setattr(ad.poller_lock, "adquirir", lambda: None)
+    monkeypatch.setattr(ad.db, "connect", lambda *a, **k: conectar_real(tmp_path / "t.db"))
+    monkeypatch.setattr(ad.db, "init_db", lambda cx: None)
     monkeypatch.setattr(ad, "_pares_actuales", lambda: next(rondas))
     monkeypatch.setattr(ad, "construir_app",
                         lambda t, c, slug, interactivo=False: construidas.append(slug) or object())
@@ -73,10 +78,15 @@ def test_pares_actuales_no_migra(tmp_path, monkeypatch) -> None:
     assert llamadas == []
 
 
-def test_main_sin_bots_espera_en_vez_de_fallar(monkeypatch) -> None:
+def test_main_sin_bots_espera_en_vez_de_fallar(tmp_path, monkeypatch) -> None:
+    from src import db as db_mod
+
+    conectar_real = db_mod.connect  # capturado ANTES de monkeypatchear: ad.db es db_mod
     rondas = iter([[], [(_M("a"), {"TELEGRAM_BOT_TOKEN": "1", "TELEGRAM_CHAT_ID": "x"})]])
     dormidas: list = []
     monkeypatch.setattr(ad.poller_lock, "adquirir", lambda: None)
+    monkeypatch.setattr(ad.db, "connect", lambda *a, **k: conectar_real(tmp_path / "t.db"))
+    monkeypatch.setattr(ad.db, "init_db", lambda cx: None)
     monkeypatch.setattr(ad, "_pares_actuales", lambda: next(rondas))
     monkeypatch.setattr(ad, "_dormir", lambda s: dormidas.append(s))
     monkeypatch.setattr(ad, "construir_app", lambda *a, **k: object())
