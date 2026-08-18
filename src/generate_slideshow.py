@@ -49,7 +49,7 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
                                            n_slides=n_slides,
                                            contexto=contexto_full)
     hints = [sl["image_hint"] for sl in guion["slides"]]
-    imagenes = image_sources.resolver(hints, list(fuentes), cx=cx)
+    imagenes = image_sources.resolver(hints, list(fuentes), cx=cx, slug=m.slug)
     sin_imagen = sum(1 for i in imagenes if i is None)
     if sin_imagen:
         print(f"[slideshow] {sin_imagen}/{len(imagenes)} slides sin imagen "

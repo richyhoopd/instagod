@@ -287,3 +287,52 @@ def test_banco_provider_nombre_corto_sin_falso_positivo(tmp_path) -> None:
               source_post_id="e1", usable_meme=1, usada=0, descartada=0,
               nitidez=80.0)
     assert isrc.BancoProvider(cx).buscar("coffee education poster") == []
+
+
+# --- CarpetaProvider: fotos propias de la marca en data/brands/<slug>/fotos ---
+
+def _carpeta_marca(tmp_path):
+    raiz = tmp_path / "fotos"
+    for rel in ("brand/bay-sunset.jpg", "brand/aerial-palms.jpg",
+                "melaque/pier.jpg", "sayula/church.png", "notas.txt"):
+        p = raiz / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+    return raiz
+
+
+def test_carpeta_matchea_tokens_del_hint_contra_ruta(tmp_path) -> None:
+    prov = isrc.CarpetaProvider(_carpeta_marca(tmp_path))
+    out = prov.buscar("melaque pier at golden hour", n=2)
+    assert out and out[0].ruta_o_url.endswith("melaque/pier.jpg")
+    assert out[0].source == "carpeta"
+
+
+def test_carpeta_prefiere_mas_tokens_coincidentes(tmp_path) -> None:
+    prov = isrc.CarpetaProvider(_carpeta_marca(tmp_path))
+    out = prov.buscar("aerial view of palms on the bay", n=3)
+    # aerial+palms (2 tokens) gana a bay (1 token)
+    assert out[0].ruta_o_url.endswith("brand/aerial-palms.jpg")
+    assert out[1].ruta_o_url.endswith("brand/bay-sunset.jpg")
+
+
+def test_carpeta_sin_match_cae_a_fotos_de_marca_igual(tmp_path) -> None:
+    """Sin coincidencia sigue devolviendo fotos: la marca prefiere su banco a
+    fondo sólido o stock. Determinista por hint (mismo hint → mismo orden)."""
+    prov = isrc.CarpetaProvider(_carpeta_marca(tmp_path))
+    a = prov.buscar("régimen ejidal y fideicomiso", n=3)
+    b = prov.buscar("régimen ejidal y fideicomiso", n=3)
+    assert len(a) == 3 and [c.ruta_o_url for c in a] == [c.ruta_o_url for c in b]
+    assert all(not c.ruta_o_url.endswith(".txt") for c in a)
+
+
+def test_carpeta_inexistente_devuelve_vacio(tmp_path) -> None:
+    assert isrc.CarpetaProvider(tmp_path / "nada").buscar("beach") == []
+
+
+def test_providers_default_incluye_carpeta_de_la_marca(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(isrc, "BRANDS_DIR", tmp_path)
+    (tmp_path / "melaquecapital" / "fotos").mkdir(parents=True)
+    provs = isrc.providers_default(slug="melaquecapital")
+    assert isinstance(provs["carpeta"], isrc.CarpetaProvider)
+    assert "carpeta" not in isrc.providers_default()

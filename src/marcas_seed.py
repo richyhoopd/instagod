@@ -113,7 +113,9 @@ _PERFIL_PENSIONMAS = {
 
 _PERFIL_MELAQUECAPITAL = {
     "voz": VOZ_MELAQUECAPITAL,
-    "fuentes_imagen": json.dumps(["pexels", "pinterest"]),
+    # carpeta = data/brands/melaquecapital/fotos (symlink a MWRS/public/img):
+    # banco propio primero, stock solo de respaldo.
+    "fuentes_imagen": json.dumps(["carpeta", "pexels", "pinterest"]),
     "formatos": json.dumps(["listicle", "libre"]),
     "estilos_json": json.dumps(ESTILOS_MELAQUECAPITAL, ensure_ascii=False),
     "logo_path": "data/brands/melaquecapital/mark.svg",

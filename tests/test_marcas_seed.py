@@ -49,7 +49,7 @@ def test_sembrar_crea_melaquecapital_completo(tmp_path) -> None:
     assert m.ig_handle == "@melaquecapital"
     assert m.color_marca == "#223124"
     assert m.formatos == ["listicle", "libre"]
-    assert m.fuentes == ["pexels", "pinterest"]
+    assert m.fuentes == ["carpeta", "pexels", "pinterest"]
     p = m.estilos["melaquecapital"]
     assert p["chrome"]["handle"] == "@melaquecapital"
     assert p["caja"] == "olivo" and p["overlay"] == "olivo"

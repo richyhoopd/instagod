@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,9 @@ import config
 from src import covers, db
 
 SOURCING_DIR = config.BASE_DIR / "data" / "sourcing"
+# Fotos propias por marca: data/brands/<slug>/fotos/ (o symlink al banco real).
+BRANDS_DIR = config.BASE_DIR / "data" / "brands"
+_EXT_FOTO = {".jpg", ".jpeg", ".png", ".webp"}
 
 # Bytes mágicos aceptados (JPEG, PNG, WEBP/RIFF).
 _MAGIA = (b"\xff\xd8\xff", b"\x89PNG", b"RIFF")
@@ -27,7 +32,7 @@ _MAGIA = (b"\xff\xd8\xff", b"\x89PNG", b"RIFF")
 @dataclass
 class ImagenCandidata:
     ruta_o_url: str            # path local o URL https
-    source: str                # "banco"|"covers"|"pexels"|"pinterest"|"manual"
+    source: str                # "banco"|"covers"|"carpeta"|"pexels"|"pinterest"|"manual"
     credito: str | None = None
 
 
@@ -226,21 +231,67 @@ class PinterestProvider:
         return out
 
 
-def providers_default(cx=None) -> dict:
-    """Providers disponibles. banco/covers requieren conexión a la DB."""
+class CarpetaProvider:
+    """Banco de fotos PROPIO de una marca (carpeta local, sin red).
+
+    Matchea los tokens del hint del LLM contra la ruta relativa de cada
+    archivo (carpetas + nombre: "brand/aerial-palms.jpg" → aerial, palms).
+    Sin coincidencia NO devuelve vacío: reparte fotos de la marca de forma
+    determinista por hint — para marcas con reglas de imagen estrictas
+    (MWRS: sin gente de stock) cualquier foto propia gana a stock o a fondo
+    sólido. La anti-repetición dentro del set la hace resolver().
+    """
+
+    nombre = "carpeta"
+
+    def __init__(self, raiz: Path):
+        self.raiz = Path(raiz)
+
+    def _archivos(self) -> list[Path]:
+        if not self.raiz.is_dir():
+            return []
+        return sorted(p for p in self.raiz.rglob("*")
+                      if p.is_file() and p.suffix.lower() in _EXT_FOTO)
+
+    @staticmethod
+    def _tokens(texto: str) -> set[str]:
+        return {t for t in re.split(r"[^a-z0-9áéíóúñ]+", texto.lower()) if len(t) >= 3}
+
+    def buscar(self, hint: str, n: int = 3) -> list[ImagenCandidata]:
+        archivos = self._archivos()
+        if not archivos:
+            return []
+        quiere = self._tokens(hint)
+        puntuadas = []
+        for p in archivos:
+            rel = p.relative_to(self.raiz).with_suffix("").as_posix()
+            puntuadas.append((len(quiere & self._tokens(rel)), p))
+        con_match = [p for score, p in sorted(puntuadas, key=lambda x: -x[0]) if score > 0]
+        if not con_match:
+            resto = list(archivos)
+            random.Random(hint).shuffle(resto)
+            con_match = resto
+        return [ImagenCandidata(str(p), "carpeta") for p in con_match[:n]]
+
+
+def providers_default(cx=None, slug: str | None = None) -> dict:
+    """Providers disponibles. banco/covers requieren DB; carpeta requiere slug
+    (y que exista data/brands/<slug>/fotos)."""
     out: dict = {}
     if cx is not None:
         out["banco"] = BancoProvider(cx)
         out["covers"] = CoversProvider(cx)
+    if slug and (BRANDS_DIR / slug / "fotos").is_dir():
+        out["carpeta"] = CarpetaProvider(BRANDS_DIR / slug / "fotos")
     out["pexels"] = PexelsProvider()
     out["pinterest"] = PinterestProvider()
     return out
 
 
-def resolver(hints: list[str], fuentes: list[str], *, cx=None,
+def resolver(hints: list[str], fuentes: list[str], *, cx=None, slug: str | None = None,
              providers: dict | None = None) -> list[ImagenCandidata | None]:
     """Una candidata (o None) por hint, sin repetir imagen dentro del set."""
-    provs = providers if providers is not None else providers_default(cx)
+    provs = providers if providers is not None else providers_default(cx, slug=slug)
     usadas: set[str] = set()
     out: list[ImagenCandidata | None] = []
     for hint in hints:

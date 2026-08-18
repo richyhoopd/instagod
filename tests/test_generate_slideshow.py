@@ -164,3 +164,18 @@ def test_generar_gdlscene_default_sigue_siendo_listicle(monkeypatch, tmp_path) -
     monkeypatch.setattr(gs.slideshow_script, "generar_guion", _guion_spy)
     gs.generar(cx, "café")
     assert capturado["formato"] == "listicle"
+
+
+def test_generar_pasa_slug_al_sourcing(tmp_path, monkeypatch) -> None:
+    """El provider `carpeta` necesita saber de qué marca son las fotos."""
+    from src import marcas_seed
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    marcas_seed.sembrar(cx)
+    visto = {}
+
+    def _resolver_spy(hints, fuentes, **kw):
+        visto.update(kw)
+        return [None] * len(hints)
+    monkeypatch.setattr(gs.image_sources, "resolver", _resolver_spy)
+    gs.generar(cx, "comprar en Melaque", marca="melaquecapital", dry_run=True)
+    assert visto.get("slug") == "melaquecapital"
