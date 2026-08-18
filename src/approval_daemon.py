@@ -38,6 +38,7 @@ import asyncio
 import contextlib
 import signal
 import sys
+import time
 
 from telegram import Update
 from telegram.ext import (
@@ -221,7 +222,50 @@ async def _esperar_senal() -> None:
     await stop.wait()
 
 
-async def correr(apps) -> None:
+RECARGA_SEG = 60   # cada cuánto revisa si cambiaron tokens/chats de marcas
+
+
+def _huella(pares) -> tuple:
+    """Huella de (slug, token, chat) de las marcas con bot: cambia → recargar."""
+    return tuple(sorted((m.slug, c.get("TELEGRAM_BOT_TOKEN"), c.get("TELEGRAM_CHAT_ID"))
+                        for m, c in pares))
+
+
+def _pares_actuales() -> list:
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        lista = marcas_mod.listar(cx)
+    finally:
+        cx.close()
+    return marcas_con_bot(lista)
+
+
+def _dormir(seg: float) -> None:
+    time.sleep(seg)
+
+
+async def _esperar_senal_o_cambio(huella, calcular, cada: float = RECARGA_SEG) -> str:
+    """Termina con 'senal' (SIGINT/SIGTERM) o 'recarga' (cambió la huella)."""
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop.set)
+    while not stop.is_set():
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=cada)
+        if stop.is_set():
+            break
+        try:
+            if await asyncio.to_thread(calcular) != huella:
+                return "recarga"
+        except Exception as e:  # noqa: BLE001 — un fallo de DB no tumba el daemon
+            print(f"WARNING recarga: {e}", file=sys.stderr)
+    return "senal"
+
+
+async def correr(apps, *, esperar=None) -> str:
     """Ciclo de vida de N Applications en un solo loop.
 
     El `try` arranca ANTES de `initialize`: si una marca falla al arrancar
@@ -234,8 +278,13 @@ async def correr(apps) -> None:
     el latido ya está corriendo y sigue cubriendo la ventana de arranque; el
     guard `_todos_corriendo` evita que escriba un latido falso mientras alguna
     marca todavía no levanta.
+
+    `esperar` (corutina sin args) decide cuándo terminar; por default espera
+    señal. Devuelve el motivo ('senal' | 'recarga') para que main() decida si
+    reconstruir los bots.
     """
     latido = None
+    motivo = "senal"
     try:
         for app in apps:
             await app.initialize()
@@ -246,7 +295,7 @@ async def correr(apps) -> None:
             # bootstrap_retries=-1: parpadeo de red al arrancar reintenta indefinido
             await app.updater.start_polling(drop_pending_updates=True,
                                             bootstrap_retries=-1)
-        await _esperar_senal()
+        motivo = await (esperar() if esperar else _esperar_senal()) or "senal"
     finally:
         if latido is not None:
             latido.cancel()
@@ -259,26 +308,32 @@ async def correr(apps) -> None:
         for app in reversed(apps):
             with contextlib.suppress(Exception):
                 await app.shutdown()
+    return motivo
 
 
 def main() -> None:
     poller_lock.adquirir()
-    cx = db.connect()
-    try:
-        db.init_db(cx)
-        lista = marcas_mod.listar(cx)
-    finally:
-        cx.close()
-    pares = marcas_con_bot(lista)
-    if not pares:
-        raise RuntimeError("Ninguna marca tiene TELEGRAM_BOT_TOKEN/CHAT_ID: "
-                           "no hay bots que polear")
-    apps = [construir_app(creds["TELEGRAM_BOT_TOKEN"], creds["TELEGRAM_CHAT_ID"],
-                          m.slug, interactivo=(m.slug == "gdlscene"))
-            for m, creds in pares]
-    print(f"Daemon multi-bot: {len(apps)} marca(s) — "
-          + ", ".join(m.slug for m, _ in pares))
-    asyncio.run(correr(apps))
+    while True:
+        pares = _pares_actuales()
+        if not pares:
+            print("[daemon] ninguna marca tiene TELEGRAM_BOT_TOKEN/CHAT_ID; "
+                  f"reviso de nuevo en {RECARGA_SEG}s")
+            _dormir(RECARGA_SEG)
+            continue
+        huella = _huella(pares)
+        apps = [construir_app(creds["TELEGRAM_BOT_TOKEN"], creds["TELEGRAM_CHAT_ID"],
+                              m.slug, interactivo=(m.slug == "gdlscene"))
+                for m, creds in pares]
+        print(f"Daemon multi-bot: {len(apps)} marca(s) — "
+              + ", ".join(m.slug for m, _ in pares))
+
+        async def _esperar(h=huella):
+            return await _esperar_senal_o_cambio(
+                h, lambda: _huella(_pares_actuales()), cada=RECARGA_SEG)
+        motivo = asyncio.run(correr(apps, esperar=_esperar))
+        if motivo != "recarga":
+            break
+        print("[daemon] cambiaron credenciales de Telegram: recargando bots")
 
 
 if __name__ == "__main__":
