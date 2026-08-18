@@ -12,6 +12,7 @@ import sys
 
 from cryptography.fernet import Fernet
 
+import config
 from src import db, users
 from src import secrets_store as ss
 
@@ -65,8 +66,8 @@ def main(argv=None) -> int:
         db.init_db(cx)
         if a.admin:
             uid, tok = asegurar_admin(cx, a.admin, a.nombre)
-            base = os.getenv("API_URL_PUBLICA", "http://localhost:8100")
-            print(f"Admin listo (id={uid}). Entra con:\n  {base}/auth/callback?token={tok}")
+            print(f"Admin listo (id={uid}). Entra con:\n"
+                  f"  {config.API_URL}/auth/callback?token={tok}")
         if a.importar_env:
             if not ss.habilitado():
                 print("Falta INSTAGOD_MASTER_KEY en .env", file=sys.stderr)

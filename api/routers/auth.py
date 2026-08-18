@@ -35,7 +35,7 @@ def pedir_magic_link(datos: PedirLink, request: Request, cx=Depends(get_cx)) -> 
     u = users.por_email(cx, email)
     if u and u["activo"]:
         tok = users.crear_magic_link(cx, u["id"])
-        url = str(request.url_for("auth_callback")) + f"?token={tok}"
+        url = f"{config.API_URL}/auth/callback?token={tok}"
         mail.enviar_magic_link(email, url)
     return {"ok": True}   # nunca revela si el email existe
 

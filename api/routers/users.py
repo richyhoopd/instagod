@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, EmailStr, Field
 
+import config
 from api import mail
 from api.deps import get_cx, requiere_admin
 from api.errors import ApiError, conflicto, no_encontrado
@@ -49,9 +50,9 @@ def _vista(cx, uid: int) -> dict:
     return u
 
 
-def _mandar_link(cx, request: Request, uid: int, email: str) -> None:
+def _mandar_link(cx, uid: int, email: str) -> None:
     tok = users.crear_magic_link(cx, uid)
-    mail.enviar_magic_link(email, str(request.url_for("auth_callback")) + f"?token={tok}")
+    mail.enviar_magic_link(email, f"{config.API_URL}/auth/callback?token={tok}")
 
 
 @router.get("")
@@ -68,7 +69,7 @@ def invitar(datos: Invitar, request: Request, cx=Depends(get_cx)) -> dict:
         raise conflicto(str(e), "email") from e
     for account_id, rol in asignaciones:
         users.asignar_marca(cx, uid, account_id, rol)
-    _mandar_link(cx, request, uid, datos.email.lower())
+    _mandar_link(cx, uid, datos.email.lower())
     return _vista(cx, uid)
 
 
@@ -99,7 +100,7 @@ def reinvitar(uid: int, request: Request, cx=Depends(get_cx)) -> dict:
     u = users.por_id(cx, uid)
     if not u:
         raise no_encontrado(f"el usuario {uid}")
-    _mandar_link(cx, request, uid, u["email"])
+    _mandar_link(cx, uid, u["email"])
     return {"ok": True}
 
 

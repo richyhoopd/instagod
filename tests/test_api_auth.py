@@ -111,3 +111,18 @@ def test_usuario_inactivo_pierde_sesion(api_cliente) -> None:
     H.login(uid)
     db.update(cx, "users", uid, activo=0)
     assert cli.get("/me").status_code == 401
+
+
+def test_magic_link_ignora_header_host(api_cliente, monkeypatch) -> None:
+    cli, _, H = api_cliente
+    from api import mail
+    enviados = []
+    monkeypatch.setattr(mail, "_post_resend", lambda payload: enviados.append(payload))
+    monkeypatch.setattr(mail.config, "RESEND_API_KEY", "re_test")
+    H.usuario("ana@x.com")
+    r = cli.post("/auth/magic-link", json={"email": "ana@x.com"},
+                headers={"Host": "evil.example.com"})
+    assert r.status_code == 200
+    url = enviados[0]["_url"]
+    assert url.startswith("http://api.test/auth/callback?token=")
+    assert "evil.example.com" not in url

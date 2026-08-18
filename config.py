@@ -442,3 +442,4 @@ MAIL_FROM = _get("MAIL_FROM", "instagod <no-reply@instagod.local>")
 SESSION_DAYS = int(_get("SESSION_DAYS", "30") or 30)
 ENV = (_get("ENV", "dev") or "dev").lower()          # dev | prod
 COOKIE_DOMAIN = _get("COOKIE_DOMAIN")                 # p.ej. ".midominio.com" (opcional)
+API_URL = (_get("API_URL", "http://localhost:8100") or "").rstrip("/")

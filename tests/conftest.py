@@ -34,6 +34,7 @@ def api_cliente(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", None)
     monkeypatch.setattr(config, "APP_URL", "http://front.test")
+    monkeypatch.setattr(config, "API_URL", "http://api.test")
     monkeypatch.setattr(config, "ENV", "dev")
     from api import app as app_mod
     importlib.reload(app_mod)
