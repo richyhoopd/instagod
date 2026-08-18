@@ -1,7 +1,11 @@
 """El refresh --aplicar debe persistir el token en .env y en el secret del repo."""
-import pytest
+import importlib
 
-from src import ig_token
+import pytest
+from cryptography.fernet import Fernet
+
+import config
+from src import db, ig_token, secrets_store
 
 
 def test_aplicar_token_escribe_env_y_secret(tmp_path):
@@ -111,5 +115,40 @@ def test_refrescar_todas_itera_marcas_del_env_y_no_para_por_una(monkeypatch):
     monkeypatch.setattr(ig_token, "refrescar_y_aplicar", _refrescar)
     with pytest.raises(RuntimeError, match="gdlscene"):
         ig_token.refrescar_todas()
-    # y las marcas se derivan del ENTORNO (sufijos IG_ACCESS_TOKEN__*)
+    # y las marcas se derivan del ENTORNO (sufijos IG_ACCESS_TOKEN__*); con el
+    # store apagado (conftest anula INSTAGOD_MASTER_KEY) no suma marcas de DB
     assert ig_token.marcas_con_token() == ["gdlscene", "melaquecapital"]
+
+
+# --- F2: el refresh también persiste en brand_secrets si el token vive ahí ---
+
+def test_aplicar_token_actualiza_brand_secrets_si_existe(tmp_path, monkeypatch):
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "t.db"))
+    importlib.reload(config)
+    monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", Fernet.generate_key().decode())
+    cx = db.connect()
+    db.init_db(cx)
+    pid = db.insert(cx, "accounts", slug="pensionmas", ig_handle="@p", nombre="P", ciudad="CDMX")
+    secrets_store.guardar(cx, pid, "IG_ACCESS_TOKEN", "viejo")
+    cx.close()
+
+    tmp_env = tmp_path / ".env"
+    tmp_env.write_text("")
+    ig_token.aplicar_token("nuevo", slug="pensionmas", env_path=tmp_env,
+                           _run=lambda *a, **k: None)
+
+    cx2 = db.connect()
+    try:
+        assert secrets_store.leer(cx2, pid, "IG_ACCESS_TOKEN") == "nuevo"
+    finally:
+        cx2.close()
+    assert "pensionmas" in ig_token.marcas_con_token()
+
+
+def test_aplicar_token_sin_master_key_es_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", None)
+    tmp_env = tmp_path / ".env"
+    tmp_env.write_text("")
+    ig_token.aplicar_token("nuevo", slug="pensionmas", env_path=tmp_env,
+                           _run=lambda *a, **k: None)
+    assert "nuevo" in tmp_env.read_text()

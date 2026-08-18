@@ -173,7 +173,7 @@ def actualizar_si_existe(slug: str, clave: str, valor: str) -> bool:
             return False
         guardar(cx, account_id, clave, valor)
         return True
-    except sqlite3.Error as e:
+    except (sqlite3.Error, ValueError, KeyError) as e:
         print(f"[secretos] no pude actualizar {clave} de {slug}: {e}", file=sys.stderr)
         return False
     finally:

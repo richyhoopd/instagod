@@ -33,13 +33,22 @@ def _var_token(slug: str) -> str:
 
 
 def marcas_con_token() -> list[str]:
-    """gdlscene + slugs con IG_ACCESS_TOKEN__<SLUG> en el entorno (multi-marca)."""
+    """gdlscene + slugs con IG_ACCESS_TOKEN__<SLUG> en el entorno, + slugs con el
+    token guardado en brand_secrets (DB). Tolerante: store apagado/DB ausente → []."""
     out = ["gdlscene"]
     for k in sorted(os.environ):
         if k.startswith("IG_ACCESS_TOKEN__"):
             slug = k.removeprefix("IG_ACCESS_TOKEN__").lower()
             if slug and slug not in out:
                 out.append(slug)
+    try:
+        from src import secrets_store
+        de_db = secrets_store.slugs_con_clave("IG_ACCESS_TOKEN")
+    except Exception:  # noqa: BLE001 — nunca debe tumbar el refresh semanal
+        de_db = []
+    for slug in de_db:
+        if slug not in out:
+            out.append(slug)
     return out
 
 
@@ -69,10 +78,22 @@ def _gh_bin() -> str:
     raise RuntimeError("gh CLI no encontrado: el secret del repo no se puede actualizar")
 
 
+def _persistir_en_db(slug: str, token: str) -> bool:
+    """Si el token de la marca vive en brand_secrets, actualízalo ahí también.
+    Tolerante: store apagado / DB ausente → no-op (False)."""
+    try:
+        from src import secrets_store
+        return secrets_store.actualizar_si_existe(slug, "IG_ACCESS_TOKEN", token)
+    except Exception as e:  # noqa: BLE001 — el refresh semanal jamás debe fallar por esto
+        print(f"[ig_token] no pude actualizar brand_secrets de {slug}: {e}", file=sys.stderr)
+        return False
+
+
 def aplicar_token(token: str, *, slug: str = "gdlscene", env_path=None,
                   _run=subprocess.run) -> None:
-    """Escribe el token en .env (local) y en el secret del repo, con la var
-    de la marca (IG_ACCESS_TOKEN o IG_ACCESS_TOKEN__<SLUG>)."""
+    """Escribe el token en .env (local), en el secret del repo y, si vive ahí,
+    también en brand_secrets (DB), con la var de la marca (IG_ACCESS_TOKEN o
+    IG_ACCESS_TOKEN__<SLUG>)."""
     from dotenv import set_key
 
     var = _var_token(slug)
@@ -80,6 +101,7 @@ def aplicar_token(token: str, *, slug: str = "gdlscene", env_path=None,
     set_key(str(env_path), var, token)
     _run([_gh_bin(), "secret", "set", var, "--repo", _REPO_GH,
           "--body", token], check=True, capture_output=True, text=True, timeout=60)
+    _persistir_en_db(slug, token)
 
 
 def refrescar_y_aplicar(slug: str = "gdlscene") -> bool:
