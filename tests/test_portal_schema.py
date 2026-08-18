@@ -40,3 +40,9 @@ def test_secretos_pk_compuesta(tmp_path) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         cx.execute("INSERT INTO brand_secrets(account_id, clave, valor_cifrado) "
                    "VALUES (1, 'IG_USER_ID', 'y')")
+
+
+def test_connect_wal_y_busy_timeout(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    assert cx.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert cx.execute("PRAGMA busy_timeout").fetchone()[0] == 5000

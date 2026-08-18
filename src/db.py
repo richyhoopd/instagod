@@ -110,6 +110,10 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     cx = sqlite3.connect(path)
     cx.row_factory = sqlite3.Row
     cx.execute("PRAGMA foreign_keys = ON")
+    # WAL + busy_timeout: varios procesos (api, daemon, worker, publisher) escriben
+    # la misma DB a la vez; sin esto un writer bloquea a los demás con "database is locked".
+    cx.execute("PRAGMA journal_mode = WAL")
+    cx.execute("PRAGMA busy_timeout = 5000")
     return cx
 
 
