@@ -24,7 +24,7 @@ ASPECT_RATIOS = {"4:5": (1080, 1350), "9:16": (1080, 1920),
 ALINEACIONES = ("left", "center", "right")
 ANCLAS_V = ("top", "center", "bottom")
 # Proveniencia de la imagen (auditoría/bajadas de copyright, ver spec).
-SOURCES = ("banco", "covers", "pexels", "pinterest", "manual")
+SOURCES = ("banco", "covers", "carpeta", "pexels", "pinterest", "manual")
 
 
 @dataclass

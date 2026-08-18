@@ -73,3 +73,8 @@ def test_round_trip_json() -> None:
     otra = sm.desde_json(sm.a_json(s))
     assert otra == s
     assert isinstance(otra.slides[0].text_items[0], sm.TextItem)
+
+
+def test_source_carpeta_es_valido() -> None:
+    """El banco propio por marca (image_sources.CarpetaProvider) es un source legal."""
+    assert "carpeta" in sm.SOURCES
