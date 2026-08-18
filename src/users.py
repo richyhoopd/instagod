@@ -134,8 +134,11 @@ def consumir_magic_link(cx: sqlite3.Connection, token: str, *,
 def crear_sesion(cx: sqlite3.Connection, user_id: int, *, dias: int = 30,
                  ua: str | None = None, ahora: datetime | None = None) -> str:
     tok = secrets.token_urlsafe(32)
+    now = _fmt(_ahora(ahora))
     db.insert(cx, "sessions", token_hash=hash_token(tok), user_id=user_id,
               expira=_fmt(_ahora(ahora) + timedelta(days=dias)), ua=(ua or "")[:200] or None)
+    cx.execute("UPDATE users SET last_login=? WHERE id=?", (now, user_id))
+    cx.commit()
     return tok
 
 
@@ -143,16 +146,11 @@ def usuario_de_sesion(cx: sqlite3.Connection, token: str, *,
                       ahora: datetime | None = None) -> dict | None:
     if not token:
         return None
-    now = _fmt(_ahora(ahora))
     r = db.rows(cx, """
         SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ? AND s.expira > ? AND u.activo = 1""",
-                (hash_token(token), now))
-    if r:
-        cx.execute("UPDATE users SET last_login=? WHERE id=?", (now, r[0]["id"]))
-        cx.commit()
-        return r[0]
-    return None
+                (hash_token(token), _fmt(_ahora(ahora))))
+    return r[0] if r else None
 
 
 def cerrar_sesion(cx: sqlite3.Connection, token: str) -> None:

@@ -72,6 +72,7 @@ def test_magic_link_usuario_inactivo(cx) -> None:
 def test_sesiones(cx) -> None:
     uid = users.crear_usuario(cx, "a@x.com")
     s = users.crear_sesion(cx, uid, dias=30, ua="pytest", ahora=T0)
+    assert users.por_id(cx, uid)["last_login"] == "2026-08-17 12:00:00"
     u = users.usuario_de_sesion(cx, s, ahora=T0 + timedelta(days=1))
     assert u["id"] == uid and u["email"] == "a@x.com"
     assert users.usuario_de_sesion(cx, s, ahora=T0 + timedelta(days=31)) is None
@@ -82,3 +83,12 @@ def test_sesiones(cx) -> None:
     assert users.cerrar_sesiones_de(cx, uid) == 1
     assert users.usuario_de_sesion(cx, s, ahora=T0) is None
     assert users.por_id(cx, uid)["last_login"] is not None
+
+
+def test_usuario_de_sesion_no_escribe(cx) -> None:
+    """usuario_de_sesion es read-only y no modifica last_login."""
+    uid = users.crear_usuario(cx, "a@x.com")
+    s = users.crear_sesion(cx, uid, dias=30, ahora=T0)
+    last_login_inicial = users.por_id(cx, uid)["last_login"]
+    users.usuario_de_sesion(cx, s, ahora=T0 + timedelta(days=2))
+    assert users.por_id(cx, uid)["last_login"] == last_login_inicial
