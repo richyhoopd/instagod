@@ -25,6 +25,13 @@ def api_cliente(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DB_PATH", str(tmp_path / "api.db"))
     importlib.reload(config)
+    # Limpiar env vars de marcas DESPUÉS del reload (que carga .env)
+    for key in ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
+                "IG_SCRAPER_UA", "SHEET_ID",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL",
+                "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY"):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", None)
     monkeypatch.setattr(config, "APP_URL", "http://front.test")
     monkeypatch.setattr(config, "ENV", "dev")
