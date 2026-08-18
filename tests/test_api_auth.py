@@ -57,9 +57,28 @@ def test_magic_link_rate_limit(api_cliente, monkeypatch) -> None:
     from api import mail
     monkeypatch.setattr(mail, "_post_resend", lambda payload: None)
     H.usuario("ana@x.com")
+    H.usuario("bea@x.com")
     for _ in range(5):
         assert cli.post("/auth/magic-link", json={"email": "ana@x.com"}).status_code == 200
     r = cli.post("/auth/magic-link", json={"email": "ana@x.com"})
+    assert r.status_code == 429 and r.json()["error"] == "demasiados_intentos"
+    # el límite por IP (ya agotado) también bloquea a otro email desde el mismo cliente
+    r2 = cli.post("/auth/magic-link", json={"email": "bea@x.com"})
+    assert r2.status_code == 429 and r2.json()["error"] == "demasiados_intentos"
+
+
+def test_magic_link_rate_limit_por_email(api_cliente, monkeypatch) -> None:
+    cli, _, H = api_cliente
+    from api import mail
+    monkeypatch.setattr(mail, "_post_resend", lambda payload: None)
+    H.usuario("ana@x.com")
+    H.usuario("bea@x.com")
+    # 3 para ana, 2 para bea: ningún email individual toca su tope de 5
+    emails = ["ana@x.com", "bea@x.com", "ana@x.com", "bea@x.com", "ana@x.com"]
+    for email in emails:
+        assert cli.post("/auth/magic-link", json={"email": email}).status_code == 200
+    # pero el límite por IP (5 en total desde el mismo cliente) ya se agotó
+    r = cli.post("/auth/magic-link", json={"email": "bea@x.com"})
     assert r.status_code == 429 and r.json()["error"] == "demasiados_intentos"
 
 

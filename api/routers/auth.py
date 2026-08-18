@@ -9,12 +9,9 @@ import config
 from api import mail
 from api.deps import COOKIE, get_cx, usuario_actual
 from api.errors import ApiError, no_autenticado
-from api.ratelimit import Limitador
 from src import users
 
 router = APIRouter(tags=["auth"])
-_limite_email = Limitador(5, 3600)
-_limite_ip = Limitador(5, 3600)
 
 
 class PedirLink(BaseModel):
@@ -31,7 +28,9 @@ def _poner_cookie(resp: Response, token: str) -> None:
 def pedir_magic_link(datos: PedirLink, request: Request, cx=Depends(get_cx)) -> dict:
     email = datos.email.lower()
     ip = request.client.host if request.client else "?"
-    if not (_limite_email.permitir(email) and _limite_ip.permitir(ip)):
+    limite_email = request.app.state.limite_email
+    limite_ip = request.app.state.limite_ip
+    if not (limite_email.permitir(email) and limite_ip.permitir(ip)):
         raise ApiError(429, "demasiados_intentos", "Espera un rato antes de pedir otro link")
     u = users.por_email(cx, email)
     if u and u["activo"]:
