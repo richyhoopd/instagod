@@ -124,3 +124,13 @@ def creds_faltantes(slug: str) -> list[str]:
     creds = config.account_creds(slug)
     sufijo = f"__{slug.upper()}"
     return [v + sufijo for v in CRED_VARS if not creds.get(v)]
+
+
+# Portal: obligatorias para operar (SHEET_ID ya no lo es: la cola vive en DB).
+CRED_OBLIGATORIAS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "IG_USER_ID", "IG_ACCESS_TOKEN")
+
+
+def claves_faltantes(slug: str) -> list[str]:
+    """Claves (sin sufijo) que la marca aún no tiene ni en DB ni en env."""
+    creds = config.account_creds(slug)
+    return [k for k in CRED_OBLIGATORIAS if not creds.get(k)]
