@@ -378,7 +378,24 @@ def resolve_ig_session_path() -> Path:
 # Claves de credenciales que existen POR CUENTA de escena (multi-cuenta Fase A).
 _ACCOUNT_CRED_KEYS = ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
                       "IG_SCRAPER_UA", "SHEET_ID",
-                      "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+                      "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                      # Portal: LLM y APIs de imágenes/noticias por marca (opcionales)
+                      "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL",
+                      "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY")
+
+
+def _creds_db(slug: str) -> dict[str, str]:
+    """Secretos de la marca en DB (brand_secrets). {} si el store está apagado
+    o falla: la resolución cae a env sin tumbar al que llama."""
+    if not INSTAGOD_MASTER_KEY:
+        return {}
+    try:
+        from src import secrets_store  # import tardío: src importa config
+        return secrets_store.creds_de_slug(slug)
+    except Exception as e:  # noqa: BLE001 — nunca romper por secretos en DB
+        import sys
+        print(f"[config] secretos en DB no disponibles para {slug}: {e}", file=sys.stderr)
+        return {}
 
 
 def marcas_en_env() -> list[str]:
@@ -397,16 +414,18 @@ def marcas_en_env() -> list[str]:
 
 
 def account_creds(slug: str) -> dict[str, str | None]:
-    """Credenciales de una cuenta: env con sufijo __SLUG (en mayúsculas).
+    """Credenciales de una cuenta. Precedencia: DB (brand_secrets) → env con
+    sufijo __SLUG → env global SOLO para gdlscene.
 
-    gdlscene (la cuenta original) cae a las vars SIN sufijo para no tocar el
-    .env ni los secrets actuales. Las demás cuentas usan SOLO su sufijo: que
-    una cuenta nueva jamás herede por accidente los tokens de gdlscene.
+    Una cuenta nueva jamás hereda por accidente los tokens de gdlscene.
     """
     sufijo = f"__{slug.upper()}"
+    en_db = _creds_db(slug)
     out: dict[str, str | None] = {}
     for k in _ACCOUNT_CRED_KEYS:
-        val = os.getenv(k + sufijo)
+        val = en_db.get(k)
+        if val is None:
+            val = os.getenv(k + sufijo)
         if val is None and slug == "gdlscene":
             val = os.getenv(k)
         out[k] = val
