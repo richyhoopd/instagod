@@ -232,9 +232,10 @@ def _huella(pares) -> tuple:
 
 
 def _pares_actuales() -> list:
+    """Se llama cada RECARGA_SEG (60s): solo lee, sin migrar (init_db ya corrió
+    una vez en main() antes del bucle)."""
     cx = db.connect()
     try:
-        db.init_db(cx)
         lista = marcas_mod.listar(cx)
     finally:
         cx.close()
@@ -313,6 +314,11 @@ async def correr(apps, *, esperar=None) -> str:
 
 def main() -> None:
     poller_lock.adquirir()
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+    finally:
+        cx.close()
     while True:
         pares = _pares_actuales()
         if not pares:

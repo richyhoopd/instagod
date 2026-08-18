@@ -57,6 +57,22 @@ def test_main_recarga_hasta_senal(monkeypatch) -> None:
     assert construidas == ["a", "a", "b"]
 
 
+def test_pares_actuales_no_migra(tmp_path, monkeypatch) -> None:
+    from src import db as db_mod
+
+    conectar_real = db_mod.connect  # capturado ANTES de monkeypatchear: ad.db es db_mod
+    cx = conectar_real(tmp_path / "t.db")
+    db_mod.init_db(cx)
+    cx.close()
+
+    llamadas: list = []
+    monkeypatch.setattr(ad.db, "init_db", lambda cx: llamadas.append(cx))
+    monkeypatch.setattr(ad.db, "connect", lambda: conectar_real(tmp_path / "t.db"))
+    monkeypatch.setattr(ad.marcas_mod, "listar", lambda cx: [])
+    ad._pares_actuales()
+    assert llamadas == []
+
+
 def test_main_sin_bots_espera_en_vez_de_fallar(monkeypatch) -> None:
     rondas = iter([[], [(_M("a"), {"TELEGRAM_BOT_TOKEN": "1", "TELEGRAM_CHAT_ID": "x"})]])
     dormidas: list = []
