@@ -33,7 +33,7 @@ def test_instagram_502_si_falla(api_cliente, monkeypatch) -> None:
     def _boom(token):
         raise RuntimeError("token expirado")
     monkeypatch.setattr(pruebas, "_ig_me", _boom)
-    cli = _setup(api_cliente, monkeypatch, IG_ACCESS_TOKEN="t", IG_USER_ID="1")
+    cli = _setup(api_cliente, monkeypatch, IG_ACCESS_TOKEN="tok_abc123", IG_USER_ID="1")
     r = cli.post("/brands/pensionmas/instagram/test")
     assert r.status_code == 502 and "token expirado" in r.json()["detalle"]
 
@@ -59,3 +59,36 @@ def test_editor_403(api_cliente) -> None:
     pid = db.insert(cx, "accounts", slug="pensionmas", ig_handle="@p", nombre="P", ciudad="CDMX")
     H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
     assert cli.post("/brands/pensionmas/telegram/test").status_code == 403
+
+
+def test_502_no_filtra_token(api_cliente, monkeypatch) -> None:
+    from api.routers import pruebas
+
+    def _boom(token):
+        raise RuntimeError(f"fallo con token={token}-secreto-123 en la url")
+    monkeypatch.setattr(pruebas, "_ig_me", _boom)
+    cli = _setup(api_cliente, monkeypatch, IG_ACCESS_TOKEN="t-secreto-123", IG_USER_ID="1")
+    r = cli.post("/brands/pensionmas/instagram/test")
+    assert r.status_code == 502
+    assert "t-secreto-123" not in r.text
+    assert "***" in r.json()["detalle"]
+
+
+def test_502_http_error_solo_status(api_cliente, monkeypatch) -> None:
+    import requests
+
+    from api.routers import pruebas
+
+    def _boom(token):
+        resp = requests.Response()
+        resp.status_code = 400
+        resp.url = "https://graph.instagram.com/me?access_token=t-secreto-123"
+        err = requests.HTTPError("400 Client Error", response=resp)
+        raise err
+    monkeypatch.setattr(pruebas, "_ig_me", _boom)
+    cli = _setup(api_cliente, monkeypatch, IG_ACCESS_TOKEN="t-secreto-123", IG_USER_ID="1")
+    r = cli.post("/brands/pensionmas/instagram/test")
+    assert r.status_code == 502
+    detalle = r.json()["detalle"]
+    assert "El servicio respondió HTTP 400" in detalle
+    assert "t-secreto-123" not in r.text

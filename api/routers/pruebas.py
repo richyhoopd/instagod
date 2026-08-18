@@ -39,8 +39,24 @@ def _llm_ping(provider: str, key: str, model: str) -> str:
     return out.choices[0].message.content or ""
 
 
-def _fallo(e: Exception) -> ApiError:
-    return ApiError(502, "prueba_fallida", f"El servicio respondió con error: {e}")
+def _fallo(e: Exception, secretos: list[str] | None = None) -> ApiError:
+    if secretos is None:
+        secretos = []
+
+    # For HTTPError with response, only show status code
+    if isinstance(e, requests.HTTPError) and hasattr(e, 'response') and e.response is not None:
+        detalle = f"El servicio respondió HTTP {e.response.status_code}"
+    else:
+        detalle = str(e)
+
+    # Redact secrets
+    for secreto in secretos:
+        if secreto:
+            detalle = detalle.replace(secreto, "***")
+
+    # Truncate to 200 chars
+    detalle = detalle[:200]
+    return ApiError(502, "prueba_fallida", detalle)
 
 
 def _llm_de(creds: dict) -> tuple[str, str, str]:
@@ -67,7 +83,7 @@ def telegram_test(slug: str, user: dict = Depends(usuario_actual), cx=Depends(ge
         _telegram_send(creds["TELEGRAM_BOT_TOKEN"], creds["TELEGRAM_CHAT_ID"],
                        f"✅ instagod conectado a {fila['nombre']} ({fila['ig_handle']})")
     except Exception as e:  # noqa: BLE001
-        raise _fallo(e) from e
+        raise _fallo(e, [creds["TELEGRAM_BOT_TOKEN"], creds["TELEGRAM_CHAT_ID"]]) from e
     return {"ok": True, "detalle": "Mensaje enviado al chat configurado"}
 
 
@@ -81,7 +97,7 @@ def instagram_test(slug: str, user: dict = Depends(usuario_actual), cx=Depends(g
     try:
         me = _ig_me(creds["IG_ACCESS_TOKEN"])
     except Exception as e:  # noqa: BLE001
-        raise _fallo(e) from e
+        raise _fallo(e, [creds["IG_ACCESS_TOKEN"]]) from e
     return {"ok": True, "username": me.get("username"), "id": me.get("id")}
 
 
@@ -92,5 +108,5 @@ def llm_test(slug: str, user: dict = Depends(usuario_actual), cx=Depends(get_cx)
     try:
         respuesta = _llm_ping(provider, key, model)
     except Exception as e:  # noqa: BLE001
-        raise _fallo(e) from e
+        raise _fallo(e, [key]) from e
     return {"ok": True, "provider": provider, "model": model, "respuesta": respuesta[:80]}
