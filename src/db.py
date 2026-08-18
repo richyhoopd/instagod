@@ -79,6 +79,12 @@ TABLES: dict[str, set[str]] = {
     "segment_runs": {"segmento", "account_id", "ventana", "corrido_at"},
     "venues": {"nombre", "ciudad", "ig_handle", "activa"},
     "venue_alias": {"venue_id", "alias_norm", "alias_visto", "origen"},
+    # Portal de colaboradores (spec 2026-08-17)
+    "users": {"email", "nombre", "is_admin", "activo", "last_login"},
+    "brand_members": {"user_id", "account_id", "rol"},
+    "magic_links": {"token_hash", "user_id", "expira", "usado_at"},
+    "sessions": {"token_hash", "user_id", "expira", "ua"},
+    "brand_secrets": {"account_id", "clave", "valor_cifrado", "updated_by", "updated_at"},
 }
 
 # Estados de content_queue (espejo del CHECK en schema.sql).

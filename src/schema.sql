@@ -330,3 +330,53 @@ CREATE TABLE IF NOT EXISTS venue_alias (
     origen      TEXT NOT NULL DEFAULT 'visto',
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- -----------------------------------------------------------------------------
+-- Portal de colaboradores (spec 2026-08-17): usuarios, roles por marca,
+-- magic links, sesiones y secretos cifrados por marca. Los tokens se guardan
+-- SIEMPRE hasheados (sha256); el valor de un secreto SIEMPRE cifrado (Fernet).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    email       TEXT NOT NULL UNIQUE,
+    nombre      TEXT,
+    is_admin    INTEGER NOT NULL DEFAULT 0,
+    activo      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    last_login  TEXT,
+    CHECK (is_admin IN (0,1)), CHECK (activo IN (0,1))
+);
+
+CREATE TABLE IF NOT EXISTS brand_members (
+    user_id     INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    rol         TEXT NOT NULL,
+    PRIMARY KEY (user_id, account_id),
+    CHECK (rol IN ('manager', 'editor'))
+);
+
+CREATE TABLE IF NOT EXISTS magic_links (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expira      TEXT NOT NULL,
+    usado_at    TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expira      TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    ua          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS brand_secrets (
+    account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    clave          TEXT NOT NULL,
+    valor_cifrado  TEXT NOT NULL,
+    updated_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (account_id, clave)
+);
