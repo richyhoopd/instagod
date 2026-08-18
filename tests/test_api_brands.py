@@ -30,6 +30,19 @@ def test_alta_solo_admin_y_validaciones(api_cliente) -> None:
     assert r.status_code == 409
 
 
+def test_nombre_y_handle_no_vacios(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    H.login(H.usuario("r@x.com", admin=True))
+    r = cli.post("/brands", json={"slug": "n1", "nombre": "", "ig_handle": "@n"})
+    assert r.status_code == 422 and r.json()["campo"] == "nombre"
+
+    db.insert(cx, "accounts", slug="pensionmas", ig_handle="@p", nombre="P", ciudad="CDMX")
+    r = cli.patch("/brands/pensionmas", json={"nombre": "   "})
+    assert r.status_code == 422 and r.json()["campo"] == "nombre"
+    r = cli.patch("/brands/pensionmas", json={"ig_handle": ""})
+    assert r.status_code == 422 and r.json()["campo"] == "ig_handle"
+
+
 def test_detalle_y_patch(api_cliente) -> None:
     cli, cx, H = api_cliente
     pid = db.insert(cx, "accounts", slug="pensionmas", ig_handle="@p", nombre="P", ciudad="CDMX")

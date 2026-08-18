@@ -4,10 +4,10 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from api.deps import get_cx, marca_para, requiere_admin, usuario_actual
-from api.errors import conflicto, sin_permiso
+from api.errors import ApiError, conflicto, sin_permiso
 from src import db, marcas, users
 
 router = APIRouter(prefix="/brands", tags=["brands"])
@@ -22,8 +22,8 @@ def _handle(v: str) -> str:
 
 class NuevaMarca(BaseModel):
     slug: str
-    nombre: str
-    ig_handle: str
+    nombre: str = Field(min_length=1, max_length=80)
+    ig_handle: str = Field(min_length=1, max_length=60)
     ciudad: str = "México"
     timezone: str = "America/Mexico_City"
     color_marca: str = "#1b5e3f"
@@ -44,8 +44,8 @@ class NuevaMarca(BaseModel):
 
 
 class EditarMarca(BaseModel):
-    nombre: str | None = None
-    ig_handle: str | None = None
+    nombre: str | None = Field(default=None, min_length=1, max_length=80)
+    ig_handle: str | None = Field(default=None, min_length=1, max_length=60)
     ciudad: str | None = None
     timezone: str | None = None
     color_marca: str | None = None
@@ -99,6 +99,12 @@ def editar(slug: str, datos: EditarMarca, user: dict = Depends(usuario_actual),
         if rol != "admin":
             raise sin_permiso("Solo un admin activa/desactiva marcas")
         campos["activa"] = 1 if campos["activa"] else 0
+    if "nombre" in campos:
+        campos["nombre"] = campos["nombre"].strip()
+        if not campos["nombre"]:
+            raise ApiError(422, "validacion", "El nombre no puede quedar vacío", "nombre")
+    if "ciudad" in campos:
+        campos["ciudad"] = campos["ciudad"].strip()
     if "ig_handle" in campos:
         campos["ig_handle"] = _handle(campos["ig_handle"])
     if campos:
