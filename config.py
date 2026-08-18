@@ -411,3 +411,15 @@ def account_creds(slug: str) -> dict[str, str | None]:
             val = os.getenv(k)
         out[k] = val
     return out
+
+
+# ---------- Portal de colaboradores (api/) ----------
+# Llave maestra Fernet para brand_secrets. Sin ella, la API no acepta secretos
+# y account_creds ignora la DB (solo env). Generar: python -m api.bootstrap --nueva-master-key
+INSTAGOD_MASTER_KEY = _get("INSTAGOD_MASTER_KEY")
+APP_URL = (_get("APP_URL", "http://localhost:3000") or "").rstrip("/")
+RESEND_API_KEY = _get("RESEND_API_KEY")
+MAIL_FROM = _get("MAIL_FROM", "instagod <no-reply@instagod.local>")
+SESSION_DAYS = int(_get("SESSION_DAYS", "30") or 30)
+ENV = (_get("ENV", "dev") or "dev").lower()          # dev | prod
+COOKIE_DOMAIN = _get("COOKIE_DOMAIN")                 # p.ej. ".midominio.com" (opcional)
