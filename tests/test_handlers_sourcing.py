@@ -1,0 +1,288 @@
+"""Handlers de sourcing (rss/newsapi/ig_scrape) y preview de presets como jobs."""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from src import db, fuentes, jobs, topics
+from src.jobs import handlers, worker
+
+
+@pytest.fixture()
+def cx(tmp_path):
+    c = db.connect(tmp_path / "t.db")
+    db.init_db(c)
+    yield c
+    c.close()
+
+
+def _job(cx, tipo, account_id, payload):
+    jid = jobs.crear(cx, tipo, account_id, payload)
+    return db.get(cx, "jobs", jid)
+
+
+# ---------- sourcing.rss_fetch ----------
+
+def test_rss_fetch_lee_urls_de_la_fuente_y_guarda_topics(cx, monkeypatch) -> None:
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+
+    llamadas = []
+
+    def _fake_fetch_rss(url, **kw):
+        llamadas.append(url)
+        return [{"titulo": "T1", "resumen": "r", "url": "https://a.com/1",
+                 "publicado_en": None}]
+
+    monkeypatch.setattr(handlers.topics, "fetch_rss", _fake_fetch_rss)
+    job = _job(cx, "sourcing.rss_fetch", 1, {"source_id": sid})
+
+    resultado = handlers.sourcing_rss_fetch(cx, job)
+
+    assert llamadas == ["https://a.com/f.xml"]
+    assert resultado["nuevos"] == 1
+    assert len(topics.listar(cx, 1)) == 1
+    fila = db.get(cx, "brand_sources", sid)
+    assert fila["ultimo_run"]
+    assert fila["ultimo_error"] is None
+
+
+def test_rss_fetch_fuente_de_otra_cuenta_revienta(cx) -> None:
+    otra_id = db.insert(cx, "accounts", slug="otra", ig_handle="@o", nombre="O", ciudad="CDMX")
+    sid = fuentes.crear(cx, otra_id, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    job = _job(cx, "sourcing.rss_fetch", 1, {"source_id": sid})  # job es de account_id=1
+
+    with pytest.raises(ValueError):
+        handlers.sourcing_rss_fetch(cx, job)
+
+
+def test_rss_fetch_fuente_inexistente_revienta(cx) -> None:
+    job = _job(cx, "sourcing.rss_fetch", 1, {"source_id": 999})
+    with pytest.raises(ValueError):
+        handlers.sourcing_rss_fetch(cx, job)
+
+
+# ---------- sourcing.newsapi_fetch ----------
+
+def test_newsapi_fetch_sin_key_termina_el_job_en_error_accionable(cx, monkeypatch) -> None:
+    sid = fuentes.crear(cx, 1, "info", "newsapi", {"query": "cafeterías"})
+    monkeypatch.setattr(handlers.config, "account_creds", lambda slug: {"NEWSAPI_KEY": None})
+    job = _job(cx, "sourcing.newsapi_fetch", 1, {"source_id": sid})
+
+    worker._despachar(cx, job)
+
+    fila = db.get(cx, "jobs", job["id"])
+    assert fila["estado"] == "error"
+    assert "NEWSAPI_KEY" in json.loads(fila["resultado_json"])["error"]
+
+
+def test_newsapi_fetch_con_key_guarda_topics(cx, monkeypatch) -> None:
+    sid = fuentes.crear(cx, 1, "info", "newsapi", {"query": "cafeterías", "idioma": "es"})
+    monkeypatch.setattr(handlers.config, "account_creds",
+                        lambda slug: {"NEWSAPI_KEY": "clave-123"})
+
+    capturado = {}
+
+    def _fake_fetch_newsapi(query, key, **kw):
+        capturado["query"] = query
+        capturado["key"] = key
+        capturado["idioma"] = kw.get("idioma")
+        return [{"titulo": "N1", "resumen": "r", "url": "https://n.com/1",
+                 "publicado_en": None}]
+
+    monkeypatch.setattr(handlers.topics, "fetch_newsapi", _fake_fetch_newsapi)
+    job = _job(cx, "sourcing.newsapi_fetch", 1, {"source_id": sid})
+
+    resultado = handlers.sourcing_newsapi_fetch(cx, job)
+
+    assert capturado["query"] == "cafeterías"
+    assert capturado["key"] == "clave-123"
+    assert capturado["idioma"] == "es"
+    assert resultado["nuevos"] == 1
+    assert len(topics.listar(cx, 1)) == 1
+
+
+# ---------- sourcing.ig_scrape ----------
+
+class _FakeSession:
+    pass
+
+
+def test_ig_scrape_descarga_fotos_de_cada_cuenta(cx, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    sid = fuentes.crear(cx, 1, "imagen", "ig_accounts",
+                        {"cuentas": ["@banda1"], "max_por_cuenta": 2})
+
+    monkeypatch.setattr(handlers.ingest_ig, "get_session", lambda: _FakeSession())
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_profile",
+                        lambda session, handle: {"id": "123", "is_private": False})
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_posts",
+                        lambda session, user_id, count: [
+                            {"code": "abc", "media_type": 1},
+                            {"code": "def", "media_type": 1},
+                        ])
+    monkeypatch.setattr(handlers.ingest_ig, "_image_urls",
+                        lambda item: [(0, f"https://img/{item['code']}.jpg")])
+
+    descargas = []
+
+    def _fake_download(session, url, dest):
+        descargas.append(dest)
+        dest.write_bytes(b"jpg")
+        return True
+
+    monkeypatch.setattr(handlers.ingest_ig, "_download", _fake_download)
+
+    job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
+    resultado = handlers.sourcing_ig_scrape(cx, job)
+
+    assert resultado["bajadas"] == 2
+    assert len(descargas) == 2
+    for p in descargas:
+        assert p.parent == tmp_path / "data" / "brands" / "gdlscene" / "fotos"
+        assert p.exists()
+
+
+def test_ig_scrape_respeta_max_por_cuenta(cx, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    sid = fuentes.crear(cx, 1, "imagen", "ig_accounts",
+                        {"cuentas": ["@banda1"], "max_por_cuenta": 1})
+    monkeypatch.setattr(handlers.ingest_ig, "get_session", lambda: _FakeSession())
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_profile",
+                        lambda session, handle: {"id": "1", "is_private": False})
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_posts",
+                        lambda session, user_id, count: [
+                            {"code": "a"}, {"code": "b"}, {"code": "c"}])
+    monkeypatch.setattr(handlers.ingest_ig, "_image_urls",
+                        lambda item: [(0, f"https://img/{item['code']}.jpg")])
+    monkeypatch.setattr(handlers.ingest_ig, "_download",
+                        lambda session, url, dest: dest.write_bytes(b"x") or True)
+
+    job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
+    resultado = handlers.sourcing_ig_scrape(cx, job)
+    assert resultado["bajadas"] == 1
+
+
+def test_ig_scrape_sesion_no_sana_revienta_sin_loop(cx, monkeypatch) -> None:
+    sid = fuentes.crear(cx, 1, "imagen", "ig_accounts", {"cuentas": ["@banda1"]})
+
+    def _revienta():
+        raise RuntimeError("Faltan cuentas scraper.")
+    monkeypatch.setattr(handlers.ingest_ig, "get_session", _revienta)
+
+    job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
+    with pytest.raises(RuntimeError, match="Faltan cuentas"):
+        handlers.sourcing_ig_scrape(cx, job)
+
+
+def test_ig_scrape_cuenta_privada_no_revienta_el_job(cx, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    sid = fuentes.crear(cx, 1, "imagen", "ig_accounts", {"cuentas": ["@priv"]})
+    monkeypatch.setattr(handlers.ingest_ig, "get_session", lambda: _FakeSession())
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_profile",
+                        lambda session, handle: {"id": "1", "is_private": True})
+
+    job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
+    resultado = handlers.sourcing_ig_scrape(cx, job)
+    assert resultado["bajadas"] == 0
+    fila = db.get(cx, "brand_sources", sid)
+    assert "priv" in (fila["ultimo_error"] or "")
+
+
+# ---------- preset.preview ----------
+
+def test_preset_preview_renderiza_y_copia_el_png(cx, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+
+    render_llamadas = []
+
+    def _fake_render_card(template_file, ctx, **kw):
+        render_llamadas.append((template_file, kw.get("prefix")))
+        p = tmp_path / "render.png"
+        p.write_bytes(b"png-data")
+        return p
+
+    monkeypatch.setattr(handlers.compose, "render_card", _fake_render_card)
+
+    job = _job(cx, "preset.preview", 1, {"nombre": "tiktok_bold", "texto": "Hola mundo"})
+    resultado = handlers.preset_preview(cx, job)
+
+    assert render_llamadas[0][0] == "slide.html"
+    assert "tiktok_bold" in render_llamadas[0][1]
+    destino = tmp_path / "data" / "previews" / "gdlscene" / "tiktok_bold.png"
+    assert resultado["path"] == str(destino)
+    assert destino.exists()
+    assert destino.read_bytes() == b"png-data"
+
+
+def test_preset_preview_preset_inexistente_revienta(cx) -> None:
+    job = _job(cx, "preset.preview", 1, {"nombre": "no-existe", "texto": "x"})
+    with pytest.raises(ValueError):
+        handlers.preset_preview(cx, job)
+
+
+# ---------- HANDLERS dict ----------
+
+def test_handlers_registrados() -> None:
+    assert handlers.HANDLERS["sourcing.rss_fetch"] is handlers.sourcing_rss_fetch
+    assert handlers.HANDLERS["sourcing.newsapi_fetch"] is handlers.sourcing_newsapi_fetch
+    assert handlers.HANDLERS["sourcing.ig_scrape"] is handlers.sourcing_ig_scrape
+    assert handlers.HANDLERS["preset.preview"] is handlers.preset_preview
+
+
+# ---------- worker.encolar_fuentes_vencidas ----------
+
+def test_encolar_fuentes_vencidas_crea_job_si_nunca_corrio(cx) -> None:
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 1
+    pendientes = db.rows(cx, "SELECT * FROM jobs WHERE tipo = 'sourcing.rss_fetch'")
+    assert len(pendientes) == 1
+    payload = json.loads(pendientes[0]["payload_json"])
+    assert payload["source_id"] == sid
+
+
+def test_encolar_fuentes_vencidas_no_duplica_si_ya_hay_job_en_cola(cx) -> None:
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    worker.encolar_fuentes_vencidas(cx)
+    creados2 = worker.encolar_fuentes_vencidas(cx)
+    assert creados2 == 0
+    pendientes = db.rows(cx, "SELECT * FROM jobs WHERE tipo = 'sourcing.rss_fetch'")
+    assert len(pendientes) == 1
+    assert sid  # solo para linter, sid usado arriba
+
+
+def test_encolar_fuentes_vencidas_no_encola_si_no_ha_pasado_cada_horas(cx) -> None:
+    fuentes.crear(cx, 1, "info", "newsapi", {"query": "x", "cada_horas": 24})
+    reciente = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    sid = db.rows(cx, "SELECT id FROM brand_sources")[0]["id"]
+    db.update(cx, "brand_sources", sid, ultimo_run=reciente)
+
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 0
+
+
+def test_encolar_fuentes_vencidas_encola_si_paso_cada_horas(cx) -> None:
+    fuentes.crear(cx, 1, "info", "newsapi", {"query": "x", "cada_horas": 24})
+    viejo = (datetime.now(timezone.utc) - timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S")
+    sid = db.rows(cx, "SELECT id FROM brand_sources")[0]["id"]
+    db.update(cx, "brand_sources", sid, ultimo_run=viejo)
+
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 1
+    pendientes = db.rows(cx, "SELECT * FROM jobs WHERE tipo = 'sourcing.newsapi_fetch'")
+    assert len(pendientes) == 1
+
+
+def test_encolar_fuentes_vencidas_ignora_fuentes_de_imagen(cx) -> None:
+    fuentes.crear(cx, 1, "imagen", "ig_accounts", {"cuentas": ["@x"]})
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 0
+
+
+def test_encolar_fuentes_vencidas_ignora_fuentes_inactivas(cx) -> None:
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    fuentes.actualizar(cx, sid, activa=False)
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 0

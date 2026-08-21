@@ -12,14 +12,18 @@ no bloqueen de verdad.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 import config
 from src import db, jobs
 from src.jobs import handlers
 
 _TRUNCA_ERROR = 400
+_CADA_HORAS_DEFAULT = 24
+_TIPO_POR_PROVIDER = {"rss": "sourcing.rss_fetch", "newsapi": "sourcing.newsapi_fetch"}
 
 
 def _dormir(seg: float) -> None:
@@ -49,6 +53,48 @@ def _error_seguro(exc: Exception, cx, job: dict) -> str:
     return msg[:_TRUNCA_ERROR]
 
 
+def encolar_fuentes_vencidas(cx) -> int:
+    """Encola `sourcing.rss_fetch`/`sourcing.newsapi_fetch` para fuentes `info`
+    activas cuyo `cada_horas` (config, default 24) ya venció. Dedup: si ya hay
+    un job cola/corriendo para esa `source_id`, no encola otro. Devuelve
+    cuántos jobs creó."""
+    ahora = datetime.now(timezone.utc)
+    fuentes_info = db.rows(
+        cx, "SELECT * FROM brand_sources WHERE kind = 'info' AND activa = 1")
+    creados = 0
+    for f in fuentes_info:
+        tipo = _TIPO_POR_PROVIDER.get(f["provider"])
+        if tipo is None:
+            continue
+        try:
+            cfg = json.loads(f["config_json"]) if f["config_json"] else {}
+        except (TypeError, ValueError):
+            cfg = {}
+        cada_horas = cfg.get("cada_horas") or _CADA_HORAS_DEFAULT
+
+        vencido = True
+        if f["ultimo_run"]:
+            try:
+                ultimo = datetime.strptime(f["ultimo_run"], "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=timezone.utc)
+                vencido = (ahora - ultimo) >= timedelta(hours=cada_horas)
+            except ValueError:
+                vencido = True
+        if not vencido:
+            continue
+
+        ya_en_cola = db.rows(
+            cx, "SELECT id FROM jobs WHERE tipo = ? AND estado IN ('cola', 'corriendo') "
+                "AND payload_json LIKE ?",
+            (tipo, f'%"source_id": {f["id"]}%'))
+        if ya_en_cola:
+            continue
+
+        jobs.crear(cx, tipo, f["account_id"], {"source_id": f["id"]})
+        creados += 1
+    return creados
+
+
 def _despachar(cx, job: dict) -> None:
     handler = handlers.HANDLERS.get(job["tipo"])
     try:
@@ -68,6 +114,7 @@ def main(once: bool = False) -> None:
         db.init_db(cx)
         while True:
             jobs.rescatar_huerfanos(cx)
+            encolar_fuentes_vencidas(cx)
             job = jobs.tomar(cx, worker_id, max_global=max_global)
             if job is None:
                 if once:

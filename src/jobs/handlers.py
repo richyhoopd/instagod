@@ -7,10 +7,14 @@ avance vía `jobs.progresar` (el worker no sabe nada del payload interno).
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any
 
-from src import db, generate_slideshow, jobs
+import config
+from src import compose, db, generate_slideshow, ingest_ig, jobs, marcas, slideshow_compile, topics
+from src import fuentes as fuentes_mod
 
 
 def _marca_de(cx: sqlite3.Connection, account_id: int) -> str:
@@ -22,6 +26,20 @@ def _marca_de(cx: sqlite3.Connection, account_id: int) -> str:
     if cuenta is None:
         raise ValueError(f"No existe la cuenta {account_id} del job")
     return cuenta["slug"]
+
+
+def _ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _fuente_de(cx: sqlite3.Connection, account_id: int, source_id: int, kind: str) -> dict[str, Any]:
+    """Fuente de `account_id` con `source_id` y `kind` esperados. ValueError si no
+    existe o es de otra cuenta (aislamiento: `fuentes.listar` ya filtra por cuenta,
+    así que una fuente ajena simplemente no aparece en la lista)."""
+    for f in fuentes_mod.listar(cx, account_id, kind=kind):
+        if f["id"] == source_id:
+            return f
+    raise ValueError(f"La fuente {source_id} no existe o no pertenece a la cuenta {account_id}")
 
 
 def generar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
@@ -71,7 +89,131 @@ def regenerar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str
     return {"queue_id": nuevo_qid}
 
 
+def sourcing_rss_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {source_id}. Baja cada URL de la fuente RSS y guarda temas nuevos."""
+    payload = json.loads(job["payload_json"] or "{}")
+    source_id = payload["source_id"]
+    fuente = _fuente_de(cx, job["account_id"], source_id, "info")
+    urls = fuente["config"].get("urls", [])
+
+    nuevos = 0
+    error: str | None = None
+    for url in urls:
+        try:
+            items = topics.fetch_rss(url)
+            nuevos += topics.guardar(cx, job["account_id"], items, "rss")
+        except Exception as exc:  # noqa: BLE001 — una URL rota no debe tumbar las demás
+            error = str(exc)
+    db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
+    return {"nuevos": nuevos}
+
+
+def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {source_id}. Usa NEWSAPI_KEY de la marca; sin key, error accionable."""
+    payload = json.loads(job["payload_json"] or "{}")
+    source_id = payload["source_id"]
+    fuente = _fuente_de(cx, job["account_id"], source_id, "info")
+    slug = _marca_de(cx, job["account_id"])
+    key = config.account_creds(slug).get("NEWSAPI_KEY")
+    if not key:
+        raise ValueError("Falta NEWSAPI_KEY")
+
+    cfg = fuente["config"]
+    items = topics.fetch_newsapi(cfg["query"], key, idioma=cfg.get("idioma", "es"),
+                                 pais=cfg.get("pais"))
+    nuevos = topics.guardar(cx, job["account_id"], items, "newsapi")
+    db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=None)
+    return {"nuevos": nuevos}
+
+
+def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {source_id}. Descarga hasta `max_por_cuenta` fotos por cada @cuenta
+    a `data/brands/<slug>/fotos/`. Best-effort por cuenta: una cuenta rota o privada
+    se anota en `ultimo_error` y se sigue con la siguiente — JAMÁS reintenta ni rota
+    de sesión (a diferencia de `ingest_ig.ingest`, pensado para corridas manuales)."""
+    payload = json.loads(job["payload_json"] or "{}")
+    source_id = payload["source_id"]
+    fuente = _fuente_de(cx, job["account_id"], source_id, "imagen")
+    slug = _marca_de(cx, job["account_id"])
+    cfg = fuente["config"]
+    cuentas = cfg.get("cuentas", [])
+    max_por_cuenta = cfg.get("max_por_cuenta") or 10
+
+    # Sin sesión sana no hay nada que hacer: error accionable, se propaga tal
+    # cual (el mensaje de get_session ya dice qué configurar).
+    session = ingest_ig.get_session()
+
+    dest_dir = config.BASE_DIR / "data" / "brands" / slug / "fotos"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    total = 0
+    errores: list[str] = []
+    for cuenta in cuentas:
+        handle = cuenta.lstrip("@")
+        try:
+            user = ingest_ig.fetch_profile(session, handle)
+            if user.get("is_private"):
+                errores.append(f"@{handle}: perfil privado")
+                continue
+            items = ingest_ig.fetch_posts(session, user["id"], max_por_cuenta)
+        except Exception as exc:  # noqa: BLE001 — una cuenta rota no debe tumbar las demás
+            errores.append(f"@{handle}: {exc}")
+            continue
+
+        bajadas = 0
+        for item in items:
+            if bajadas >= max_por_cuenta:
+                break
+            shortcode = item.get("code") or f"post{bajadas}"
+            for i, url in ingest_ig._image_urls(item):
+                if bajadas >= max_por_cuenta:
+                    break
+                dest = dest_dir / f"{handle}_{shortcode}_{i}.jpg"
+                if dest.exists():
+                    continue
+                if ingest_ig._download(session, url, dest):
+                    bajadas += 1
+        total += bajadas
+
+    db.update(cx, "brand_sources", source_id, ultimo_run=_ts(),
+             ultimo_error="; ".join(errores) if errores else None)
+    return {"bajadas": total, "errores": errores}
+
+
+def preset_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {nombre, texto}. Renderiza un slide de 1 hoja con el preset `nombre`
+    y lo copia a `data/previews/<slug>/<nombre>.png`."""
+    payload = json.loads(job["payload_json"] or "{}")
+    nombre = payload["nombre"]
+    texto = (payload.get("texto") or "").strip() or "Así se ve tu preset"
+    slug = _marca_de(cx, job["account_id"])
+    m = marcas.cargar_por_id(cx, job["account_id"])
+    catalogo = marcas.estilos_de(m)
+    if nombre not in catalogo:
+        raise ValueError(f"El preset {nombre!r} no existe para {slug} "
+                         f"(disponibles: {sorted(catalogo)})")
+
+    guion = {"tema": "preview", "hook": texto, "caption": "", "cta": "",
+             "slides": [{"text": texto, "rol": "hook", "image_hint": ""}]}
+    show = slideshow_compile.compilar(
+        guion, estilo=nombre, imagenes=[None], aspect_ratio="4:5",
+        brief={"tema": "preview"}, formato="libre", account_slug=slug,
+        estilos=catalogo)
+    ctx = slideshow_compile.contexto_slide(show, 0)
+    png = compose.render_card("slide.html", ctx, prefix=f"preview_{slug}_{nombre}")
+
+    dest_dir = config.BASE_DIR / "data" / "previews" / slug
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{nombre}.png"
+    shutil.copyfile(png, dest)
+    return {"path": str(dest)}
+
+
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
+    "sourcing.rss_fetch": sourcing_rss_fetch,
+    "sourcing.newsapi_fetch": sourcing_newsapi_fetch,
+    "sourcing.ig_scrape": sourcing_ig_scrape,
+    "preset.preview": preset_preview,
 }
