@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { del, get, patch, post } from "@/lib/api";
+import { del, get, patch, post, put } from "@/lib/api";
 import type { Estado } from "@/lib/estados";
 
 export interface QueueItem {
@@ -58,6 +58,22 @@ export function useSlotsProximos(slug: string, n: number) {
     queryKey: ["slots-proximos", slug, n],
     queryFn: () => get<string[]>(`/brands/${slug}/slots/proximos?n=${n}`),
     enabled: !!slug,
+  });
+}
+
+// PUT /queue/{qid}/slides: manda el estado COMPLETO deseado de cada slide
+// (un texts por text_item, image_url null = fondo sólido) y devuelve el job
+// de re-render; la invalidación llega cuando el job termina (el drawer hace
+// polling con useJob y refresca ahí).
+export interface SlideEdit {
+  texts: string[];
+  image_url: string | null;
+}
+
+export function useEditarSlides(slug: string) {
+  return useMutation({
+    mutationFn: ({ qid, slides }: { qid: number; slides: SlideEdit[] }) =>
+      put<{ job_id: number }>(`/brands/${slug}/queue/${qid}/slides`, { slides }),
   });
 }
 

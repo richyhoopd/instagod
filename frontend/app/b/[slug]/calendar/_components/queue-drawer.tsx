@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstadoBadge } from "@/components/estado-badge";
 import { ImageCarousel } from "./image-carousel";
+import { SlideEditor, slidesDe } from "./slide-editor";
 import { ApiError, get } from "@/lib/api";
 import { formatearFecha } from "@/lib/fecha";
 import { listaImagenes } from "@/lib/imagenes";
@@ -68,12 +69,16 @@ export function QueueDrawer({
   const [caption, setCaption] = useState("");
   const [captionSyncId, setCaptionSyncId] = useState<number | null>(null);
   const [reintentando, setReintentando] = useState(false);
+  const [slideIdx, setSlideIdx] = useState(0);
+  const [editandoSlides, setEditandoSlides] = useState(false);
 
   // Sincroniza el borrador de caption cuando cambia el item mostrado (nueva
   // fila u otro fetch tras guardar), sin usar un efecto (react-hooks/set-state-in-effect).
   if (item && captionSyncId !== item.id) {
     setCaptionSyncId(item.id);
     setCaption(item.caption ?? "");
+    setSlideIdx(0);
+    setEditandoSlides(false);
   }
 
   const puedeEditar = item ? EDITABLES.includes(item.estado) : false;
@@ -182,7 +187,24 @@ export function QueueDrawer({
           </div>
         ) : (
           <div className="space-y-4">
-            <ImageCarousel imagenes={listaImagenes(item.imagen_url)} />
+            <ImageCarousel imagenes={listaImagenes(item.imagen_url)} onIndexChange={setSlideIdx} />
+
+            {item.tipo === "slideshow" && puedeEditar && slidesDe(item.slides_data) && (
+              <div className="space-y-2">
+                <Button size="sm" variant="outline" onClick={() => setEditandoSlides((v) => !v)}>
+                  {editandoSlides ? "Cerrar editor de slides" : "Editar slides"}
+                </Button>
+                {editandoSlides && (
+                  <SlideEditor
+                    key={item.id}
+                    slug={slug}
+                    qid={item.id}
+                    slides={slidesDe(item.slides_data)!}
+                    slideIdx={slideIdx}
+                  />
+                )}
+              </div>
+            )}
 
             {item.error && (
               <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-500/10 dark:text-red-400">
