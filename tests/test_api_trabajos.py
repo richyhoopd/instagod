@@ -122,3 +122,68 @@ def test_cancel_en_cola_ok_y_corriendo_422(api_cliente) -> None:
     r = cli.post(f"/brands/pensionmas/jobs/{en_cola}/cancel")
     assert r.status_code == 200
     assert db.get(cx, "jobs", en_cola)["estado"] == "cancelado"
+
+
+def _topic(cx, account_id, **campos):
+    base = dict(account_id=account_id, titulo="Nuevo mural en el centro",
+               resumen="Un colectivo pintó un mural gigante", url="https://x.com/nota",
+               fuente="rss")
+    base.update(campos)
+    return db.insert(cx, "topic_suggestions", **base)
+
+
+def test_slideshow_con_topic_id_usa_tema_y_contexto_del_topic(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    tid = _topic(cx, pid)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    r = cli.post("/brands/pensionmas/slideshows", json={"topic_id": tid, "tema": "un tema cualquiera"})
+    assert r.status_code == 202
+    job = db.get(cx, "jobs", r.json()["job_id"])
+    payload = json.loads(job["payload_json"])
+    assert payload["topic_id"] == tid
+    assert payload["tema"] == "un tema cualquiera"
+
+
+def test_slideshow_con_topic_id_sin_tema_ni_contexto_usa_defaults_del_topic(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    tid = _topic(cx, pid, titulo="Feria gastronómica en GDL",
+                resumen="Más de 40 puestos de comida local", url="https://x.com/feria")
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    r = cli.post("/brands/pensionmas/slideshows", json={"topic_id": tid})
+    assert r.status_code == 202
+    job = db.get(cx, "jobs", r.json()["job_id"])
+    payload = json.loads(job["payload_json"])
+    assert payload["topic_id"] == tid
+    assert payload["tema"] == "Feria gastronómica en GDL"
+    assert payload["contexto"] == "Más de 40 puestos de comida local\nhttps://x.com/feria"
+
+
+def test_slideshow_sin_tema_ni_topic_id_422(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+    r = cli.post("/brands/pensionmas/slideshows", json={})
+    assert r.status_code == 422
+
+
+def test_slideshow_topic_id_de_otra_marca_404(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx, "pensionmas")
+    otra = _marca(cx, "otra")
+    tid = _topic(cx, otra)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+    r = cli.post("/brands/pensionmas/slideshows", json={"topic_id": tid})
+    assert r.status_code == 404
+
+
+def test_slideshow_topic_id_descartado_422(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    tid = _topic(cx, pid, descartado=1)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+    r = cli.post("/brands/pensionmas/slideshows", json={"topic_id": tid})
+    assert r.status_code == 422

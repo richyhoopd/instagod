@@ -51,6 +51,21 @@ def test_generar_slideshow_pasa_marca_tema_progreso_y_guarda_queue_id(cx, monkey
     assert callable(llamada["progreso"])
 
 
+def test_generar_slideshow_pasa_topic_id_al_motor(cx, monkeypatch) -> None:
+    registro = []
+    monkeypatch.setattr(handlers.generate_slideshow, "generar", _fake_generar(registro))
+
+    payload = {"tema": "cafeterías", "formato": "listicle", "estilo": "tiktok_bold",
+               "fuentes": ["pexels"], "n_slides": 5, "aspect": "4:5", "contexto": None,
+               "topic_id": 42}
+    jid = jobs.crear(cx, "slideshow.generar", 1, payload, creado_por=9)
+    job = db.get(cx, "jobs", jid)
+
+    handlers.generar_slideshow(cx, job)
+
+    assert registro[0]["topic_id"] == 42
+
+
 def test_generar_slideshow_progreso_llega_a_jobs_progresar(cx, monkeypatch) -> None:
     capturado = {}
 

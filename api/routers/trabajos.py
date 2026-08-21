@@ -25,13 +25,21 @@ def _job_de_marca(cx, account_id: int, jid: int) -> dict:
 
 
 class NuevoSlideshow(BaseModel):
-    tema: str = Field(min_length=3)
+    tema: str | None = Field(default=None, min_length=3)
+    topic_id: int | None = None
     formato: str | None = None
     estilo: str | None = None
     fuentes: list[str] | None = None
     n_slides: int = Field(default=6, ge=1, le=10)
     aspect: str = "4:5"
     contexto: str | None = None
+
+
+def _topic_de_marca(cx, account_id: int, tid: int) -> dict:
+    fila = db.get(cx, "topic_suggestions", tid)
+    if fila is None or fila["account_id"] != account_id:
+        raise no_encontrado("ese tema")
+    return fila
 
 
 @router.post("/slideshows", status_code=202)
@@ -49,9 +57,23 @@ def crear_slideshow(slug: str, datos: NuevoSlideshow, user: dict = Depends(usuar
     if estilo not in estilos:
         raise ApiError(422, "validacion", f"Estilo inexistente: {estilo}", "estilo")
 
+    tema = datos.tema
+    contexto = datos.contexto
+    if datos.topic_id is not None:
+        topic = _topic_de_marca(cx, fila["id"], datos.topic_id)
+        if topic["descartado"]:
+            raise ApiError(422, "validacion", "Ese tema ya fue descartado", "topic_id")
+        tema = tema or topic["titulo"]
+        if contexto is None:
+            contexto = f"{topic['resumen']}\n{topic['url']}"
+    elif not tema:
+        raise ApiError(422, "validacion", "tema es requerido si no se da topic_id", "tema")
+
     fuentes = datos.fuentes if datos.fuentes is not None else m.fuentes
-    payload = {"tema": datos.tema, "formato": formato, "estilo": estilo, "fuentes": fuentes,
-              "n_slides": datos.n_slides, "aspect": datos.aspect, "contexto": datos.contexto}
+    payload = {"tema": tema, "formato": formato, "estilo": estilo, "fuentes": fuentes,
+              "n_slides": datos.n_slides, "aspect": datos.aspect, "contexto": contexto}
+    if datos.topic_id is not None:
+        payload["topic_id"] = datos.topic_id
     job_id = jobs.crear(cx, "slideshow.generar", fila["id"], payload, creado_por=user["id"])
     return {"job_id": job_id}
 

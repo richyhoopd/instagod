@@ -67,6 +67,7 @@ def generar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, 
         contexto=payload.get("contexto"),
         progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg),
         creado_por=job.get("creado_por"),
+        topic_id=payload.get("topic_id"),
     )
     db.update(cx, "jobs", job["id"], queue_id=qid)
     return {"queue_id": qid}
