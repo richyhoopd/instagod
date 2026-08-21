@@ -20,6 +20,22 @@ _EXT_LOGO = {"png", "svg", "jpg", "jpeg"}
 _MAX_LOGO = 2 * 1024 * 1024
 _MAX_PRESET_BYTES = 32 * 1024
 _SCRIPT_RE = re.compile(rb"<script", re.IGNORECASE)
+_CHUNK = 64 * 1024
+_MAX_PROMPT_FORMATO = 2000
+
+
+def _leer_con_tope(archivo: UploadFile, tope: int) -> bytes:
+    """Lee `archivo` por chunks, abortando con 422 ANTES de tener el archivo
+    completo en memoria si supera `tope` (H5: nunca acumular más de un chunk
+    de más de lo permitido)."""
+    piezas: list[bytes] = []
+    total = 0
+    while chunk := archivo.file.read(_CHUNK):
+        total += len(chunk)
+        if total > tope:
+            raise ApiError(422, "validacion", "archivo demasiado grande", "archivo")
+        piezas.append(chunk)
+    return b"".join(piezas)
 
 # Rutas base (constantes de módulo para poder monkeypatchearlas en tests).
 PREVIEWS_DIR = config.BASE_DIR / "data" / "previews"
@@ -50,6 +66,15 @@ class PromptsIn(BaseModel):
                 raise ValueError("cada hashtag debe empezar con '#'")
         return v
 
+    @field_validator("por_formato")
+    @classmethod
+    def _valida_por_formato(cls, v):
+        for formato, texto in v.items():
+            if len(texto) > _MAX_PROMPT_FORMATO:
+                raise ValueError(
+                    f"el prompt de '{formato}' no puede exceder {_MAX_PROMPT_FORMATO} caracteres")
+        return v
+
 
 class ProbarIn(BaseModel):
     tema: str = Field(min_length=1, max_length=200)
@@ -67,9 +92,11 @@ def _contexto(m: marcas.Marca, formato: str) -> str:
 
 
 def _prueba_fallida(e: Exception, slug: str) -> ApiError:
-    creds = config.account_creds(slug)
+    """Redacta CUALQUIER credencial no vacía de la cuenta (antes redactaba a
+    mano solo 3 secretos puntuales; H8 amplía a todo `account_creds`, que es
+    la fuente de verdad de qué secretos existen para esta marca)."""
     detalle = str(e)
-    for secreto in (creds.get("LLM_API_KEY"), config.DEEPSEEK_API_KEY, config.ANTHROPIC_API_KEY):
+    for secreto in config.account_creds(slug).values():
         if secreto:
             detalle = detalle.replace(secreto, "***")
     return ApiError(502, "prueba_fallida",
@@ -190,9 +217,7 @@ def subir_logo(slug: str, archivo: UploadFile = File(...),
     if ext not in _EXT_LOGO:
         raise ApiError(422, "validacion",
                        "Formato de logo no soportado (png, svg, jpg)", "archivo")
-    contenido = archivo.file.read()
-    if len(contenido) > _MAX_LOGO:
-        raise ApiError(422, "validacion", "El logo no puede pesar más de 2 MB", "archivo")
+    contenido = _leer_con_tope(archivo, _MAX_LOGO)
     if ext == "svg" and _SCRIPT_RE.search(contenido):
         raise ApiError(422, "validacion",
                        "El SVG no puede contener <script> (riesgo de XSS)", "archivo")

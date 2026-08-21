@@ -20,6 +20,20 @@ _EXT_FOTO = {"jpg", "jpeg", "png", "webp"}
 _MAX_FOTO = 8 * 1024 * 1024
 _MAX_FOTOS_POR_REQUEST = 10
 _NOMBRE_FOTO_RE = re.compile(r"^[a-z0-9_.-]+$")
+_CHUNK = 64 * 1024
+
+
+def _leer_con_tope(archivo: UploadFile, tope: int) -> bytes:
+    """Lee `archivo` por chunks, abortando con 422 ANTES de tener el archivo
+    completo en memoria si supera `tope` (H5)."""
+    piezas: list[bytes] = []
+    total = 0
+    while chunk := archivo.file.read(_CHUNK):
+        total += len(chunk)
+        if total > tope:
+            raise ApiError(422, "validacion", "archivo demasiado grande", "archivos")
+        piezas.append(chunk)
+    return b"".join(piezas)
 
 _JOB_TIPO_POR_PROVIDER = {
     "rss": "sourcing.rss_fetch",
@@ -201,9 +215,7 @@ def subir_photos(slug: str, archivos: list[UploadFile] = File(...),
         if ext not in _EXT_FOTO:
             raise ApiError(422, "validacion",
                            "Formato de foto no soportado (jpg, jpeg, png, webp)", "archivos")
-        contenido = archivo.file.read()
-        if len(contenido) > _MAX_FOTO:
-            raise ApiError(422, "validacion", "Cada foto no puede pesar más de 8 MB", "archivos")
+        contenido = _leer_con_tope(archivo, _MAX_FOTO)
         contenidos.append((ext, contenido))
 
     dest_dir = BRANDS_DIR / fila["slug"] / "fotos"

@@ -90,6 +90,14 @@ def test_crear_rss_valida_cada_horas(cx) -> None:
     assert sid > 0
 
 
+def test_crear_rss_rechaza_urls_ssrf(cx) -> None:
+    """H4: SSRF — loopback, link-local (metadata cloud) y localhost rechazados
+    al crear la fuente, antes de que el worker les pegue una sola vez."""
+    for url in ("http://169.254.169.254/x", "http://localhost/x", "http://127.0.0.1"):
+        with pytest.raises(ValueError, match="config"):
+            fuentes.crear(cx, 2, "info", "rss", {"urls": [url]})
+
+
 def test_crear_newsapi_valida_config(cx) -> None:
     with pytest.raises(ValueError, match="config"):
         fuentes.crear(cx, 2, "info", "newsapi", {})  # sin query

@@ -78,6 +78,17 @@ def test_sources_rss_cada_horas_invalido_422(api_cliente) -> None:
         assert r.status_code == 422 and r.json()["campo"] == "config"
 
 
+def test_sources_rss_url_ssrf_422(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+
+    for url in ("http://169.254.169.254/x", "http://localhost/x", "http://127.0.0.1"):
+        r = cli.post("/brands/pensionmas/sources",
+                     json={"kind": "info", "provider": "rss", "config": {"urls": [url]}})
+        assert r.status_code == 422 and r.json()["campo"] == "config"
+
+
 def test_sources_patch_delete_y_ownership(api_cliente) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)
@@ -246,6 +257,26 @@ def test_fotos_valida_extension_tamano_y_cantidad(api_cliente, monkeypatch, tmp_
 
     r = cli.get("/brands/pensionmas/photos")
     assert r.json() == []  # nada se guardó de los intentos fallidos
+
+
+def test_fotos_upload_streaming_aborta_sin_escribir_nada(api_cliente, monkeypatch, tmp_path) -> None:
+    """H5: la lectura del archivo es por chunks y aborta con 422 al superar el
+    tope ANTES de tenerlo completo en memoria. Se monkeypatchea el tope a un
+    valor chico para no tener que generar 8 MB reales en el test."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+    from api.routers import fuentes_api
+    monkeypatch.setattr(fuentes_api, "BRANDS_DIR", tmp_path / "brands")
+    monkeypatch.setattr(fuentes_api, "_MAX_FOTO", 200)  # tope chico
+
+    r = cli.post("/brands/pensionmas/photos",
+                files=[("archivos", ("foto.png", io.BytesIO(_png(500)), "image/png"))])
+    assert r.status_code == 422
+
+    r = cli.get("/brands/pensionmas/photos")
+    assert r.json() == []  # nada se escribió en disco
+    assert not (tmp_path / "brands" / "pensionmas" / "fotos").exists()
 
 
 def test_fotos_editor_no_puede_mutar(api_cliente, tmp_path, monkeypatch) -> None:

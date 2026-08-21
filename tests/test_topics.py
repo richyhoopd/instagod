@@ -55,6 +55,42 @@ class _FakeResp:
         return None
 
 
+# ---------- url_segura (H4: SSRF) ----------
+
+def test_url_segura_acepta_https_normal() -> None:
+    assert topics.url_segura("https://ejemplo.com/feed.xml") is True
+    assert topics.url_segura("http://ejemplo.com/feed.xml") is True
+
+
+def test_url_segura_rechaza_esquema_no_http() -> None:
+    assert topics.url_segura("ftp://ejemplo.com/feed.xml") is False
+    assert topics.url_segura("file:///etc/passwd") is False
+
+
+def test_url_segura_rechaza_loopback_link_local_y_privados() -> None:
+    assert topics.url_segura("http://127.0.0.1") is False
+    assert topics.url_segura("http://127.0.0.1/x") is False
+    assert topics.url_segura("http://169.254.169.254/x") is False  # metadata cloud
+    assert topics.url_segura("http://localhost/x") is False
+    assert topics.url_segura("http://10.0.0.5/x") is False
+    assert topics.url_segura("http://192.168.1.1/x") is False
+
+
+def test_url_segura_acepta_hostname_no_ip_sin_resolver_dns() -> None:
+    assert topics.url_segura("https://noticias.ejemplo.com/rss") is True
+
+
+def test_fetch_rss_bloquea_url_insegura_sin_llamar_a_get() -> None:
+    llamado = []
+
+    def _get(url, **kw):
+        llamado.append(url)
+        return _FakeResp(_RSS2)
+
+    assert topics.fetch_rss("http://127.0.0.1/feed.xml", _get=_get) == []
+    assert llamado == []
+
+
 def test_fetch_rss_parsea_rss2() -> None:
     items = topics.fetch_rss("https://ejemplo.com/feed.xml",
                              _get=lambda url, **kw: _FakeResp(_RSS2))

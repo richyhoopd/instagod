@@ -58,6 +58,18 @@ def test_prompts_valida_por_formato_y_hashtags(api_cliente) -> None:
     assert r.status_code == 422 and r.json()["campo"] == "voz"
 
 
+def test_prompts_por_formato_valor_excede_2000_chars_422(api_cliente) -> None:
+    """H8: cada valor de por_formato tiene su propio tope (2000 chars)."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+
+    r = cli.put("/brands/pensionmas/prompts", json={
+        "voz": "x", "por_formato": {"listicle": "y" * 2001},
+    })
+    assert r.status_code == 422 and r.json()["campo"] == "por_formato"
+
+
 def test_probar_prompt_con_llm_monkeypatcheado(api_cliente, monkeypatch) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)
@@ -257,6 +269,24 @@ def test_logo_upload_valida_extension_y_tamano(api_cliente, monkeypatch, tmp_pat
     r = cli.get("/brands/pensionmas/files/logo")
     assert r.status_code == 200 and r.content == b"\x89PNGdata"
     assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_logo_upload_streaming_aborta_sin_escribir_nada(api_cliente, monkeypatch, tmp_path) -> None:
+    """H5: lectura por chunks, aborta con 422 antes de tener el archivo
+    completo en memoria. Tope monkeypatcheado a un valor chico para no
+    necesitar generar 2 MB reales en el test."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+    from api.routers import perfil
+    monkeypatch.setattr(perfil, "BRANDS_DIR", tmp_path / "brands")
+    monkeypatch.setattr(perfil, "_MAX_LOGO", 200)  # tope chico
+
+    grande = b"\x89PNG" + b"0" * 500
+    r = cli.post("/brands/pensionmas/logo",
+                files={"archivo": ("logo.png", io.BytesIO(grande), "image/png")})
+    assert r.status_code == 422
+    assert not (tmp_path / "brands" / "pensionmas").exists()
 
 
 def test_logo_svg_con_script_se_rechaza(api_cliente, monkeypatch, tmp_path) -> None:

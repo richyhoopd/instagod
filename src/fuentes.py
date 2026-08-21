@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 
-from src import db
+from src import db, topics
 
 PROVIDERS_IMAGEN = ("carpeta", "ig_accounts", "pinterest", "pexels", "unsplash", "banco", "covers")
 PROVIDERS_INFO = ("rss", "newsapi")
@@ -60,7 +60,7 @@ def validar_config(kind: str, provider: str, config: dict | None) -> None:
     elif provider == "rss":
         urls = config.get("urls")
         if not isinstance(urls, list) or not urls or not all(
-            isinstance(u, str) and u.startswith("http") for u in urls
+            isinstance(u, str) and topics.url_segura(u) for u in urls
         ):
             raise ValueError("config")
         if not _cada_horas_valido(config):

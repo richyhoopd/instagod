@@ -8,9 +8,11 @@ persiste con dedup por URL; `listar`/`descartar` son la bandeja.
 from __future__ import annotations
 
 import html
+import ipaddress
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -19,6 +21,37 @@ from src import db
 _RESUMEN_MAX = 500
 _NEWSAPI_URL = "https://newsapi.org/v2/everything"
 _NEWSAPI_TOP = 20
+# Hostnames literales que apuntan a la propia máquina/red aunque no sean IPs
+# (localhost no es una IP, así que `ipaddress` no lo detecta por sí solo).
+_HOSTS_PELIGROSOS = {"localhost", "localhost.localdomain", "0.0.0.0"}
+
+
+def url_segura(url: str) -> bool:
+    """True si `url` es http(s) y no apunta a un host loopback/link-local/privado
+    (defensa contra SSRF en fuentes RSS, H4).
+
+    Si el host es un literal IP (`http://127.0.0.1/...`) se valida directo con
+    `ipaddress`. Si es un hostname normal, esta función NO resuelve DNS (eso
+    metería una llamada de red al *path* de validación) — solo bloquea los
+    literales peligrosos conocidos (`localhost` y variantes).
+    """
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https"):
+        return False
+    host = (p.hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in _HOSTS_PELIGROSOS or host.endswith(".localhost"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True  # hostname no-IP: no se resuelve DNS en este path
+    return not (ip.is_loopback or ip.is_link_local or ip.is_private
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
 def _local(tag: str) -> str:
@@ -91,7 +124,13 @@ def fetch_rss(url: str, *, _get=None) -> list[dict[str, Any]]:
 
     Cualquier falla (red, XML malformado, formato desconocido) se avisa por
     stdout y devuelve `[]`: una fuente rota nunca debe tronar el job completo.
+    Cinturón anti-SSRF (H4): `validar_config` ya rechaza URLs inseguras al
+    crear/editar la fuente, pero por si una fila vieja se cuela, se revalida
+    aquí antes de golpear la red.
     """
+    if not url_segura(url):
+        print(f"[topics] fetch_rss bloqueado (URL insegura): {url}")
+        return []
     get = _get or requests.get
     try:
         resp = get(url, timeout=15)

@@ -162,8 +162,9 @@ sugeridos). Aislamiento estricto por `account_id`: una fuente ajena a la marca d
   (ver abajo), el resto acepta `config` libre u omitido.
 - `PATCH /brands/{slug}/sources/{sid}` — `{config?, activa?}` (manager+).
 - `DELETE /brands/{slug}/sources/{sid}` (manager+).
-- `PUT /brands/{slug}/sources/orden` — `{ids: [...]}`, reordena la cascada de un `kind`; debe ser
-  exactamente el set de ids existentes de ese `kind` para esa marca, sin repetir (422 si no).
+- `PUT /brands/{slug}/sources/orden` — `{ids: [...]}`, reordena la cascada de fuentes; debe ser
+  exactamente el set COMPLETO de ids de la marca (todos los `kind` juntos, no uno solo), sin
+  repetir ni faltar ninguno (422 si no).
 - `POST /brands/{slug}/sources/{sid}/run` — encola el job de esa fuente (`202 {job_id}`). Solo
   fuentes "ejecutables" (`rss`→`sourcing.rss_fetch`, `newsapi`→`sourcing.newsapi_fetch`,
   `ig_accounts`→`sourcing.ig_scrape`); el resto de providers son estáticos y responden 422.

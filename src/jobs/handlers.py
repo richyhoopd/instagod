@@ -165,7 +165,10 @@ def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
     """payload: {source_id}. Descarga hasta `max_por_cuenta` fotos por cada @cuenta
     a `data/brands/<slug>/fotos/`. Best-effort por cuenta: una cuenta rota o privada
     se anota en `ultimo_error` y se sigue con la siguiente — JAMÁS reintenta ni rota
-    de sesión (a diferencia de `ingest_ig.ingest`, pensado para corridas manuales)."""
+    de sesión (a diferencia de `ingest_ig.ingest`, pensado para corridas manuales).
+
+    Si NINGUNA cuenta produjo fotos y hubo errores, el job termina en error de
+    verdad (no un "ok" con 0 fotos que esconde que el scrape falló, H6)."""
     payload = json.loads(job["payload_json"] or "{}")
     source_id = payload["source_id"]
     fuente = _fuente_de(cx, job["account_id"], source_id, "imagen")
@@ -193,6 +196,7 @@ def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
             if user.get("is_private"):
                 errores.append(f"@{handle}: perfil privado")
                 continue
+            ingest_ig._sleep()  # pausa entre el request de perfil y el de posts
             items = ingest_ig.fetch_posts(session, user["id"], max_por_cuenta)
         except Exception as exc:  # noqa: BLE001 — una cuenta rota no debe tumbar las demás
             errores.append(f"@{handle}: {exc}")
@@ -222,6 +226,8 @@ def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
 
     db.update(cx, "brand_sources", source_id, ultimo_run=_ts(),
              ultimo_error="; ".join(errores) if errores else None)
+    if total == 0 and errores:
+        raise RuntimeError("scrape sin resultados: " + "; ".join(errores)[:200])
     return {"bajadas": total, "errores": errores}
 
 

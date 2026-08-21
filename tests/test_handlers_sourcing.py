@@ -167,6 +167,9 @@ def test_ig_scrape_descarga_fotos_de_cada_cuenta(cx, monkeypatch, tmp_path) -> N
     monkeypatch.setattr(handlers.ingest_ig, "_image_urls",
                         lambda item: [(0, f"https://img/{item['code']}.jpg")])
 
+    sleeps = []
+    monkeypatch.setattr(handlers.ingest_ig, "_sleep", lambda: sleeps.append(1))
+
     descargas = []
 
     def _fake_download(session, url, dest):
@@ -184,6 +187,7 @@ def test_ig_scrape_descarga_fotos_de_cada_cuenta(cx, monkeypatch, tmp_path) -> N
     for p in descargas:
         assert p.parent == tmp_path / "data" / "brands" / "gdlscene" / "fotos"
         assert p.exists()
+    assert sleeps  # H6b: se pausó entre el request de perfil y el de posts
 
 
 def test_ig_scrape_respeta_max_por_cuenta(cx, monkeypatch, tmp_path) -> None:
@@ -200,6 +204,7 @@ def test_ig_scrape_respeta_max_por_cuenta(cx, monkeypatch, tmp_path) -> None:
                         lambda item: [(0, f"https://img/{item['code']}.jpg")])
     monkeypatch.setattr(handlers.ingest_ig, "_download",
                         lambda session, url, dest: dest.write_bytes(b"x") or True)
+    monkeypatch.setattr(handlers.ingest_ig, "_sleep", lambda: None)
 
     job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
     resultado = handlers.sourcing_ig_scrape(cx, job)
@@ -220,6 +225,7 @@ def test_ig_scrape_code_malicioso_no_escapa_la_carpeta(cx, monkeypatch, tmp_path
                         lambda session, user_id, count: [{"code": "../../evil"}])
     monkeypatch.setattr(handlers.ingest_ig, "_image_urls",
                         lambda item: [(0, "https://img/x.jpg")])
+    monkeypatch.setattr(handlers.ingest_ig, "_sleep", lambda: None)
 
     descargas = []
 
@@ -253,7 +259,9 @@ def test_ig_scrape_sesion_no_sana_revienta_sin_loop(cx, monkeypatch) -> None:
         handlers.sourcing_ig_scrape(cx, job)
 
 
-def test_ig_scrape_cuenta_privada_no_revienta_el_job(cx, monkeypatch, tmp_path) -> None:
+def test_ig_scrape_todas_las_cuentas_fallan_termina_el_job_en_error(cx, monkeypatch, tmp_path) -> None:
+    """H6a: si NINGUNA cuenta produjo fotos y hubo errores, el job debe
+    reventar (no un "ok" con 0 fotos que esconde que el scrape falló)."""
     monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
     sid = fuentes.crear(cx, 1, "imagen", "ig_accounts", {"cuentas": ["@priv"]})
     monkeypatch.setattr(handlers.ingest_ig, "get_session", lambda: _FakeSession())
@@ -261,8 +269,31 @@ def test_ig_scrape_cuenta_privada_no_revienta_el_job(cx, monkeypatch, tmp_path) 
                         lambda session, handle: {"id": "1", "is_private": True})
 
     job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
+    with pytest.raises(RuntimeError, match="scrape sin resultados"):
+        handlers.sourcing_ig_scrape(cx, job)
+
+    fila = db.get(cx, "brand_sources", sid)
+    assert "priv" in (fila["ultimo_error"] or "")
+    assert fila["ultimo_run"] is not None  # ultimo_run se sella pese al error
+
+
+def test_ig_scrape_cuenta_privada_entre_varias_no_revienta_si_otra_si_baja(cx, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    sid = fuentes.crear(cx, 1, "imagen", "ig_accounts", {"cuentas": ["@priv", "@ok"]})
+    monkeypatch.setattr(handlers.ingest_ig, "get_session", lambda: _FakeSession())
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_profile",
+                        lambda session, handle: {"id": "1", "is_private": handle == "priv"})
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_posts",
+                        lambda session, user_id, count: [{"code": "abc"}])
+    monkeypatch.setattr(handlers.ingest_ig, "_image_urls",
+                        lambda item: [(0, "https://img/x.jpg")])
+    monkeypatch.setattr(handlers.ingest_ig, "_sleep", lambda: None)
+    monkeypatch.setattr(handlers.ingest_ig, "_download",
+                        lambda session, url, dest: dest.write_bytes(b"x") or True)
+
+    job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
     resultado = handlers.sourcing_ig_scrape(cx, job)
-    assert resultado["bajadas"] == 0
+    assert resultado["bajadas"] == 1  # @priv falló pero @ok sí bajó algo
     fila = db.get(cx, "brand_sources", sid)
     assert "priv" in (fila["ultimo_error"] or "")
 

@@ -162,6 +162,22 @@ def test_slideshow_con_topic_id_sin_tema_ni_contexto_usa_defaults_del_topic(api_
     assert payload["contexto"] == "Más de 40 puestos de comida local\nhttps://x.com/feria"
 
 
+def test_slideshow_topic_sin_url_ni_resumen_no_mete_none_en_contexto(api_cliente) -> None:
+    """H7: filtrar None al armar el contexto — un topic sin resumen ni url no
+    debe terminar con el texto literal "None" en el prompt del LLM."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    tid = _topic(cx, pid, resumen=None, url=None)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    r = cli.post("/brands/pensionmas/slideshows", json={"topic_id": tid})
+    assert r.status_code == 202
+    job = db.get(cx, "jobs", r.json()["job_id"])
+    payload = json.loads(job["payload_json"])
+    assert payload["contexto"] is None
+    assert "None" not in (payload["contexto"] or "")
+
+
 def test_slideshow_sin_tema_ni_topic_id_422(api_cliente) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)

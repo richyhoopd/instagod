@@ -65,7 +65,9 @@ def crear_slideshow(slug: str, datos: NuevoSlideshow, user: dict = Depends(usuar
             raise ApiError(422, "validacion", "Ese tema ya fue descartado", "topic_id")
         tema = tema or topic["titulo"]
         if contexto is None:
-            contexto = f"{topic['resumen']}\n{topic['url']}"
+            # Filtrar None (H7): un topic sin resumen o sin url no debe meter
+            # el texto literal "None" en el contexto que ve el LLM.
+            contexto = "\n".join(x for x in (topic.get("resumen"), topic.get("url")) if x) or None
     elif not tema:
         raise ApiError(422, "validacion", "tema es requerido si no se da topic_id", "tema")
 
