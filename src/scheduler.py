@@ -110,3 +110,76 @@ def next_free_slot_before(
         day += timedelta(days=1)
         if datetime.combine(day, time(0, 0)) > limite.replace(tzinfo=None):
             return None
+
+
+# ---------- Fase 2 (portal): slots desde content_queue (DB), no Sheet ----------
+
+_STATUS_OCUPA_SLOT = ("en_sheet", "programado", "publicado")
+
+
+def _taken_db(cx, account_id: int) -> set[str]:
+    """Conjunto de scheduled_datetime (ISO, minuto) ya ocupados en content_queue."""
+    placeholders = ", ".join("?" * len(_STATUS_OCUPA_SLOT))
+    filas = cx.execute(
+        f"SELECT scheduled_datetime FROM content_queue "
+        f"WHERE account_id = ? AND status IN ({placeholders}) "
+        f"AND scheduled_datetime IS NOT NULL",
+        (account_id, *_STATUS_OCUPA_SLOT),
+    ).fetchall()
+    return {str(r["scheduled_datetime"])[:16] for r in filas}
+
+
+def next_free_slot_db(cx, account_id: int, *, now: datetime | None = None,
+                      slots: list[str] | None = None) -> datetime:
+    """Igual que `next_free_slot`, pero los ocupados salen de `content_queue` (DB)."""
+    tz = _tz()
+    now = now or datetime.now(tz)
+    if now.tzinfo is None:
+        now = tz.localize(now)
+
+    horarios = _slot_times(slots)
+    # con malla propia el tope diario ES la malla; sin ella, POSTS_PER_DAY:
+    if slots is None:
+        horarios = horarios[: max(1, config.POSTS_PER_DAY)]
+    taken = _taken_db(cx, account_id)
+
+    day = now.date() + timedelta(days=1)  # empezamos mañana
+    for _ in range(365):
+        for slot in horarios:
+            candidate = tz.localize(datetime.combine(day, slot))
+            if candidate.strftime("%Y-%m-%dT%H:%M") not in taken and candidate > now:
+                return candidate
+        day += timedelta(days=1)
+    raise RuntimeError("No se encontró slot libre en el próximo año")
+
+
+def slots_proximos_db(cx, account_id: int, n: int = 5, *, now: datetime | None = None,
+                      slots: list[str] | None = None) -> list[datetime]:
+    """Los `n` primeros huecos libres, en orden (cada uno evita los anteriores)."""
+    tz = _tz()
+    now = now or datetime.now(tz)
+    if now.tzinfo is None:
+        now = tz.localize(now)
+
+    horarios = _slot_times(slots)
+    if slots is None:
+        horarios = horarios[: max(1, config.POSTS_PER_DAY)]
+    taken = _taken_db(cx, account_id)
+
+    resultado: list[datetime] = []
+    day = now.date() + timedelta(days=1)  # empezamos mañana
+    for _ in range(365):
+        if len(resultado) >= n:
+            break
+        for slot in horarios:
+            if len(resultado) >= n:
+                break
+            candidate = tz.localize(datetime.combine(day, slot))
+            key = candidate.strftime("%Y-%m-%dT%H:%M")
+            if key not in taken and candidate > now:
+                resultado.append(candidate)
+                taken.add(key)
+        day += timedelta(days=1)
+    if len(resultado) < n:
+        raise RuntimeError("No se encontraron suficientes slots libres en el próximo año")
+    return resultado
