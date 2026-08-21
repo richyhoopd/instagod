@@ -213,3 +213,27 @@ def test_notificar_resolucion_sin_tg_ids_devuelve_false(tmp_path, monkeypatch) -
     cx = _cx(tmp_path)
     qid = approval.encolar_pendiente(cx, tipo="meme", caption="c", imagen_url="u")
     assert approval.notificar_resolucion(cx, qid, "x") is False
+
+
+def test_notificar_resolucion_no_filtra_token(tmp_path, monkeypatch, capsys) -> None:
+    """requests.HTTPError trae la URL completa (con el bot token) en su texto
+    y en resp.url — el log a stderr NUNCA debe filtrar ese token."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok_tg_999")
+    cx = _cx(tmp_path)
+    qid = approval.encolar_pendiente(cx, tipo="meme", caption="c", imagen_url="u")
+    db.update(cx, "content_queue", qid, tg_chat_id="-100", tg_message_id="42")
+
+    import requests
+
+    def _post(url, data=None, timeout=None):
+        resp = requests.Response()
+        resp.status_code = 401
+        resp.url = "https://api.telegram.org/bottok_tg_999/editMessageReplyMarkup"
+        raise requests.HTTPError("401 Client Error: Unauthorized for url: "
+                                 f"{resp.url}", response=resp)
+
+    monkeypatch.setattr(requests, "post", _post)
+
+    assert approval.notificar_resolucion(cx, qid, "x") is False
+    captured = capsys.readouterr()
+    assert "tok_tg_999" not in captured.err

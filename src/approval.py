@@ -92,7 +92,7 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             # a la vista, accionable, sin bloquear al aprobador.
             db.update(cx, "content_queue", queue_id, aprobacion="aprobado",
                       status="programado", scheduled_datetime=slot.isoformat(),
-                      aprobado_por=user_id, error=f"espejo sheet: {str(exc)[:200]}")
+                      aprobado_por=user_id, error=("espejo sheet: " + str(exc))[:200])
         else:
             db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
                       sheet_row_id=str(sheet_row), scheduled_datetime=slot.isoformat(),
@@ -377,6 +377,10 @@ def notificar_resolucion(cx, queue_id: int, texto: str) -> bool:
     """
     import sys
 
+    import requests
+
+    token: str | None = None
+    chat_id: str | None = None
     try:
         fila = db.get(cx, "content_queue", queue_id)
         if not fila or not fila.get("tg_chat_id") or not fila.get("tg_message_id"):
@@ -390,7 +394,6 @@ def notificar_resolucion(cx, queue_id: int, texto: str) -> bool:
 
         import json
 
-        import requests
         base_url = f"https://api.telegram.org/bot{token}"
         chat_id = fila["tg_chat_id"]
         message_id = fila["tg_message_id"]
@@ -410,6 +413,26 @@ def notificar_resolucion(cx, queue_id: int, texto: str) -> bool:
         r2.raise_for_status()
         return True
     except Exception as exc:
-        print(f"[approval] notificar_resolucion falló para queue {queue_id}: {exc}",
-             file=sys.stderr)
+        print(f"[approval] notificar_resolucion falló para queue {queue_id}: "
+             f"{_error_seguro(exc, token=token, chat_id=chat_id)}", file=sys.stderr)
         return False
+
+
+def _error_seguro(exc: Exception, *, token: str | None = None,
+                  chat_id: str | None = None) -> str:
+    """Texto de error SIN secretos: nunca la URL cruda (trae el bot token).
+
+    requests.HTTPError trae la URL completa (con el token) en su __str__ y en
+    resp.url — de esa solo se loguea el status code. Cualquier otra excepción
+    se castea a texto y se redactan token/chat_id si aparecen ahí (p. ej. un
+    ConnectionError también puede traer la URL en su mensaje).
+    """
+    import requests
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return f"HTTP {exc.response.status_code}"
+    msg = str(exc)
+    if token:
+        msg = msg.replace(token, "***")
+    if chat_id:
+        msg = msg.replace(str(chat_id), "***")
+    return msg[:200]
