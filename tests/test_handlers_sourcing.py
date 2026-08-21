@@ -88,6 +88,7 @@ def test_newsapi_fetch_con_key_guarda_topics(cx, monkeypatch) -> None:
         capturado["query"] = query
         capturado["key"] = key
         capturado["idioma"] = kw.get("idioma")
+        capturado["estricto"] = kw.get("estricto")
         return [{"titulo": "N1", "resumen": "r", "url": "https://n.com/1",
                  "publicado_en": None}]
 
@@ -99,8 +100,30 @@ def test_newsapi_fetch_con_key_guarda_topics(cx, monkeypatch) -> None:
     assert capturado["query"] == "cafeterías"
     assert capturado["key"] == "clave-123"
     assert capturado["idioma"] == "es"
+    assert capturado["estricto"] is True  # nunca 'best-effort' silencioso: si falla, se sabe
     assert resultado["nuevos"] == 1
     assert len(topics.listar(cx, 1)) == 1
+
+
+def test_newsapi_fetch_error_marca_ultimo_error_y_termina_job_en_error(cx, monkeypatch) -> None:
+    sid = fuentes.crear(cx, 1, "info", "newsapi", {"query": "cafeterías"})
+    monkeypatch.setattr(handlers.config, "account_creds",
+                        lambda slug: {"NEWSAPI_KEY": "clave-999"})
+
+    def _fake_fetch_newsapi(query, key, **kw):
+        assert kw.get("estricto") is True
+        raise RuntimeError("newsapi HTTP 500")
+
+    monkeypatch.setattr(handlers.topics, "fetch_newsapi", _fake_fetch_newsapi)
+    job = _job(cx, "sourcing.newsapi_fetch", 1, {"source_id": sid})
+
+    worker._despachar(cx, job)
+
+    fila_job = db.get(cx, "jobs", job["id"])
+    assert fila_job["estado"] == "error"
+    fila_fuente = db.get(cx, "brand_sources", sid)
+    assert fila_fuente["ultimo_error"] == "newsapi HTTP 500"
+    assert "clave-999" not in (fila_fuente["ultimo_error"] or "")
 
 
 # ---------- sourcing.ig_scrape ----------
@@ -251,6 +274,24 @@ def test_encolar_fuentes_vencidas_no_duplica_si_ya_hay_job_en_cola(cx) -> None:
     pendientes = db.rows(cx, "SELECT * FROM jobs WHERE tipo = 'sourcing.rss_fetch'")
     assert len(pendientes) == 1
     assert sid  # solo para linter, sid usado arriba
+
+
+def test_encolar_fuentes_vencidas_no_colisiona_por_prefijo_numerico(cx) -> None:
+    """G3: dedup debe comparar `source_id` como valor, no por substring del
+    payload — sin esto, un job pendiente de source_id=10 "bloqueaba" (por el
+    match `%"source_id": 1%`) a una fuente distinta con id=1."""
+    sid1 = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    assert sid1 == 1  # primera fuente creada en un cx limpio
+    jobs.crear(cx, "sourcing.rss_fetch", 1, {"source_id": 10})  # job de OTRA fuente (id=10)
+
+    creados = worker.encolar_fuentes_vencidas(cx)
+
+    assert creados == 1  # sid1 se encoló pese al job pendiente de source_id=10
+    ids_encolados = {
+        json.loads(j["payload_json"])["source_id"]
+        for j in db.rows(cx, "SELECT payload_json FROM jobs WHERE tipo = 'sourcing.rss_fetch'")
+    }
+    assert ids_encolados == {1, 10}
 
 
 def test_encolar_fuentes_vencidas_no_encola_si_no_ha_pasado_cada_horas(cx) -> None:

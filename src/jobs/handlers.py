@@ -13,7 +13,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 import config
-from src import compose, db, generate_slideshow, ingest_ig, jobs, marcas, slideshow_compile, topics
+from src import (
+    compose,
+    db,
+    generate_slideshow,
+    ingest_ig,
+    jobs,
+    marcas,
+    slideshow_compile,
+    slideshow_model,
+    topics,
+)
 from src import fuentes as fuentes_mod
 
 
@@ -119,8 +129,15 @@ def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[
         raise ValueError("Falta NEWSAPI_KEY")
 
     cfg = fuente["config"]
-    items = topics.fetch_newsapi(cfg["query"], key, idioma=cfg.get("idioma", "es"),
-                                 pais=cfg.get("pais"))
+    try:
+        items = topics.fetch_newsapi(cfg["query"], key, idioma=cfg.get("idioma", "es"),
+                                     pais=cfg.get("pais"), estricto=True)
+    except RuntimeError as exc:
+        # `estricto=True` ya nos devuelve el mensaje redactado (sin la key):
+        # lo dejamos en ultimo_error para la GUI y volvemos a lanzar para que
+        # el worker cierre el job en error.
+        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=str(exc))
+        raise
     nuevos = topics.guardar(cx, job["account_id"], items, "newsapi")
     db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=None)
     return {"nuevos": nuevos}
@@ -199,6 +216,9 @@ def preset_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
         guion, estilo=nombre, imagenes=[None], aspect_ratio="4:5",
         brief={"tema": "preview"}, formato="libre", account_slug=slug,
         estilos=catalogo)
+    errores = slideshow_model.validar(show)
+    if errores:
+        raise RuntimeError(f"Contrato inválido, no se genera preview: {errores}")
     ctx = slideshow_compile.contexto_slide(show, 0)
     png = compose.render_card("slide.html", ctx, prefix=f"preview_{slug}_{nombre}")
 

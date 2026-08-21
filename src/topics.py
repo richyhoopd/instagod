@@ -113,8 +113,17 @@ def fetch_rss(url: str, *, _get=None) -> list[dict[str, Any]]:
 
 
 def fetch_newsapi(query: str, key: str, *, idioma: str = "es", pais: str | None = None,
-                   _get=None) -> list[dict[str, Any]]:
-    """NewsAPI `/v2/everything` → [{titulo, resumen, url, publicado_en}] (top 20)."""
+                   _get=None, estricto: bool = False) -> list[dict[str, Any]]:
+    """NewsAPI `/v2/everything` → [{titulo, resumen, url, publicado_en}] (top 20).
+
+    NUNCA imprime `key`: un `HTTPError` de `requests` trae la URL completa (con
+    `apiKey=...`) en `str(exc)`, así que de un HTTPError solo se loguea el status
+    code; cualquier otra excepción se castea a texto con la key redactada.
+    `estricto=False` (default): fuente rota → `[]` (no tumba el job, como
+    `fetch_rss`). `estricto=True`: en vez de devolver `[]`, relanza un
+    `RuntimeError` (ya redactado) para que el caller pueda registrar el fallo
+    en `brand_sources.ultimo_error` y terminar el job en error.
+    """
     get = _get or requests.get
     params = {"q": query, "language": idioma, "apiKey": key, "pageSize": _NEWSAPI_TOP}
     if pais:
@@ -124,8 +133,20 @@ def fetch_newsapi(query: str, key: str, *, idioma: str = "es", pais: str | None 
         if hasattr(resp, "raise_for_status"):
             resp.raise_for_status()
         data = resp.json()
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "?"
+        print(f"[topics] fetch_newsapi HTTP {status}")
+        if estricto:
+            raise RuntimeError(f"newsapi HTTP {status}") from exc
+        return []
     except Exception as exc:  # noqa: BLE001 — igual que fetch_rss: fuente rota, no fatal
-        print(f"[topics] fetch_newsapi error para {query!r}: {exc}")
+        msg = str(exc)
+        if key:
+            msg = msg.replace(key, "***")
+        msg = msg[:200]
+        print(f"[topics] fetch_newsapi error para {query!r}: {msg}")
+        if estricto:
+            raise RuntimeError(msg) from exc
         return []
 
     articulos = (data.get("articles") or [])[:_NEWSAPI_TOP]

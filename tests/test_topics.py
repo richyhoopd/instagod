@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+import requests
 
 from src import db, topics
 
@@ -155,6 +156,64 @@ def test_fetch_newsapi_error_devuelve_lista_vacia() -> None:
     def _get(url, params=None, **kw):
         raise ConnectionError("caída")
     assert topics.fetch_newsapi("q", "k", _get=_get) == []
+
+
+class _FakeHTTPResp:
+    """Respuesta HTTP fake cuya `.url` (como en `requests` real) trae la key
+    en query string — exactamente el vector de fuga que hay que evitar."""
+    def __init__(self, status_code, url):
+        self.status_code = status_code
+        self.url = url
+
+
+def test_fetch_newsapi_http_error_no_filtra_la_key_al_log(capsys) -> None:
+    resp = _FakeHTTPResp(500, "https://newsapi.org/v2/everything?apiKey=key_secreta_9")
+
+    def _get(url, params=None, **kw):
+        raise requests.HTTPError("500 Server Error", response=resp)
+
+    items = topics.fetch_newsapi("q", "key_secreta_9", _get=_get)
+
+    assert items == []
+    salida = capsys.readouterr().out
+    assert "key_secreta_9" not in salida
+    assert "500" in salida
+
+
+def test_fetch_newsapi_error_generico_redacta_la_key_del_mensaje(capsys) -> None:
+    def _get(url, params=None, **kw):
+        raise ConnectionError("fallo hablando con key_secreta_9 en el mensaje")
+
+    items = topics.fetch_newsapi("q", "key_secreta_9", _get=_get)
+
+    assert items == []
+    salida = capsys.readouterr().out
+    assert "key_secreta_9" not in salida
+    assert "***" in salida
+
+
+def test_fetch_newsapi_estricto_relanza_runtime_error_redactado(capsys) -> None:
+    resp = _FakeHTTPResp(401, "https://newsapi.org/v2/everything?apiKey=key_secreta_9")
+
+    def _get(url, params=None, **kw):
+        raise requests.HTTPError("401", response=resp)
+
+    with pytest.raises(RuntimeError, match="401"):
+        topics.fetch_newsapi("q", "key_secreta_9", _get=_get, estricto=True)
+
+    salida = capsys.readouterr().out
+    assert "key_secreta_9" not in salida
+
+
+def test_fetch_newsapi_estricto_sin_error_devuelve_items_normal() -> None:
+    def _get(url, params=None, **kw):
+        return _FakeRespJson({"status": "ok", "articles": [
+            {"title": "T", "description": "d", "url": "https://x.com/1",
+             "publishedAt": None},
+        ]})
+
+    items = topics.fetch_newsapi("q", "k", _get=_get, estricto=True)
+    assert len(items) == 1
 
 
 # ---------- guardar / listar / descartar ----------

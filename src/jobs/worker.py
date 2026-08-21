@@ -61,6 +61,26 @@ def encolar_fuentes_vencidas(cx) -> int:
     ahora = datetime.now(timezone.utc)
     fuentes_info = db.rows(
         cx, "SELECT * FROM brand_sources WHERE kind = 'info' AND activa = 1")
+
+    # source_id que ya tienen un job cola/corriendo, por tipo. UN SOLO query:
+    # comparar el `source_id` parseado (no LIKE por substring) evita que
+    # source_id=1 "bloquee" a source_id=10 por coincidencia de prefijo.
+    tipos = tuple(_TIPO_POR_PROVIDER.values())
+    marcas_pendientes: dict[str, set[int]] = {}
+    if tipos:
+        marcadores = db.rows(
+            cx, f"SELECT tipo, payload_json FROM jobs "
+                f"WHERE tipo IN ({','.join('?' * len(tipos))}) "
+                f"AND estado IN ('cola', 'corriendo')",
+            tipos)
+        for m in marcadores:
+            try:
+                sid = json.loads(m["payload_json"] or "{}").get("source_id")
+            except (TypeError, ValueError):
+                sid = None
+            if sid is not None:
+                marcas_pendientes.setdefault(m["tipo"], set()).add(sid)
+
     creados = 0
     for f in fuentes_info:
         tipo = _TIPO_POR_PROVIDER.get(f["provider"])
@@ -83,11 +103,7 @@ def encolar_fuentes_vencidas(cx) -> int:
         if not vencido:
             continue
 
-        ya_en_cola = db.rows(
-            cx, "SELECT id FROM jobs WHERE tipo = ? AND estado IN ('cola', 'corriendo') "
-                "AND payload_json LIKE ?",
-            (tipo, f'%"source_id": {f["id"]}%'))
-        if ya_en_cola:
+        if f["id"] in marcas_pendientes.get(tipo, set()):
             continue
 
         jobs.crear(cx, tipo, f["account_id"], {"source_id": f["id"]})
