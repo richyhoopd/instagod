@@ -250,6 +250,24 @@ def test_reprogramar_permite_estado_pendiente(tmp_path):
     assert db.get(cx, "content_queue", qid)["scheduled_datetime"] == "2026-06-11T19:00:00"
 
 
+def test_reprogramar_revive_fila_atorada_reseteando_intentos_y_error(tmp_path):
+    """Fix round 1 (revisión Task 6): una fila que el publisher marcó con
+    error (marcador "[publicando]" de un crash, o ya topada en MAX_INTENTOS)
+    queda visible como estado 'error'; reprogramar es la vía del operador
+    para revivirla — debe limpiar intentos/error, no solo el horario."""
+    cx = _cx(tmp_path)
+    qid = _fila(cx, aprobacion="aprobado", status="programado",
+                scheduled_datetime="2026-06-10T19:00:00",
+                error="[publicando]", intentos=5)
+
+    cola.reprogramar(cx, qid, "2026-06-11T19:00:00")
+
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["scheduled_datetime"] == "2026-06-11T19:00:00"
+    assert fila["intentos"] == 0
+    assert fila["error"] is None
+
+
 # ---------- editar_caption ----------
 
 def test_editar_caption_pendiente(tmp_path):

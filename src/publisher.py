@@ -24,16 +24,29 @@ from src import approval, db
 from src import instagram as _instagram_mod
 from src import marcas as marcas_mod
 
+# Marca temporal en `error` mientras la llamada a IG está en vuelo: si el
+# proceso muere a medias (crash window), la fila queda visible como estado
+# error EN VEZ de reintentarse sola (que podría duplicar el post si en
+# realidad sí se publicó) — filas_due la excluye; reprogramar() la revive.
+MARCADOR_PUBLICANDO = "[publicando]"
+# Tope de reintentos fallidos antes de dejar de intentar una fila sola;
+# reprogramar() resetea `intentos` para revivirla.
+MAX_INTENTOS = 5
+
 
 def filas_due(cx, account_id: int, ahora_iso: str) -> list[dict]:
     """Filas de `content_queue` de la marca listas para publicar: aprobadas,
-    programadas y cuyo `scheduled_datetime` ya venció."""
+    programadas, cuyo `scheduled_datetime` ya venció, sin el marcador de
+    "publicando" en vuelo (ver MARCADOR_PUBLICANDO) y con menos de
+    MAX_INTENTOS fallidos."""
     return db.rows(cx, """
         SELECT * FROM content_queue
          WHERE account_id = ? AND status = 'programado' AND aprobacion = 'aprobado'
            AND scheduled_datetime <= ?
+           AND (error IS NULL OR error NOT LIKE ? || '%')
+           AND intentos < ?
          ORDER BY scheduled_datetime
-    """, (account_id, ahora_iso))
+    """, (account_id, ahora_iso, MARCADOR_PUBLICANDO, MAX_INTENTOS))
 
 
 def _urls_o_none(imagen_url: str) -> list[str] | None:
@@ -61,7 +74,7 @@ def _error_seguro(exc: Exception, creds: dict | None) -> str:
     for secreto in secretos:
         if secreto:
             msg = msg.replace(str(secreto), "***")
-    return msg[:300]
+    return msg[:200]
 
 
 def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> bool:
@@ -78,6 +91,8 @@ def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> boo
     ig = _ig or _instagram_mod
     urls = _urls_o_none(fila.get("imagen_url") or "")
     caption = fila.get("caption") or ""
+    # Marca ANTES de llamar a IG (ver MARCADOR_PUBLICANDO arriba).
+    db.update(cx, "content_queue", fila["id"], error=MARCADOR_PUBLICANDO)
     try:
         if urls is not None:
             media_id = ig.publish_carousel(urls, caption, creds=creds)
@@ -85,7 +100,11 @@ def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> boo
             media_id = ig.publish(fila.get("imagen_url") or "", caption, creds=creds)
     except Exception as exc:  # noqa: BLE001
         error = _error_seguro(exc, creds)
-        db.update(cx, "content_queue", fila["id"], error=error)
+        intentos = (fila.get("intentos") or 0) + 1
+        # Nunca dejamos el marcador en un fallo CONOCIDO (la llamada lanzó):
+        # el reintento del próximo ciclo es seguro, se sobreescribe con el
+        # error real.
+        db.update(cx, "content_queue", fila["id"], error=error, intentos=intentos)
         _notificar(cx, fila["id"], f"⚠️ Error al publicar: {error}")
         return False
     else:

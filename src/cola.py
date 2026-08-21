@@ -20,7 +20,10 @@ ESTADOS = (
 )
 
 # Estados desde los que se puede mover el horario o editar el caption.
-_EDITABLES = ("pendiente", "programado")
+# "error" incluido (fix round 1, revisión Task 6): reprogramar es la vía para
+# revivir una fila atorada por el publisher (marcador "[publicando]" de un
+# crash a medias, o topada en MAX_INTENTOS) — sin esto quedaría sin salida.
+_EDITABLES = ("pendiente", "programado", "error")
 # Estados desde los que se puede descartar (→ status='descartado').
 _ELIMINABLES = ("pendiente", "rechazado", "error")
 # status crudos que ocupan un slot de la malla (mismos que scheduler._taken_db).
@@ -126,7 +129,11 @@ def reprogramar(cx, queue_id: int, nueva_iso: str) -> None:
     if any(str(r["scheduled_datetime"])[:16] == minuto for r in ocupados):
         raise ValueError("choque")
 
-    db.update(cx, "content_queue", queue_id, scheduled_datetime=nueva_iso)
+    # Reset de intentos/error: reprogramar es la vía del operador para revivir
+    # una fila atorada (marcador "[publicando]" de un crash a medias, o ya
+    # topada en MAX_INTENTOS) — sin esto seguiría excluida de filas_due.
+    db.update(cx, "content_queue", queue_id, scheduled_datetime=nueva_iso,
+              intentos=0, error=None)
 
 
 def editar_caption(cx, queue_id: int, caption: str) -> None:

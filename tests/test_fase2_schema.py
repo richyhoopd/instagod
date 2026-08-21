@@ -9,7 +9,7 @@ from src import db
 
 _COLS_NUEVAS = {
     "publicado_en", "error", "creado_por", "aprobado_por",
-    "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
+    "ig_media_id", "origen", "tg_chat_id", "tg_message_id", "intentos",
 }
 
 

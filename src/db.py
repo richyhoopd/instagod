@@ -66,6 +66,8 @@ TABLES: dict[str, set[str]] = {
         # Fase 2 (portal): trazabilidad de publicación DB-driven.
         "publicado_en", "error", "creado_por", "aprobado_por", "ig_media_id",
         "origen", "tg_chat_id", "tg_message_id",
+        # Fix round 1 (revisión Task 6): límite de reintentos del publisher DB.
+        "intentos",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -195,6 +197,9 @@ _MIGRATIONS = {
         "origen": "TEXT NOT NULL DEFAULT 'legacy'",
         "tg_chat_id": "TEXT",
         "tg_message_id": "TEXT",
+        # Fix round 1 (revisión Task 6): reintentos fallidos de publicación;
+        # filas_due excluye intentos >= MAX_INTENTOS (src/publisher.py).
+        "intentos": "INTEGER NOT NULL DEFAULT 0",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
@@ -267,6 +272,7 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         origen             TEXT    NOT NULL DEFAULT 'legacy',
         tg_chat_id         TEXT,
         tg_message_id      TEXT,
+        intentos           INTEGER NOT NULL DEFAULT 0,
         CHECK (tipo   IN ('meme','anuncio','slideshow')),
         CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
@@ -278,6 +284,7 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "formato_patron", "aprobacion", "caption", "imagen_url", "evento_ids",
     "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
     "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
+    "intentos",
 )
 
 

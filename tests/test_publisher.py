@@ -187,7 +187,77 @@ def test_publicar_fila_excepcion_guarda_error_sin_token_y_no_toca_status(tmp_pat
     assert fila2["status"] == "programado"
     assert fila2["error"]
     assert "tok_secreto_999" not in fila2["error"]
-    assert len(fila2["error"]) <= 300
+    assert len(fila2["error"]) <= 200
+
+
+def test_publicar_fila_marca_publicando_antes_de_llamar_a_ig(tmp_path) -> None:
+    """Ventana de crash: si el proceso muere a media llamada, `error` debe
+    quedar en MARCADOR_PUBLICANDO (visible como estado error en vez de
+    reintentarse solo y arriesgar duplicado). Si la llamada SÍ termina (aquí
+    con una excepción conocida), se sobreescribe con el error real —el
+    marcador nunca sobrevive a un intento resuelto."""
+    cx = _cx(tmp_path)
+    mid = _marca(cx, "pensionmas")
+    ahora = _ahora()
+    qid = _fila(cx, account_id=mid, imagen_url="https://img/1.jpg",
+               scheduled=ahora - timedelta(minutes=5))
+    fila = db.get(cx, "content_queue", qid)
+    vistos: list[str | None] = []
+
+    class _FakeMarcador:
+        def publish(self, image_url, caption, *, retries=3, creds=None):
+            vistos.append(db.get(cx, "content_queue", qid)["error"])
+            raise RuntimeError("boom")
+
+    ok = publisher.publicar_fila(cx, fila, {"user_id": "1", "token": "tok"},
+                                 _ig=_FakeMarcador())
+
+    assert ok is False
+    assert vistos == [publisher.MARCADOR_PUBLICANDO]
+    fila2 = db.get(cx, "content_queue", qid)
+    assert fila2["error"] != publisher.MARCADOR_PUBLICANDO
+    assert fila2["intentos"] == 1
+
+
+def test_filas_due_excluye_marcador_publicando(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    mid = _marca(cx, "pensionmas")
+    ahora = _ahora()
+    qid = _fila(cx, account_id=mid, imagen_url="u1", scheduled=ahora - timedelta(minutes=5))
+    db.update(cx, "content_queue", qid, error=publisher.MARCADOR_PUBLICANDO)
+
+    due = publisher.filas_due(cx, mid, ahora.isoformat())
+
+    assert qid not in [f["id"] for f in due]
+
+
+def test_filas_due_excluye_intentos_agotados(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    mid = _marca(cx, "pensionmas")
+    ahora = _ahora()
+    qid = _fila(cx, account_id=mid, imagen_url="u1", scheduled=ahora - timedelta(minutes=5))
+    db.update(cx, "content_queue", qid, intentos=publisher.MAX_INTENTOS)
+
+    due = publisher.filas_due(cx, mid, ahora.isoformat())
+
+    assert qid not in [f["id"] for f in due]
+
+
+def test_fallo_incrementa_intentos_cada_ciclo(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("SHEET_ID__PENSIONMAS", raising=False)
+    monkeypatch.setenv("IG_USER_ID__PENSIONMAS", "555")
+    monkeypatch.setenv("IG_ACCESS_TOKEN__PENSIONMAS", "tok")
+    cx = _cx(tmp_path)
+    mid = _marca(cx, "pensionmas")
+    ahora = _ahora()
+    qid = _fila(cx, account_id=mid, imagen_url="https://img/1.jpg",
+               scheduled=ahora - timedelta(minutes=5))
+
+    publisher.ciclo(cx, ahora=ahora, _ig=FakeIG(fallo=RuntimeError("boom")))
+    assert db.get(cx, "content_queue", qid)["intentos"] == 1
+
+    publisher.ciclo(cx, ahora=ahora, _ig=FakeIG(fallo=RuntimeError("boom")))
+    assert db.get(cx, "content_queue", qid)["intentos"] == 2
 
 
 def test_reintento_siguiente_ciclo_reintenta_fila_con_error(tmp_path, monkeypatch) -> None:
