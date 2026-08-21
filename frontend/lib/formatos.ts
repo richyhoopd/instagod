@@ -41,3 +41,10 @@ export function formatosDeMarca(formatosJson: string | null | undefined): string
 export function formatoLabel(formato: string): string {
   return FORMATO_LABELS[formato] ?? formato;
 }
+
+// Los temas generados por el motor traen un prefijo interno tipo
+// "slideshow listicle: ..." que no debe llegar a la UI.
+export function temaLimpio(tema: string | null | undefined): string {
+  if (!tema) return "";
+  return tema.replace(/^slideshow\s+[a-z_]+\s*:\s*/i, "").trim();
+}

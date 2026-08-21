@@ -30,6 +30,7 @@ import { ImageCarousel } from "./image-carousel";
 import { SlideEditor, slidesDe } from "./slide-editor";
 import { ApiError, get } from "@/lib/api";
 import { formatearFecha } from "@/lib/fecha";
+import { temaLimpio } from "@/lib/formatos";
 import { listaImagenes } from "@/lib/imagenes";
 import {
   useAprobar,
@@ -38,6 +39,7 @@ import {
   useQueueDetail,
   useRechazar,
   useRegenerar,
+  useSlotsProximos,
 } from "@/hooks/use-queue";
 import type { Estado } from "@/lib/estados";
 
@@ -71,6 +73,8 @@ export function QueueDrawer({
   const [reintentando, setReintentando] = useState(false);
   const [slideIdx, setSlideIdx] = useState(0);
   const [editandoSlides, setEditandoSlides] = useState(false);
+  const [slotElegido, setSlotElegido] = useState("");
+  const slotsQuery = useSlotsProximos(slug, 20);
 
   // Sincroniza el borrador de caption cuando cambia el item mostrado (nueva
   // fila u otro fetch tras guardar), sin usar un efecto (react-hooks/set-state-in-effect).
@@ -79,6 +83,7 @@ export function QueueDrawer({
     setCaption(item.caption ?? "");
     setSlideIdx(0);
     setEditandoSlides(false);
+    setSlotElegido("");
   }
 
   const puedeEditar = item ? EDITABLES.includes(item.estado) : false;
@@ -142,6 +147,17 @@ export function QueueDrawer({
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.detalle : "No se pudo eliminar");
+    }
+  }
+
+  async function onCambiarHorario() {
+    if (!item || !slotElegido) return;
+    try {
+      await editar.mutateAsync({ qid: item.id, scheduled_datetime: slotElegido });
+      toast.success(`Horario cambiado a ${formatearFecha(slotElegido)}`);
+      setSlotElegido("");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.detalle : "No se pudo cambiar el horario");
     }
   }
 
@@ -237,8 +253,48 @@ export function QueueDrawer({
               )}
             </div>
 
+            {puedeEditar && (
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">
+                  {item.estado === "programado" ? "Cambiar horario" : "Asignar horario"}
+                </p>
+                <div className="flex gap-2">
+                  <select
+                    aria-label="Horario libre"
+                    className="border-input dark:bg-input/30 h-9 min-w-0 flex-1 rounded-md border bg-transparent px-3 text-sm"
+                    value={slotElegido}
+                    onChange={(e) => setSlotElegido(e.target.value)}
+                  >
+                    <option value="">Elegir un horario libre...</option>
+                    {(slotsQuery.data ?? []).map((iso) => (
+                      <option key={iso} value={iso}>
+                        {formatearFecha(iso)}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9"
+                    disabled={!slotElegido || enCurso}
+                    onClick={onCambiarHorario}
+                  >
+                    {editar.isPending && <Loader2 className="animate-spin" />}
+                    Mover
+                  </Button>
+                </div>
+                {item.estado === "pendiente" && (
+                  <p className="text-xs text-muted-foreground">
+                    Asignar horario no publica: la publicación sigue pendiente de aprobar.
+                  </p>
+                )}
+              </div>
+            )}
+
             {item.tema_semilla && (
-              <p className="text-xs text-muted-foreground">Tema: {item.tema_semilla}</p>
+              <p className="text-xs text-muted-foreground">
+                Tema: {temaLimpio(item.tema_semilla) || item.tema_semilla}
+              </p>
             )}
           </div>
         )}

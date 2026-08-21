@@ -216,12 +216,64 @@ export function TabVoz({
             {probar.isPending ? "Probando..." : "Probar"}
           </Button>
         </div>
-        {probar.data !== undefined && (
-          <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-3 text-xs whitespace-pre-wrap">
-            {JSON.stringify(probar.data, null, 2)}
-          </pre>
-        )}
+        {probar.data !== undefined && <ResultadoPrueba data={probar.data} />}
       </div>
+    </div>
+  );
+}
+
+// Guion que regresa POST /prompts/probar (src/slideshow_script.generar_guion):
+// {tema, hook, caption, cta, slides: [{text, rol, image_hint}]}.
+interface GuionPrueba {
+  hook?: string;
+  caption?: string;
+  cta?: string;
+  slides?: { text?: string; rol?: string }[];
+}
+
+function ResultadoPrueba({ data }: { data: unknown }) {
+  const guion = (data && typeof data === "object" ? data : {}) as GuionPrueba;
+  const puntos = (guion.slides ?? []).filter((s) => s.rol === "punto" && s.text);
+
+  if (!guion.hook && puntos.length === 0 && !guion.caption) {
+    // Respuesta con otra forma: mejor cruda que nada.
+    return (
+      <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-3 text-xs whitespace-pre-wrap">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="max-h-96 space-y-3 overflow-auto rounded-lg border bg-muted/30 p-4 text-sm">
+      {guion.hook && (
+        <div>
+          <p className="text-xs text-muted-foreground">Portada</p>
+          <p className="font-medium">{guion.hook}</p>
+        </div>
+      )}
+      {puntos.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground">Slides</p>
+          <ol className="mt-1 list-decimal space-y-1 pl-5">
+            {puntos.map((s, i) => (
+              <li key={i}>{s.text}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {guion.cta && (
+        <div>
+          <p className="text-xs text-muted-foreground">Cierre</p>
+          <p>{guion.cta}</p>
+        </div>
+      )}
+      {guion.caption && (
+        <div>
+          <p className="text-xs text-muted-foreground">Caption</p>
+          <p className="whitespace-pre-wrap">{guion.caption}</p>
+        </div>
+      )}
     </div>
   );
 }
