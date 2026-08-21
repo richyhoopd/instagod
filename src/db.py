@@ -25,6 +25,8 @@ TABLES: dict[str, set[str]] = {
         "slug", "ig_handle", "nombre", "ciudad", "timezone",
         "voz_extra", "color_marca", "activa",
         "fuentes_imagen", "estilos_json", "voz", "formatos", "logo_path", "posting_slots",
+        # Fase 3 (spec 2026-08-21): perfil extendido.
+        "descripcion", "sitio_web", "hashtags_default", "prompts_json",
     },
     "bands": {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
@@ -95,6 +97,15 @@ TABLES: dict[str, set[str]] = {
         "tipo", "account_id", "payload_json", "estado", "progreso", "log",
         "resultado_json", "queue_id", "creado_por", "worker_id", "heartbeat",
         "started_at", "finished_at",
+    },
+    # Fase 3 (spec 2026-08-21): fuentes de contenido y temas sugeridos por marca.
+    "brand_sources": {
+        "account_id", "kind", "provider", "config_json", "activa", "orden",
+        "ultimo_run", "ultimo_error",
+    },
+    "topic_suggestions": {
+        "account_id", "titulo", "resumen", "url", "fuente", "publicado_en",
+        "usado_en_queue_id", "descartado",
     },
 }
 
@@ -231,6 +242,11 @@ _MIGRATIONS = {
         "formatos": "TEXT",         # JSON: formatos habilitados
         "logo_path": "TEXT",        # asset local en data/brands/<slug>/
         "posting_slots": "TEXT",    # "HH:MM,HH:MM" propio; NULL → global
+        # Fase 3 (spec 2026-08-21): perfil extendido de marca (portal).
+        "descripcion": "TEXT",
+        "sitio_web": "TEXT",
+        "hashtags_default": "TEXT",  # JSON: lista de hashtags fijos de la marca
+        "prompts_json": "TEXT",      # JSON: caption_extra/por_formato/hashtags para el LLM
     },
 }
 

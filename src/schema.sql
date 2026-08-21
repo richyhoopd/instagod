@@ -407,3 +407,39 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_estado ON jobs(estado);
 CREATE INDEX IF NOT EXISTS idx_jobs_account ON jobs(account_id);
+
+-- -----------------------------------------------------------------------------
+-- Fase 3 (spec 2026-08-21): fuentes de contenido por marca (imágenes/info) y
+-- temas sugeridos para la cola. Ambas aisladas por account_id (borrado en
+-- cascada si se elimina la cuenta).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS brand_sources (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,            -- 'imagen' | 'info'
+    provider    TEXT NOT NULL,            -- imagen: carpeta|ig_accounts|pinterest|pexels|unsplash|banco|covers ; info: rss|newsapi
+    config_json TEXT,
+    activa      INTEGER NOT NULL DEFAULT 1,
+    orden       INTEGER NOT NULL DEFAULT 0,
+    ultimo_run  TEXT,
+    ultimo_error TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (kind IN ('imagen','info')), CHECK (activa IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_sources_account ON brand_sources(account_id);
+
+CREATE TABLE IF NOT EXISTS topic_suggestions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    titulo      TEXT NOT NULL,
+    resumen     TEXT,
+    url         TEXT,
+    fuente      TEXT,
+    publicado_en TEXT,
+    usado_en_queue_id INTEGER,
+    descartado  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (descartado IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_topics_account ON topic_suggestions(account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_topics_url ON topic_suggestions(account_id, url);

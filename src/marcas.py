@@ -32,6 +32,7 @@ class Marca:
     logo_path: str | None
     posting_slots: list[str] | None
     activa: bool
+    prompts: dict
 
 
 def _formatos_default() -> list[str]:
@@ -42,6 +43,11 @@ def _formatos_default() -> list[str]:
     resto se ordena alfabético, sin importancia de orden.
     """
     return ["listicle"] + sorted(f for f in config.SLIDESHOW_FORMATOS if f != "listicle")
+
+
+# Fase 3 (spec 2026-08-21): base de prompts.por_formato/caption_extra/hashtags
+# cuando la marca no define nada (o define solo una parte).
+_PROMPTS_BASE = {"caption_extra": "", "por_formato": {}, "hashtags": []}
 
 
 def _json_o(default, crudo, *, slug: str, campo: str):
@@ -55,6 +61,17 @@ def _json_o(default, crudo, *, slug: str, campo: str):
               file=sys.stderr)
         return default
     return val if isinstance(val, type(default)) else default
+
+
+def _prompts_de(crudo, *, slug: str) -> dict:
+    """`prompts_json` tolerante: base con cada clave pisada si el tipo calza."""
+    parsed = _json_o({}, crudo, slug=slug, campo="prompts_json")
+    prompts = dict(_PROMPTS_BASE)
+    for clave, default in _PROMPTS_BASE.items():
+        valor = parsed.get(clave)
+        if isinstance(valor, type(default)):
+            prompts[clave] = valor
+    return prompts
 
 
 def _fila_a_marca(fila: dict) -> Marca:
@@ -82,6 +99,7 @@ def _fila_a_marca(fila: dict) -> Marca:
         posting_slots=[s.strip() for s in slots_raw.split(",") if s.strip()] or None
                       if slots_raw else None,
         activa=bool(fila.get("activa", 1)),
+        prompts=_prompts_de(fila.get("prompts_json"), slug=slug),
     )
 
 

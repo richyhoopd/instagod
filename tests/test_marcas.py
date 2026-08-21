@@ -108,6 +108,28 @@ def test_marca_nueva_no_hereda_creds_de_gdlscene(monkeypatch) -> None:
     assert config.account_creds("gdlscene")["TELEGRAM_BOT_TOKEN"] == "token-gdl"
 
 
+def test_prompts_default_vacio(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    m = marcas.cargar(cx, "gdlscene")
+    assert m.prompts == {"caption_extra": "", "por_formato": {}, "hashtags": []}
+
+
+def test_prompts_pisa_solo_lo_que_trae(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    _alta_pensionmas(cx, prompts_json=json.dumps({"caption_extra": "x"}))
+    m = marcas.cargar(cx, "pensionmas")
+    assert m.prompts["caption_extra"] == "x"
+    assert m.prompts["por_formato"] == {}
+    assert m.prompts["hashtags"] == []
+
+
+def test_prompts_json_roto_cae_a_default(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    _alta_pensionmas(cx, prompts_json="esto no es json")
+    m = marcas.cargar(cx, "pensionmas")
+    assert m.prompts == {"caption_extra": "", "por_formato": {}, "hashtags": []}
+
+
 def test_creds_faltantes(monkeypatch) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN__PENSIONMAS", "t")
     for var in ("TELEGRAM_CHAT_ID__PENSIONMAS", "IG_USER_ID__PENSIONMAS",
