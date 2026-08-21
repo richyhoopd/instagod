@@ -24,18 +24,22 @@ from src import (
     slideshow_model,
     slideshow_script,
 )
+from src import fuentes as fuentes_mod
 
 
 def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = None,
             estilo: str | None = None, fuentes: tuple[str, ...] | None = None,
             n_slides: int = 6, aspect: str = "4:5", contexto: str | None = None,
-            dry_run: bool = False, progreso=None, creado_por: int | None = None) -> int | None:
+            dry_run: bool = False, progreso=None, creado_por: int | None = None,
+            topic_id: int | None = None) -> int | None:
     """Genera el set con el PERFIL de la marca; queue_id o None en dry-run.
 
     `progreso`: callback opcional `(pct: int, msg: str) -> None` (p. ej.
     `jobs.progresar`), para que el caller reporte avance sin acoplarse al
     motor de jobs. `creado_por`: user_id del portal que disparó la generación
     (Fase 2); si se da, marca la fila de `content_queue` con `origen='api'`.
+    `topic_id`: fila de `topic_suggestions` que originó el tema (Fase 3); si
+    se da, se marca `usado_en_queue_id` al encolar (tolerante si ya no existe).
     """
     from src import marcas as marcas_mod
 
@@ -53,8 +57,9 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     if estilo not in catalogo:
         raise ValueError(f"Estilo {estilo!r} no existe para {m.slug} "
                          f"(disponibles: {sorted(catalogo)})")
-    fuentes = tuple(fuentes) if fuentes else tuple(m.fuentes)
-    contexto_full = "\n\n".join(x for x in (m.voz, contexto) if x) or None
+    fuentes = tuple(fuentes) if fuentes else tuple(fuentes_mod.orden_imagen(cx, m))
+    prompt_formato = m.prompts.get("por_formato", {}).get(formato)
+    contexto_full = "\n\n".join(x for x in (m.voz, prompt_formato, contexto) if x) or None
 
     _reportar(10, "guion")
     guion = slideshow_script.generar_guion(tema, formato=formato,
@@ -93,6 +98,14 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     ts = int(time.time())
     urls = [host.upload(str(p), public_id=f"ss{ts}_{i}")
             for i, p in enumerate(pngs)]
+
+    caption_extra = m.prompts.get("caption_extra")
+    caption_final = "\n\n".join(x for x in (show.caption, caption_extra) if x)
+    hashtags = m.prompts.get("hashtags")
+    if hashtags:
+        caption_final = "\n".join(x for x in (caption_final, " ".join(hashtags)) if x)
+    show.caption = caption_final
+
     qid = approval.encolar_pendiente(
         cx, tipo="slideshow", caption=show.caption,
         imagen_url=json.dumps(urls), template=estilo,
@@ -100,6 +113,11 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     campos_extra = {"creado_por": creado_por, "origen": "api"} if creado_por is not None else {}
     db.update(cx, "content_queue", qid,
               slideshow_json=slideshow_model.a_json(show), **campos_extra)
+    if topic_id is not None:
+        try:
+            db.update(cx, "topic_suggestions", topic_id, usado_en_queue_id=qid)
+        except ValueError:
+            pass
     approval.enviar_a_telegram(show.caption, json.dumps(urls), qid,
                                account_slug=m.slug, cx=cx)
     print(f"[slideshow] q{qid} ({m.slug}) enviado a Telegram ({len(urls)} slides)")

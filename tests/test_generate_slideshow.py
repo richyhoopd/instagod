@@ -179,3 +179,63 @@ def test_generar_pasa_slug_al_sourcing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(gs.image_sources, "resolver", _resolver_spy)
     gs.generar(cx, "comprar en Melaque", marca="melaquecapital", dry_run=True)
     assert visto.get("slug") == "melaquecapital"
+
+
+# ---------- Fase 3: brand_sources, prompts por formato, hashtags, topic_id ----------
+
+def test_generar_usa_orden_imagen_de_fuentes_mod_cuando_no_pasan_fuentes(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    from src import fuentes
+    fuentes.crear(cx, 1, "imagen", "pinterest")
+    fuentes.crear(cx, 1, "imagen", "banco")
+    fuentes_vistas = {}
+
+    def _resolver_spy(hints, fuentes_, **kw):
+        fuentes_vistas["f"] = fuentes_
+        return [None] * len(hints)
+
+    monkeypatch.setattr(gs.image_sources, "resolver", _resolver_spy)
+    gs.generar(cx, "café")
+    assert fuentes_vistas["f"] == ["pinterest", "banco"]
+
+
+def test_generar_concatena_prompt_por_formato_en_contexto_del_guion(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    db_mod.update(cx, "accounts", 1, voz="Voz de la marca.",
+                  prompts_json=json_mod.dumps(
+                      {"por_formato": {"listicle": "Enfócate en precios."}}))
+    capturado = {}
+
+    def _guion_spy(tema, **kw):
+        capturado.update(kw)
+        return _guion()
+
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", _guion_spy)
+    gs.generar(cx, "café", formato="listicle")
+    assert "Voz de la marca." in capturado["contexto"]
+    assert "Enfócate en precios." in capturado["contexto"]
+
+
+def test_generar_agrega_caption_extra_y_hashtags_antes_de_encolar(monkeypatch, tmp_path) -> None:
+    cx, _, enviados = _preparar(monkeypatch, tmp_path)
+    db_mod.update(cx, "accounts", 1, prompts_json=json_mod.dumps(
+        {"caption_extra": "Síguenos para más.", "hashtags": ["#gdl", "#escena"]}))
+    qid = gs.generar(cx, "café")
+    fila = db_mod.get(cx, "content_queue", qid)
+    assert "Síguenos para más." in fila["caption"]
+    assert "#gdl #escena" in fila["caption"]
+    assert enviados[-1][0] == fila["caption"]
+
+
+def test_generar_marca_topic_usado_al_encolar(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    tid = db_mod.insert(cx, "topic_suggestions", account_id=1, titulo="tema x")
+    qid = gs.generar(cx, "café", topic_id=tid)
+    fila = db_mod.get(cx, "topic_suggestions", tid)
+    assert fila["usado_en_queue_id"] == qid
+
+
+def test_generar_topic_id_tolera_fila_inexistente(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    qid = gs.generar(cx, "café", topic_id=999999)
+    assert qid is not None
