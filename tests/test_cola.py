@@ -78,19 +78,42 @@ def test_estado_de_pendiente():
 
 
 def test_estado_de_generando():
-    assert cola.estado_de({"status": "borrador", "aprobacion": None}) == "generando"
+    # "generando" es EXCLUSIVO del flujo API (worker generando un slideshow):
+    # requiere origen='api' además de status='borrador'/aprobacion None.
+    assert cola.estado_de(
+        {"status": "borrador", "aprobacion": None, "origen": "api"}
+    ) == "generando"
+
+
+def test_estado_de_borrador_legacy():
+    # G5: filas del plan mensual (origen != 'api') en borrador/listo sin
+    # aprobación NO son "generando" (nadie está generando nada ahí) — son
+    # 'borrador': visibles en el portal pero NO aprobables (la compuerta de
+    # aprobar/rechazar del router sigue exigiendo 'pendiente').
+    assert cola.estado_de(
+        {"status": "borrador", "aprobacion": None, "origen": "legacy"}
+    ) == "borrador"
+    assert cola.estado_de(
+        {"status": "listo", "aprobacion": None, "origen": "legacy"}
+    ) == "borrador"
+    # Sin columna "origen" (fila sintética/legacy vieja): mismo trato que 'legacy'.
+    assert cola.estado_de({"status": "borrador", "aprobacion": None}) == "borrador"
 
 
 def test_estado_de_fallback_pendiente():
-    # aprobacion None pero status distinto de borrador → no es "generando".
-    assert cola.estado_de({"status": "listo", "aprobacion": None}) == "pendiente"
+    # aprobacion None, status "listo", origen 'api': no matchea "generando"
+    # (exige status='borrador') ni "borrador" (exige origen != 'api') → cae
+    # al fallback histórico "pendiente".
+    assert cola.estado_de(
+        {"status": "listo", "aprobacion": None, "origen": "api"}
+    ) == "pendiente"
     # aprobacion aprobado pero status fuera de en_sheet/programado.
     assert cola.estado_de({"status": "borrador", "aprobacion": "aprobado"}) == "pendiente"
 
 
 def test_estados_expuestos():
     assert cola.ESTADOS == (
-        "generando", "pendiente", "programado", "publicado",
+        "generando", "borrador", "pendiente", "programado", "publicado",
         "rechazado", "error", "descartado",
     )
 

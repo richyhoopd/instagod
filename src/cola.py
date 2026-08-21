@@ -15,8 +15,12 @@ from src import db
 
 # Estados derivados que ve el portal (no son la columna `status` cruda: se
 # calculan a partir de status + aprobacion + error, ver `estado_de`).
+# "borrador" (Fase 2, fix G5): filas legacy (plan mensual, origen != 'api')
+# en status borrador/listo sin aprobación aún — NO son "generando" (nadie
+# está generando nada ahí) y NO son aprobables desde el portal (la compuerta
+# de aprobar/rechazar sigue exigiendo 'pendiente').
 ESTADOS = (
-    "generando", "pendiente", "programado", "publicado",
+    "generando", "borrador", "pendiente", "programado", "publicado",
     "rechazado", "error", "descartado",
 )
 
@@ -36,11 +40,19 @@ def estado_de(fila: dict[str, Any]) -> str:
 
     Prioridad evaluada en orden (la primera que aplica gana):
     descartado > rechazado > publicado > error > programado > pendiente >
-    generando > pendiente (fallback).
+    generando > borrador > pendiente (fallback).
+
+    "generando" vs "borrador" (fix G5): con aprobacion NULL, "generando" es
+    EXCLUSIVO del flujo API (origen='api') mientras el worker arma el
+    slideshow; una fila legacy (plan mensual, origen != 'api') en
+    borrador/listo sin aprobación todavía es "borrador" — nadie la está
+    generando, y no es aprobable desde el portal (esa compuerta exige
+    'pendiente').
     """
     status = fila.get("status")
     aprobacion = fila.get("aprobacion")
     error = fila.get("error")
+    origen = fila.get("origen")
 
     if status == "descartado" and aprobacion != "rechazado":
         return "descartado"
@@ -54,8 +66,10 @@ def estado_de(fila: dict[str, Any]) -> str:
         return "programado"
     if aprobacion == "pendiente":
         return "pendiente"
-    if aprobacion is None and status == "borrador":
+    if aprobacion is None and status == "borrador" and origen == "api":
         return "generando"
+    if aprobacion is None and status in ("borrador", "listo") and origen != "api":
+        return "borrador"
     return "pendiente"
 
 
