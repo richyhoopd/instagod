@@ -29,9 +29,20 @@ from src import (
 def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = None,
             estilo: str | None = None, fuentes: tuple[str, ...] | None = None,
             n_slides: int = 6, aspect: str = "4:5", contexto: str | None = None,
-            dry_run: bool = False) -> int | None:
-    """Genera el set con el PERFIL de la marca; queue_id o None en dry-run."""
+            dry_run: bool = False, progreso=None, creado_por: int | None = None) -> int | None:
+    """Genera el set con el PERFIL de la marca; queue_id o None en dry-run.
+
+    `progreso`: callback opcional `(pct: int, msg: str) -> None` (p. ej.
+    `jobs.progresar`), para que el caller reporte avance sin acoplarse al
+    motor de jobs. `creado_por`: user_id del portal que disparó la generación
+    (Fase 2); si se da, marca la fila de `content_queue` con `origen='api'`.
+    """
     from src import marcas as marcas_mod
+
+    def _reportar(pct: int, msg: str) -> None:
+        if progreso is not None:
+            progreso(pct, msg)
+
     m = marcas_mod.cargar(cx, marca)
     formato = formato or (m.formatos[0] if m.formatos else "listicle")
     if formato not in m.formatos:
@@ -45,10 +56,12 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     fuentes = tuple(fuentes) if fuentes else tuple(m.fuentes)
     contexto_full = "\n\n".join(x for x in (m.voz, contexto) if x) or None
 
+    _reportar(10, "guion")
     guion = slideshow_script.generar_guion(tema, formato=formato,
                                            n_slides=n_slides,
                                            contexto=contexto_full)
     hints = [sl["image_hint"] for sl in guion["slides"]]
+    _reportar(40, "imágenes")
     imagenes = image_sources.resolver(hints, list(fuentes), cx=cx, slug=m.slug)
     sin_imagen = sum(1 for i in imagenes if i is None)
     if sin_imagen:
@@ -65,6 +78,7 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     if errores:
         raise RuntimeError(f"Contrato inválido, no se encola: {errores}")
 
+    _reportar(60, "render")
     pngs = []
     for i in range(len(show.slides)):
         ctx = slideshow_compile.contexto_slide(show, i)
@@ -75,6 +89,7 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
             print(f"  {p}")
         return None
 
+    _reportar(85, "subiendo")
     ts = int(time.time())
     urls = [host.upload(str(p), public_id=f"ss{ts}_{i}")
             for i, p in enumerate(pngs)]
@@ -82,11 +97,13 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
         cx, tipo="slideshow", caption=show.caption,
         imagen_url=json.dumps(urls), template=estilo,
         tema_semilla=f"slideshow {formato}: {tema}", account_id=m.id)
+    campos_extra = {"creado_por": creado_por, "origen": "api"} if creado_por is not None else {}
     db.update(cx, "content_queue", qid,
-              slideshow_json=slideshow_model.a_json(show))
+              slideshow_json=slideshow_model.a_json(show), **campos_extra)
     approval.enviar_a_telegram(show.caption, json.dumps(urls), qid,
-                               account_slug=m.slug)
+                               account_slug=m.slug, cx=cx)
     print(f"[slideshow] q{qid} ({m.slug}) enviado a Telegram ({len(urls)} slides)")
+    _reportar(100, "listo")
     return qid
 
 
