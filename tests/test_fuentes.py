@@ -79,6 +79,17 @@ def test_crear_rss_valida_config(cx) -> None:
     assert sid > 0
 
 
+def test_crear_rss_valida_cada_horas(cx) -> None:
+    """H2: cada_horas ausente = ok (default lo pone el scheduler); presente
+    debe ser int >= 6."""
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "info", "rss", {"urls": ["https://x.com/feed"], "cada_horas": "abc"})
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "info", "rss", {"urls": ["https://x.com/feed"], "cada_horas": -5})
+    sid = fuentes.crear(cx, 2, "info", "rss", {"urls": ["https://x.com/feed"], "cada_horas": 12})
+    assert sid > 0
+
+
 def test_crear_newsapi_valida_config(cx) -> None:
     with pytest.raises(ValueError, match="config"):
         fuentes.crear(cx, 2, "info", "newsapi", {})  # sin query
@@ -86,6 +97,15 @@ def test_crear_newsapi_valida_config(cx) -> None:
         fuentes.crear(cx, 2, "info", "newsapi", {"query": "   "})
     sid = fuentes.crear(cx, 2, "info", "newsapi",
                         {"query": "pensiones", "idioma": "es", "pais": "mx"})
+    assert sid > 0
+
+
+def test_crear_newsapi_valida_cada_horas(cx) -> None:
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "info", "newsapi", {"query": "x", "cada_horas": "abc"})
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "info", "newsapi", {"query": "x", "cada_horas": -5})
+    sid = fuentes.crear(cx, 2, "info", "newsapi", {"query": "x", "cada_horas": 6})
     assert sid > 0
 
 

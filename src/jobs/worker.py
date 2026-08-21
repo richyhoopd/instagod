@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -90,7 +91,14 @@ def encolar_fuentes_vencidas(cx) -> int:
             cfg = json.loads(f["config_json"]) if f["config_json"] else {}
         except (TypeError, ValueError):
             cfg = {}
-        cada_horas = cfg.get("cada_horas") or _CADA_HORAS_DEFAULT
+        # Defensivo (H2): una fila vieja o tocada a mano puede traer un
+        # `cada_horas` no numérico ("abc") — nunca debe tumbar el loop del
+        # worker, cae al default.
+        try:
+            cada_horas = int(cfg["cada_horas"]) if cfg.get("cada_horas") is not None \
+                else _CADA_HORAS_DEFAULT
+        except (TypeError, ValueError):
+            cada_horas = _CADA_HORAS_DEFAULT
 
         vencido = True
         if f["ultimo_run"]:
@@ -130,7 +138,10 @@ def main(once: bool = False) -> None:
         db.init_db(cx)
         while True:
             jobs.rescatar_huerfanos(cx)
-            encolar_fuentes_vencidas(cx)
+            try:
+                encolar_fuentes_vencidas(cx)
+            except Exception as e:  # noqa: BLE001 — un fallo de scheduling no debe tumbar el loop
+                print(f"[worker] encolar_fuentes_vencidas falló: {e}", file=sys.stderr)
             job = jobs.tomar(cx, worker_id, max_global=max_global)
             if job is None:
                 if once:

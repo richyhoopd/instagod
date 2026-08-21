@@ -186,6 +186,30 @@ def test_worker_main_once_sin_job_no_bloquea(cx, dbfile, monkeypatch) -> None:
     assert dormido == []  # once=True no debe entrar al sleep-loop
 
 
+def test_worker_main_tolera_fallo_de_encolar_fuentes_vencidas(cx, dbfile, monkeypatch, capsys) -> None:
+    """H2: un fallo de scheduling (encolar_fuentes_vencidas) no debe tumbar el
+    loop del worker — se avisa por stderr (misma tolerancia que _despachar) y
+    se sigue procesando la cola normalmente."""
+    jid = jobs.crear(cx, "fake.tipo", 1, {"x": 1})
+
+    def _handler(cx_, job):
+        return {"ok": True}
+
+    monkeypatch.setattr(handlers, "HANDLERS", {"fake.tipo": _handler})
+    monkeypatch.setattr(worker.db, "connect", lambda *a, **k: _conexion_cruda(dbfile))
+
+    def _revienta(cx_):
+        raise RuntimeError("boom de scheduling")
+
+    monkeypatch.setattr(worker, "encolar_fuentes_vencidas", _revienta)
+
+    worker.main(once=True)  # no debe lanzar
+
+    fila = db.get(cx, "jobs", jid)
+    assert fila["estado"] == "ok"
+    assert "boom de scheduling" in capsys.readouterr().err
+
+
 def test_worker_main_once_excepcion_del_handler_termina_con_error(cx, dbfile, monkeypatch) -> None:
     jid = jobs.crear(cx, "fake.tipo", 1, {})
 

@@ -65,6 +65,19 @@ def test_sources_ig_accounts_cuenta_con_traversal_422(api_cliente) -> None:
     assert r.status_code == 422 and r.json()["campo"] == "config"
 
 
+def test_sources_rss_cada_horas_invalido_422(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+
+    for cada_horas in ("abc", -5):
+        r = cli.post("/brands/pensionmas/sources", json={
+            "kind": "info", "provider": "rss",
+            "config": {"urls": ["https://feed.example.com/x"], "cada_horas": cada_horas},
+        })
+        assert r.status_code == 422 and r.json()["campo"] == "config"
+
+
 def test_sources_patch_delete_y_ownership(api_cliente) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)

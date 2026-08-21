@@ -28,6 +28,14 @@ def _es_entero(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
+def _cada_horas_valido(config: dict) -> bool:
+    """`cada_horas` es opcional; si viene, debe ser int >= 6 (el scheduler no
+    admite corridas más frecuentes). Ausente = ok, el default de 24 lo pone
+    `worker.encolar_fuentes_vencidas`."""
+    cada_horas = config.get("cada_horas")
+    return cada_horas is None or (_es_entero(cada_horas) and cada_horas >= 6)
+
+
 def validar_config(kind: str, provider: str, config: dict | None) -> None:
     """ValueError("config") si `config` no cumple el esquema del provider.
 
@@ -47,14 +55,15 @@ def validar_config(kind: str, provider: str, config: dict | None) -> None:
         max_por_cuenta = config.get("max_por_cuenta")
         if max_por_cuenta is not None and not (_es_entero(max_por_cuenta) and 1 <= max_por_cuenta <= 50):
             raise ValueError("config")
-        cada_horas = config.get("cada_horas")
-        if cada_horas is not None and not (_es_entero(cada_horas) and cada_horas >= 6):
+        if not _cada_horas_valido(config):
             raise ValueError("config")
     elif provider == "rss":
         urls = config.get("urls")
         if not isinstance(urls, list) or not urls or not all(
             isinstance(u, str) and u.startswith("http") for u in urls
         ):
+            raise ValueError("config")
+        if not _cada_horas_valido(config):
             raise ValueError("config")
     elif provider == "newsapi":
         query = config.get("query")
@@ -64,6 +73,8 @@ def validar_config(kind: str, provider: str, config: dict | None) -> None:
             valor = config.get(campo)
             if valor is not None and not isinstance(valor, str):
                 raise ValueError("config")
+        if not _cada_horas_valido(config):
+            raise ValueError("config")
 
 
 def crear(cx, account_id, kind, provider, config: dict | None = None, *, orden=None) -> int:

@@ -362,3 +362,16 @@ def test_encolar_fuentes_vencidas_ignora_fuentes_inactivas(cx) -> None:
     fuentes.actualizar(cx, sid, activa=False)
     creados = worker.encolar_fuentes_vencidas(cx)
     assert creados == 0
+
+
+def test_encolar_fuentes_vencidas_cada_horas_invalido_no_tumba_el_loop(cx) -> None:
+    """H2: una fila con `cada_horas` no numérico (ej. tocada a mano en la DB,
+    de antes de que `validar_config` lo exigiera int) nunca debe reventar
+    `encolar_fuentes_vencidas` — cae al default de 24h."""
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    # bypass de validar_config: escribimos config_json crudo directo en la fila.
+    db.update(cx, "brand_sources", sid,
+             config_json=json.dumps({"urls": ["https://a.com/f.xml"], "cada_horas": "abc"}))
+
+    creados = worker.encolar_fuentes_vencidas(cx)  # no debe lanzar
+    assert creados == 1  # nunca corrió -> vencida con el default de 24h
