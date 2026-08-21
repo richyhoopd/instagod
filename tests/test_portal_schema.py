@@ -46,3 +46,25 @@ def test_connect_wal_y_busy_timeout(tmp_path) -> None:
     cx = db.connect(tmp_path / "t.db")
     assert cx.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert cx.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
+
+def test_connect_usable_desde_otro_hilo(tmp_path) -> None:
+    """La API (FastAPI) abre la conexión en un hilo del threadpool y la usa en
+    otro; sin check_same_thread=False esto revienta con ProgrammingError."""
+    import threading
+
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    resultado = {}
+
+    def _usar():
+        try:
+            resultado["filas"] = db.rows(cx, "SELECT id FROM accounts")
+        except Exception as e:  # noqa: BLE001
+            resultado["error"] = e
+
+    t = threading.Thread(target=_usar)
+    t.start()
+    t.join()
+    assert "error" not in resultado, resultado.get("error")
+    assert resultado["filas"]  # la cuenta gdlscene sembrada por init_db
