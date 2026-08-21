@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Images, RefreshCw, Search } from "lucide-react";
+import { Images, Plus, RefreshCw, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -89,9 +90,20 @@ export default function LibraryPage() {
       )}
 
       {!queueQuery.isLoading && items.length === 0 && (
-        <p className="py-12 text-center text-sm text-muted-foreground">
-          No hay carruseles que coincidan con el filtro.
-        </p>
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
+          <Images className="size-6 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            {busqueda || estadoFiltro !== "todos"
+              ? "No hay carruseles que coincidan con el filtro."
+              : "Todavía no hay carruseles en la biblioteca."}
+          </p>
+          <Button size="sm" asChild>
+            <Link href={`/b/${slug}/create`}>
+              <Plus className="size-3.5" />
+              Crear carrusel
+            </Link>
+          </Button>
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

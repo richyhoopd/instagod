@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { get, post } from "@/lib/api";
+import { ApiError, get, post } from "@/lib/api";
 
 export type JobEstado = "cola" | "corriendo" | "ok" | "error" | "cancelado";
 
@@ -18,6 +18,15 @@ export interface Job {
 }
 
 const TERMINALES: readonly JobEstado[] = ["ok", "error", "cancelado"];
+
+// Lista de jobs recientes de una marca (para /admin/system y similares).
+export function useJobs(slug: string) {
+  return useQuery<Job[], ApiError>({
+    queryKey: ["jobs", slug],
+    queryFn: () => get<Job[]>(`/brands/${slug}/jobs`),
+    enabled: !!slug,
+  });
+}
 
 // Polling de jobs (constraints.md): cada 2s, backoff a 5s tras 30s de espera
 // del mismo job, y se detiene en ok/error/cancelado.

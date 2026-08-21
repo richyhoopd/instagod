@@ -1,8 +1,10 @@
 "use client";
 
-import { CalendarClock, Images } from "lucide-react";
+import Link from "next/link";
+import { CalendarClock, Images, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { EstadoBadge } from "@/components/estado-badge";
 import { useQueue } from "@/hooks/use-queue";
 import { primeraImagen, contarImagenes } from "@/lib/imagenes";
@@ -30,7 +32,15 @@ export function ProximasPanel({ slug }: { slug: string }) {
           </div>
         )}
         {!isLoading && proximas.length === 0 && (
-          <p className="text-sm text-muted-foreground">No hay nada programado todavía.</p>
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <p className="text-sm text-muted-foreground">No hay nada programado todavía.</p>
+            <Button size="sm" variant="outline" asChild>
+              <Link href={`/b/${slug}/create`}>
+                <Plus className="size-3.5" />
+                Crear carrusel
+              </Link>
+            </Button>
+          </div>
         )}
         {proximas.map((item) => {
           const thumb = primeraImagen(item.imagen_url);

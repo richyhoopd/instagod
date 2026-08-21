@@ -11,6 +11,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { toast } from "sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CalendarToolbar, type Vista } from "./_components/calendar-toolbar";
 import { WeekView } from "./_components/week-view";
 import { MonthView } from "./_components/month-view";
@@ -167,33 +168,41 @@ export default function CalendarPage() {
         </div>
       )}
 
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        {vista === "semana" ? (
-          <WeekView
+      {queueQuery.isLoading ? (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-7">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <Skeleton key={i} className="h-64 w-full" />
+          ))}
+        </div>
+      ) : (
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          {vista === "semana" ? (
+            <WeekView
+              slug={slug}
+              dias={dias}
+              itemsByDay={itemsByDay}
+              slotsByDay={slotsByDay}
+              onItemClick={setOpenQid}
+            />
+          ) : (
+            <MonthView
+              slug={slug}
+              dias={dias}
+              ancla={ancla}
+              itemsByDay={itemsByDay}
+              slotsByDay={slotsByDay}
+              onItemClick={setOpenQid}
+            />
+          )}
+          <DayListMobile
             slug={slug}
-            dias={dias}
+            dias={diasVisibles}
             itemsByDay={itemsByDay}
             slotsByDay={slotsByDay}
             onItemClick={setOpenQid}
           />
-        ) : (
-          <MonthView
-            slug={slug}
-            dias={dias}
-            ancla={ancla}
-            itemsByDay={itemsByDay}
-            slotsByDay={slotsByDay}
-            onItemClick={setOpenQid}
-          />
-        )}
-        <DayListMobile
-          slug={slug}
-          dias={diasVisibles}
-          itemsByDay={itemsByDay}
-          slotsByDay={slotsByDay}
-          onItemClick={setOpenQid}
-        />
-      </DndContext>
+        </DndContext>
+      )}
 
       <QueueDrawer slug={slug} qid={openQid} onOpenChange={(open) => !open && setOpenQid(null)} />
     </div>
