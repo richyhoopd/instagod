@@ -150,12 +150,42 @@ def test_presets_crud_manager(api_cliente) -> None:
     assert "mipreset" not in {p["nombre"] for p in r.json()}
 
 
-def test_preset_nombre_path_traversal(api_cliente) -> None:
+def test_preset_rechaza_payload_mayor_a_32kb(api_cliente) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)
     H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
-    r = cli.put("/brands/pensionmas/presets/../x", json={"texto": "a", "roles": {"h": {}}})
-    assert r.status_code in (404, 422)
+    relleno = "x" * (33 * 1024)
+    r = cli.put("/brands/pensionmas/presets/grande",
+               json={"texto": "blanco", "roles": {"hook": {"nota": relleno}}})
+    assert r.status_code == 422
+
+
+def test_nombre_re_rechaza_traversal_y_caracteres_invalidos() -> None:
+    # Unit directo del validador: "../x" trae "/" y nunca podría viajar como
+    # un solo segmento de URL (httpx/starlette lo normalizan antes de rutear),
+    # así que la garantía real vive aquí, no en un round-trip HTTP.
+    from api.routers.perfil import _NOMBRE_RE
+    assert _NOMBRE_RE.match("../x") is None
+    assert _NOMBRE_RE.match("..") is None
+    assert _NOMBRE_RE.match("a b") is None
+    assert _NOMBRE_RE.match("tiktok_bold") is not None
+
+
+def test_preset_nombre_invalido_en_segmento_unico_da_error_json(api_cliente) -> None:
+    # ".." SÍ llega al router como un segmento único (va codificado, sin "/"),
+    # y debe responder con el shape uniforme de la API, no un 404 crudo de
+    # Starlette por "no matching route".
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+
+    r = cli.get("/brands/pensionmas/files/previews/%2E%2E.png")
+    assert r.status_code == 422
+    assert r.json()["error"] == "validacion" and r.json()["campo"] == "nombre"
+
+    r = cli.put("/brands/pensionmas/presets/%2E%2E", json={"texto": "a", "roles": {"h": {}}})
+    assert r.status_code == 422
+    assert r.json()["error"] == "validacion" and r.json()["campo"] == "nombre"
 
 
 # ---------- preview (job) + archivo servido ----------
@@ -226,6 +256,40 @@ def test_logo_upload_valida_extension_y_tamano(api_cliente, monkeypatch, tmp_pat
 
     r = cli.get("/brands/pensionmas/files/logo")
     assert r.status_code == 200 and r.content == b"\x89PNGdata"
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_logo_svg_con_script_se_rechaza(api_cliente, monkeypatch, tmp_path) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+    from api.routers import perfil
+    monkeypatch.setattr(perfil, "BRANDS_DIR", tmp_path / "brands")
+
+    svg_malicioso = b"<svg><script>alert(1)</script></svg>"
+    r = cli.post("/brands/pensionmas/logo",
+                files={"archivo": ("logo.svg", io.BytesIO(svg_malicioso), "image/svg+xml")})
+    assert r.status_code == 422
+    assert not (tmp_path / "brands" / "pensionmas" / "logo.svg").exists()
+
+
+def test_logo_svg_limpio_se_sirve_como_descarga_con_csp(api_cliente, monkeypatch, tmp_path) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+    from api.routers import perfil
+    monkeypatch.setattr(perfil, "BRANDS_DIR", tmp_path / "brands")
+
+    svg_limpio = b"<svg xmlns='http://www.w3.org/2000/svg'><circle r='5'/></svg>"
+    r = cli.post("/brands/pensionmas/logo",
+                files={"archivo": ("logo.svg", io.BytesIO(svg_limpio), "image/svg+xml")})
+    assert r.status_code == 200
+
+    r = cli.get("/brands/pensionmas/files/logo")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == "attachment; filename=logo.svg"
+    assert r.headers["content-security-policy"] == "default-src 'none'"
+    assert r.headers["x-content-type-options"] == "nosniff"
 
 
 def test_logo_solo_manager(api_cliente, tmp_path) -> None:

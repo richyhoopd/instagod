@@ -18,6 +18,8 @@ router = APIRouter(prefix="/brands/{slug}", tags=["perfil"])
 _NOMBRE_RE = re.compile(r"^[a-z0-9_]{2,32}$")
 _EXT_LOGO = {"png", "svg", "jpg", "jpeg"}
 _MAX_LOGO = 2 * 1024 * 1024
+_MAX_PRESET_BYTES = 32 * 1024
+_SCRIPT_RE = re.compile(rb"<script", re.IGNORECASE)
 
 # Rutas base (constantes de módulo para poder monkeypatchearlas en tests).
 PREVIEWS_DIR = config.BASE_DIR / "data" / "previews"
@@ -138,6 +140,9 @@ def guardar_preset(slug: str, nombre: str, datos: dict, user: dict = Depends(usu
     roles = datos.get("roles")
     if not isinstance(roles, dict) or not roles:
         raise ApiError(422, "validacion", "roles no puede estar vacío", "roles")
+    peso = len(json.dumps(datos, ensure_ascii=False).encode("utf-8"))
+    if peso > _MAX_PRESET_BYTES:
+        raise ApiError(422, "validacion", "El preset no puede pesar más de 32 KB")
     estilos = dict(m.estilos)
     estilos[nombre] = datos
     db.update(cx, "accounts", fila["id"], estilos_json=json.dumps(estilos, ensure_ascii=False))
@@ -188,6 +193,9 @@ def subir_logo(slug: str, archivo: UploadFile = File(...),
     contenido = archivo.file.read()
     if len(contenido) > _MAX_LOGO:
         raise ApiError(422, "validacion", "El logo no puede pesar más de 2 MB", "archivo")
+    if ext == "svg" and _SCRIPT_RE.search(contenido):
+        raise ApiError(422, "validacion",
+                       "El SVG no puede contener <script> (riesgo de XSS)", "archivo")
     dest_dir = BRANDS_DIR / fila["slug"]
     dest_dir.mkdir(parents=True, exist_ok=True)
     for anterior in dest_dir.glob("logo.*"):
@@ -219,4 +227,12 @@ def archivo_logo(slug: str, user: dict = Depends(usuario_actual), cx=Depends(get
     candidatos = sorted(carpeta.glob("logo.*")) if carpeta.is_dir() else []
     if not candidatos:
         raise no_encontrado("el logo de la marca")
-    return FileResponse(candidatos[0])
+    logo = candidatos[0]
+    # SVG servido inline es XSS-able (<script> ejecuta same-origin): se fuerza
+    # descarga + CSP restrictiva. Los rasterizados (png/jpg) sí van inline,
+    # pero con nosniff para que el navegador no reinterprete el content-type.
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if logo.suffix.lower() == ".svg":
+        headers["Content-Disposition"] = "attachment; filename=logo.svg"
+        headers["Content-Security-Policy"] = "default-src 'none'"
+    return FileResponse(logo, headers=headers)
