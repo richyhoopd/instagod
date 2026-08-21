@@ -15,6 +15,7 @@ import argparse
 import os
 import time
 
+import config
 from src import db, jobs
 from src.jobs import handlers
 
@@ -29,6 +30,25 @@ def _worker_id() -> str:
     return os.getenv("WORKER_ID") or f"worker-{os.getpid()}"
 
 
+def _error_seguro(exc: Exception, cx, job: dict) -> str:
+    """Texto de error SIN secretos (mismo criterio que approval._error_seguro):
+    requests.HTTPError → solo el status code; cualquier otra excepción se
+    castea a texto y se redactan las credenciales de la cuenta del job
+    (IG_ACCESS_TOKEN, TELEGRAM_BOT_TOKEN, LLM_API_KEY, etc. — lo que devuelva
+    `config.account_creds`) si aparecen ahí. Truncado a 400 chars.
+    """
+    import requests
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return f"HTTP {exc.response.status_code}"
+    msg = str(exc)
+    cuenta = db.get(cx, "accounts", job.get("account_id"))
+    if cuenta:
+        for val in config.account_creds(cuenta["slug"]).values():
+            if val:
+                msg = msg.replace(val, "***")
+    return msg[:_TRUNCA_ERROR]
+
+
 def _despachar(cx, job: dict) -> None:
     handler = handlers.HANDLERS.get(job["tipo"])
     try:
@@ -37,7 +57,7 @@ def _despachar(cx, job: dict) -> None:
         resultado = handler(cx, job)
         jobs.terminar(cx, job["id"], ok=True, resultado=resultado)
     except Exception as exc:  # noqa: BLE001 — cualquier falla del handler cierra el job
-        jobs.terminar(cx, job["id"], ok=False, error=str(exc)[:_TRUNCA_ERROR])
+        jobs.terminar(cx, job["id"], ok=False, error=_error_seguro(exc, cx, job))
 
 
 def main(once: bool = False) -> None:

@@ -14,8 +14,14 @@ from src import db, generate_slideshow, jobs
 
 
 def _marca_de(cx: sqlite3.Connection, account_id: int) -> str:
+    """Slug de la cuenta del job. NUNCA cae a un default: un account_id viejo
+    o borrado no debe terminar generando contenido bajo la marca equivocada
+    (p. ej. 'gdlscene' por default) — mejor que el job truene y quede en
+    estado='error' (el worker ya sabe manejar esa excepción)."""
     cuenta = db.get(cx, "accounts", account_id)
-    return cuenta["slug"] if cuenta else "gdlscene"
+    if cuenta is None:
+        raise ValueError(f"No existe la cuenta {account_id} del job")
+    return cuenta["slug"]
 
 
 def generar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:

@@ -200,3 +200,37 @@ def test_worker_main_once_excepcion_del_handler_termina_con_error(cx, dbfile, mo
     fila = db.get(cx, "jobs", jid)
     assert fila["estado"] == "error"
     assert len(fila["resultado_json"]) <= 450  # truncado a 400 + envoltorio json
+
+
+def test_worker_despacha_job_de_cuenta_inexistente_termina_en_error(cx) -> None:
+    # account_id viejo/borrado: el handler real (_marca_de) debe reventar en
+    # vez de caer en un default silencioso que generaría bajo la marca
+    # equivocada — el worker lo atrapa y deja el job en error.
+    jid = jobs.crear(cx, "slideshow.generar", 999, {"tema": "x"})
+    job = db.get(cx, "jobs", jid)
+
+    worker._despachar(cx, job)
+
+    fila = db.get(cx, "jobs", jid)
+    assert fila["estado"] == "error"
+    assert "No existe la cuenta" in fila["resultado_json"]
+
+
+def test_worker_redacta_secretos_del_error(cx, monkeypatch) -> None:
+    cuenta = db.get_account(cx, "pensionmas")
+    monkeypatch.setenv("IG_ACCESS_TOKEN__PENSIONMAS", "tok_abc_123")
+    jid = jobs.crear(cx, "fake.tipo", cuenta["id"], {})
+    job = db.get(cx, "jobs", jid)
+
+    def _handler(cx_, job_):
+        raise RuntimeError("boom token tok_abc_123")
+
+    monkeypatch.setattr(handlers, "HANDLERS", {"fake.tipo": _handler})
+
+    worker._despachar(cx, job)
+
+    fila = db.get(cx, "jobs", jid)
+    assert fila["estado"] == "error"
+    assert "tok_abc_123" not in fila["resultado_json"]
+    assert "tok_abc_123" not in (fila["log"] or "")
+    assert "***" in fila["resultado_json"]

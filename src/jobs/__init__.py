@@ -48,6 +48,12 @@ def tomar(cx: sqlite3.Connection, worker_id: str,
 
     `max_global`: tope de jobs corriendo a la vez en toda la instancia; si ya
     se alcanzó, no toma nada (deja que otras cuentas/worker lo intenten luego).
+
+    El chequeo de `max_global` y el UPDATE...RETURNING no son una sola
+    transacción atómica: con varios workers en paralelo dos podrían leer el
+    conteo antes de que cualquiera tome, y ambos pasar el tope por uno (TOCTOU).
+    Aceptado a propósito — es un throttle suave (evita saturar LLM/Cloudinary),
+    no una garantía dura; el aislamiento por cuenta del UPDATE sí es atómico.
     """
     if max_global is not None:
         corriendo = cx.execute(
