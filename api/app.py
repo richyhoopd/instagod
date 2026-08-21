@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 import config
 from api.errors import ApiError, manejar_api_error
 from api.ratelimit import Limitador
-from api.routers import auth, brands, pruebas, secrets, system, users
+from api.routers import auth, brands, cola, pruebas, secrets, system, trabajos, users
 from src import db
 
 
@@ -48,6 +48,8 @@ def create_app() -> FastAPI:
     app.include_router(brands.router)
     app.include_router(secrets.router)
     app.include_router(pruebas.router)
+    app.include_router(cola.router)
+    app.include_router(trabajos.router)
     return app
 
 
