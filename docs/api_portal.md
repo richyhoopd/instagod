@@ -107,3 +107,123 @@ GET /brands/{slug}/jobs/{nuevo_job_id}  # Pollear este job
 ### Convergencia de aprobaciones
 
 Front (portal) y Telegram convergen: al aprobar o rechazar desde el portal, el bot quita los botones del mensaje de Telegram y responde en el hilo original, evitando desincronización.
+
+## Perfil creativo y fuentes (Fase 3)
+
+### Prompts (voz + hashtags + brief por formato)
+
+- `GET /brands/{slug}/prompts` — `{voz, caption_extra, por_formato, hashtags}`.
+- `PUT /brands/{slug}/prompts` — actualiza los cuatro campos (manager+). `por_formato` solo
+  acepta formatos habilitados en la marca (`accounts.formatos`); `hashtags` cada uno debe
+  empezar con `#`, máximo 30.
+- `POST /brands/{slug}/prompts/probar` — genera un guion de prueba (`{tema, formato?}`) con la
+  voz/prompt guardados, sin encolar nada en `content_queue` (llamada directa a
+  `slideshow_script.generar_guion`, sincrónica). Falla del LLM → `502 prueba_fallida` con el
+  detalle redactado (nunca expone `LLM_API_KEY`).
+
+### Presets de estilo (con preview)
+
+- `GET /brands/{slug}/presets` — catálogo completo visible por la marca (propios + los base del
+  código), cada uno con `propio: bool`.
+- `PUT /brands/{slug}/presets/{nombre}` — crea/sobreescribe un preset propio (manager+). `nombre`
+  minúsculas/dígitos/guion bajo (2-32); body requiere `texto` y `roles` (dict no vacío); máximo
+  32 KB serializado.
+- `DELETE /brands/{slug}/presets/{nombre}` — borra un preset propio (404 si no es propio de la
+  marca, aunque exista uno base con ese nombre — los presets base del código no se pueden
+  borrar).
+- `POST /brands/{slug}/presets/{nombre}/preview` — encola un job `preset.preview` (`202
+  {job_id}`, mismo patrón de polling que slideshows); genera un PNG de muestra servido luego en
+  `GET /brands/{slug}/files/previews/{nombre}.png`.
+
+### Logo
+
+- `POST /brands/{slug}/logo` — multipart, un archivo (manager+). Extensiones `png/svg/jpg/jpeg`,
+  máx 2 MB; SVG con `<script>` se rechaza (422, riesgo XSS). Reemplaza cualquier `logo.*`
+  anterior de la marca y actualiza `accounts.logo_path`.
+- `GET /brands/{slug}/files/logo` — sirve el logo actual. SVG se fuerza como descarga
+  (`Content-Disposition: attachment`) con `Content-Security-Policy: default-src 'none'`; los
+  rasterizados van inline con `X-Content-Type-Options: nosniff`.
+
+### Campos extra de marca
+
+`PATCH /brands/{slug}` (ya existente, Fase 1) ahora también acepta `descripcion` (≤600),
+`sitio_web` (≤200) y `hashtags_default` (≤400) — igual de opcionales que el resto de campos del
+PATCH, requieren manager+.
+
+### Fuentes de contenido (`brand_sources`)
+
+Dos `kind`: `imagen` (cascada de proveedores para las fotos del slideshow) e `info` (temas
+sugeridos). Aislamiento estricto por `account_id`: una fuente ajena a la marca da 404 en
+`GET/PATCH/DELETE`.
+
+- `GET /brands/{slug}/sources[?kind=imagen|info]`
+- `POST /brands/{slug}/sources` — `{kind, provider, config?, activa?}` (manager+). `provider` debe
+  existir para ese `kind`; `ig_accounts`/`rss`/`newsapi` tienen esquema de `config` obligatorio
+  (ver abajo), el resto acepta `config` libre u omitido.
+- `PATCH /brands/{slug}/sources/{sid}` — `{config?, activa?}` (manager+).
+- `DELETE /brands/{slug}/sources/{sid}` (manager+).
+- `PUT /brands/{slug}/sources/orden` — `{ids: [...]}`, reordena la cascada de un `kind`; debe ser
+  exactamente el set de ids existentes de ese `kind` para esa marca, sin repetir (422 si no).
+- `POST /brands/{slug}/sources/{sid}/run` — encola el job de esa fuente (`202 {job_id}`). Solo
+  fuentes "ejecutables" (`rss`→`sourcing.rss_fetch`, `newsapi`→`sourcing.newsapi_fetch`,
+  `ig_accounts`→`sourcing.ig_scrape`); el resto de providers son estáticos y responden 422.
+
+**Providers de imagen** (`kind=imagen`): `carpeta`, `ig_accounts`, `pinterest`, `pexels`,
+`unsplash`, `banco`, `covers`. Sin fuentes propias configuradas, `generate_slideshow.generar` cae
+al `fuentes_imagen` legacy del perfil de marca (compat con marcas de antes de esta fase).
+
+**Providers de info** (`kind=info`, alimentan `topic_suggestions`): `rss`, `newsapi`.
+
+**Esquemas de `config` obligatorios:**
+- `ig_accounts`: `{"cuentas": ["@handle", ...]}` (no vacío, cada uno con `@`); opcional
+  `max_por_cuenta` (entero 1-50) y `cada_horas` (entero ≥6, sin efecto real porque este provider
+  no entra al scheduler automático — ver abajo).
+- `rss`: `{"urls": ["http...", ...]}` (no vacío, cada URL empieza con `http`).
+- `newsapi`: `{"query": "..."}` (no vacía); opcional `idioma`, `pais` (strings).
+
+**Claves por marca (vía `brand_secrets`, nunca en `config`):** `PEXELS_API_KEY`,
+`UNSPLASH_ACCESS_KEY`, `NEWSAPI_KEY` — se guardan con `PUT /brands/{slug}/secrets/{clave}` y las
+resuelve `config.account_creds(slug)` (DB → `.env` con sufijo `__SLUG` → global). Sin
+`UNSPLASH_ACCESS_KEY` ese provider se omite sin llamar a la red; Pexels sin clave por marca cae a
+la clave global del proceso.
+
+### `encolar_fuentes_vencidas` (scheduler de fuentes de info)
+
+`src/jobs/worker.py::encolar_fuentes_vencidas` corre en **cada vuelta del loop del worker**
+(`python -m src.jobs.worker`), antes de tomar el siguiente job. Revisa las fuentes `kind='info'`
+**activas** (solo `rss`/`newsapi` — `ig_accounts` NO entra aquí, se corre manual vía
+`POST .../sources/{sid}/run`) y encola `sourcing.rss_fetch`/`sourcing.newsapi_fetch` para las que
+ya vencieron: `config.cada_horas` (default 24 h) desde `ultimo_run`, o de inmediato si nunca
+corrió. Dedup: si ya hay un job `cola`/`corriendo` para ese `source_id`, no encola otro.
+
+### Fotos (banco propio de marca)
+
+El **banco de fotos de una marca** es la carpeta `data/brands/{slug}/fotos/` — el provider
+`carpeta` (`CarpetaProvider`) lee de ahí directo, sin pasar por `brand_sources`.
+
+- `GET /brands/{slug}/photos` — lista `{nombre, tamano, mtime, url}` de la carpeta.
+- `POST /brands/{slug}/photos` — multipart, hasta 10 archivos por request (manager+). Extensiones
+  `jpg/jpeg/png/webp`, máx 8 MB c/u; se valida TODO el lote antes de escribir cualquier archivo
+  (una foto inválida no deja fotos previas a medio guardar). El nombre en disco se **regenera
+  server-side** (`uuid4().hex[:12]` + extensión) — el nombre del cliente nunca toca el
+  filesystem.
+- `DELETE /brands/{slug}/photos/{nombre}` (manager+).
+- `GET /brands/{slug}/files/fotos/{nombre}` — sirve el archivo (autenticado, vía `marca_para`).
+
+### Temas sugeridos (`topic_suggestions`)
+
+- `GET /brands/{slug}/topics[?usados=false]` — bandeja de la marca: descartados siempre fuera;
+  usados (`usado_en_queue_id` no nulo) fuera salvo `usados=true`.
+- `POST /brands/{slug}/topics/{tid}/descartar` (manager+) — descarte terminal (`descartado=1`);
+  un tema ajeno a la marca da 404.
+
+**De tema a slideshow:** `POST /brands/{slug}/slideshows` acepta `topic_id` opcional junto al
+resto del body ya existente (`tema` deja de ser obligatorio cuando se manda `topic_id`). Reglas:
+- El topic debe pertenecer a la marca (404 si no) y no estar descartado (422 si sí).
+- Si no se manda `tema`, se usa el `titulo` del topic; si no se manda `contexto`, se arma como
+  `f"{resumen}\n{url}"`.
+- Sin `topic_id` ni `tema`, 422.
+- El payload del job incluye `topic_id` cuando se dio; `src/jobs/handlers.py::generar_slideshow`
+  lo pasa a `generate_slideshow.generar(..., topic_id=...)`, que marca
+  `topic_suggestions.usado_en_queue_id` al encolar el slideshow (tolerante si el topic ya no
+  existe para entonces).
