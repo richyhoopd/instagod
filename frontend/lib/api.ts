@@ -74,4 +74,31 @@ function del<T>(path: string, init?: RequestInit): Promise<T> {
   return api<T>(path, { ...init, method: "DELETE" });
 }
 
-export { api, get, post, patch, put, del };
+// Subida de archivos: sin Content-Type propio, el navegador arma el
+// boundary de multipart/form-data solo.
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    let body: { error?: string; detalle?: string; campo?: string | null } = {};
+    try {
+      body = await res.json();
+    } catch {
+      // respuesta sin cuerpo JSON
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+export { api, get, post, patch, put, del, postForm };

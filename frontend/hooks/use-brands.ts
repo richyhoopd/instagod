@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, post } from "@/lib/api";
+import { get, patch, post } from "@/lib/api";
 
 export type RolEfectivo = "editor" | "manager" | "admin";
 
@@ -60,6 +60,28 @@ export function useCrearMarca() {
   return useMutation({
     mutationFn: (datos: NuevaMarca) => post<Brand>("/brands", datos),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["brands"] });
+    },
+  });
+}
+
+export interface PerfilMarca {
+  nombre?: string;
+  ig_handle?: string;
+  ciudad?: string;
+  timezone?: string;
+  color_marca?: string;
+  descripcion?: string;
+  sitio_web?: string;
+  hashtags_default?: string;
+}
+
+export function useActualizarMarca(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (datos: PerfilMarca) => patch<BrandDetail>(`/brands/${slug}`, datos),
+    onSuccess: (data) => {
+      qc.setQueryData(["brand", slug], data);
       qc.invalidateQueries({ queryKey: ["brands"] });
     },
   });
