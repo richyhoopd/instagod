@@ -83,6 +83,7 @@ python -m src.publisher --once     # Una sola pasada
 Variables de entorno:
 - `PUBLISH_EVERY` (default 300 s) — intervalo entre ciclos de publicación.
 - Garantía at-most-once: marca publicada con error='[publicando]'; si muere ahí, fila queda visible en estado `error` y se revive reprogramándola desde la API. Tras 5 intentos fallidos deja de reintentar; `PATCH` resetea el contador.
+- Correr **UNA sola instancia** del publisher (el claim atómico del marcador evita duplicados si por accidente hay dos, pero no es un modo soportado).
 
 ### Regla de publicación por SHEET_ID
 

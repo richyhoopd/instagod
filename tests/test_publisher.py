@@ -219,6 +219,25 @@ def test_publicar_fila_marca_publicando_antes_de_llamar_a_ig(tmp_path) -> None:
     assert fila2["intentos"] == 1
 
 
+def test_publicar_fila_claim_atomico_no_publica_dos_veces(tmp_path) -> None:
+    """G3: si otra instancia del publisher ya tomó la fila (marcador puesto
+    entre el filas_due de este ciclo y esta llamada), el claim atómico
+    (rowcount 0) hace que publicar_fila devuelva False SIN llamar a _ig."""
+    cx = _cx(tmp_path)
+    mid = _marca(cx, "pensionmas")
+    ahora = _ahora()
+    qid = _fila(cx, account_id=mid, imagen_url="https://img/1.jpg",
+               scheduled=ahora - timedelta(minutes=5))
+    fila = db.get(cx, "content_queue", qid)  # snapshot ANTES del marcador
+    db.update(cx, "content_queue", qid, error=publisher.MARCADOR_PUBLICANDO)  # otra instancia
+    fake = FakeIG()
+
+    ok = publisher.publicar_fila(cx, fila, None, _ig=fake)
+
+    assert ok is False
+    assert fake.calls == []
+
+
 def test_filas_due_excluye_marcador_publicando(tmp_path) -> None:
     cx = _cx(tmp_path)
     mid = _marca(cx, "pensionmas")

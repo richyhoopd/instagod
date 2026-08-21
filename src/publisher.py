@@ -91,8 +91,21 @@ def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> boo
     ig = _ig or _instagram_mod
     urls = _urls_o_none(fila.get("imagen_url") or "")
     caption = fila.get("caption") or ""
-    # Marca ANTES de llamar a IG (ver MARCADOR_PUBLICANDO arriba).
-    db.update(cx, "content_queue", fila["id"], error=MARCADOR_PUBLICANDO)
+    # Claim atómico ANTES de llamar a IG (ver MARCADOR_PUBLICANDO arriba): el
+    # UPDATE solo aplica si la fila SIGUE cumpliendo las condiciones de
+    # filas_due en este instante. rowcount == 0 → otra instancia ya la tomó
+    # (o dejó de calificar) entre el filas_due de este ciclo y esta llamada;
+    # no es un modo soportado correr dos publishers a la vez, pero el claim
+    # evita que un accidente duplique la publicación.
+    cur = cx.execute(
+        "UPDATE content_queue SET error=? WHERE id=? AND status='programado' "
+        "AND aprobacion='aprobado' AND (error IS NULL OR error NOT LIKE ?||'%') "
+        "AND intentos < ?",
+        (MARCADOR_PUBLICANDO, fila["id"], MARCADOR_PUBLICANDO, MAX_INTENTOS),
+    )
+    cx.commit()
+    if cur.rowcount == 0:
+        return False
     try:
         if urls is not None:
             media_id = ig.publish_carousel(urls, caption, creds=creds)
