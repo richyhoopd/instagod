@@ -71,12 +71,15 @@ export function TabVoz({
   }
 
   async function guardarCambios() {
+    // PromptsIn (api/routers/perfil.py) exige voz/caption_extra como string
+    // (no nullable) y hashtags con "#" al frente; nunca mandar null aquí.
+    const hashtagsNormalizados = hashtags.map((h) => (h.startsWith("#") ? h : `#${h}`));
     try {
       await guardar.mutateAsync({
-        voz: voz || null,
-        caption_extra: captionExtra || null,
+        voz,
+        caption_extra: captionExtra,
         por_formato: porFormato,
-        hashtags,
+        hashtags: hashtagsNormalizados,
       });
       toast.success("Prompts guardados");
       setDirty(false);

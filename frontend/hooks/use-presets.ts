@@ -3,21 +3,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, del, get, post, put } from "@/lib/api";
 
-// Forma libre: los campos conocidos del motor (texto/fondo/overlay) más
-// cualquier otro que traiga el JSON crudo del preset.
+// GET /brands/{slug}/presets (api/routers/perfil.py::listar_presets) devuelve
+// una LISTA — cada item es el preset de config.SLIDESHOW_ESTILOS/marca.estilos
+// con "nombre" y "propio" inyectados. La forma real del preset es
+// texto/fondo/background_opacity/roles (ver config.SLIDESHOW_ESTILOS); "roles"
+// es obligatorio y no vacío para poder guardarlo (guardar_preset lo valida).
 export interface Preset {
+  nombre: string;
   texto?: string;
   fondo?: string;
-  overlay?: string;
   background_opacity?: number;
+  roles?: Record<string, unknown>;
   propio?: boolean;
   [key: string]: unknown;
 }
 
 export function usePresets(slug: string) {
-  return useQuery<Record<string, Preset>, ApiError>({
+  return useQuery<Preset[], ApiError>({
     queryKey: ["presets", slug],
-    queryFn: () => get<Record<string, Preset>>(`/brands/${slug}/presets`),
+    queryFn: () => get<Preset[]>(`/brands/${slug}/presets`),
     enabled: !!slug,
     retry: false,
   });
@@ -25,7 +29,7 @@ export function usePresets(slug: string) {
 
 export function useGuardarPreset(slug: string) {
   const qc = useQueryClient();
-  return useMutation<Preset, ApiError, { nombre: string; datos: Preset }>({
+  return useMutation<Preset, ApiError, { nombre: string; datos: Record<string, unknown> }>({
     mutationFn: ({ nombre, datos }) => put<Preset>(`/brands/${slug}/presets/${nombre}`, datos),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["presets", slug] }),
   });

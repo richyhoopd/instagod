@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NoDisponible } from "@/components/no-disponible";
 import { colorSwatch, estiloLabel } from "@/lib/estilos";
-import { usePresets, type Preset } from "@/hooks/use-presets";
+import { usePresets } from "@/hooks/use-presets";
 import { PresetEditor } from "./preset-editor";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +27,8 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
     return <NoDisponible mensaje={presetsQuery.error.detalle} />;
   }
 
-  const presets = presetsQuery.data ?? {};
-  const entradas = Object.entries(presets);
+  const presets = presetsQuery.data ?? [];
+  const seleccionadoPreset = presets.find((p) => p.nombre === seleccionado) ?? null;
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -53,14 +53,14 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {entradas.map(([nombre, estilo]) => {
-          const activo = seleccionado === nombre;
+        {presets.map((estilo) => {
+          const activo = seleccionado === estilo.nombre;
           return (
             <button
-              key={nombre}
+              key={estilo.nombre}
               type="button"
               onClick={() => {
-                setSeleccionado(activo ? null : nombre);
+                setSeleccionado(activo ? null : estilo.nombre);
                 setNuevo(false);
               }}
               className={cn(
@@ -78,7 +78,7 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
                 Aa
               </div>
               <div className="flex items-center justify-between gap-1">
-                <span className="truncate text-sm font-medium">{estiloLabel(nombre)}</span>
+                <span className="truncate text-sm font-medium">{estiloLabel(estilo.nombre)}</span>
               </div>
               <Badge variant="outline" className="w-fit text-[10px] font-normal">
                 {estilo.propio ? "De la marca" : "Global"}
@@ -86,7 +86,7 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
             </button>
           );
         })}
-        {entradas.length === 0 && (
+        {presets.length === 0 && (
           <p className="col-span-full text-sm text-muted-foreground">Sin presets configurados.</p>
         )}
       </div>
@@ -95,7 +95,19 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
         <PresetEditor
           slug={slug}
           nombreInicial=""
-          preset={{}}
+          // guardar_preset (api/routers/perfil.py) exige texto y roles (dict
+          // no vacío); se arranca con un esqueleto mínimo de roles editable.
+          preset={{
+            nombre: "",
+            texto: "blanco",
+            fondo: "negro",
+            background_opacity: 0.35,
+            roles: {
+              hook: { font_size: "extra_large" },
+              punto: { font_size: "large" },
+              cta: { font_size: "medium" },
+            },
+          }}
           esNuevo
           puedeEditar={puedeEditar}
           onGuardado={() => setNuevo(false)}
@@ -103,14 +115,14 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
         />
       )}
 
-      {seleccionado && presets[seleccionado] && (
+      {seleccionado && seleccionadoPreset && (
         <PresetEditor
           key={seleccionado}
           slug={slug}
           nombreInicial={seleccionado}
-          preset={presets[seleccionado] as Preset}
+          preset={seleccionadoPreset}
           esNuevo={false}
-          puedeEditar={puedeEditar && !!presets[seleccionado]?.propio}
+          puedeEditar={puedeEditar && !!seleccionadoPreset.propio}
           onGuardado={() => setSeleccionado(null)}
           onCancelar={() => setSeleccionado(null)}
         />

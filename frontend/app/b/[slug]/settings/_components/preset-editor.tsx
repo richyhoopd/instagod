@@ -18,7 +18,10 @@ import {
 import { useJob } from "@/hooks/use-job";
 
 function limpiar(preset: Preset): Record<string, unknown> {
-  const resto = { ...preset };
+  // "nombre" y "propio" son metadatos que la API inyecta en el listado, no
+  // parte del preset guardable — no van en el body de PUT /presets/{nombre}.
+  const resto: Record<string, unknown> = { ...preset };
+  delete resto.nombre;
   delete resto.propio;
   return resto;
 }
@@ -69,11 +72,24 @@ export function PresetEditor({
   // se remonta y reintenta la carga (bypass del cache del navegador).
   const cacheKey = jobListo ? String(jobQuery.data?.finished_at ?? jobId) : "inicial";
 
-  function actualizarCampo(campo: "texto" | "fondo" | "overlay", valor: string) {
+  function actualizarCampoColor(campo: "texto" | "fondo", valor: string) {
     try {
       const actual = JSON.parse(rawJson) as Record<string, unknown>;
       if (valor) actual[campo] = valor;
       else delete actual[campo];
+      setRawJson(JSON.stringify(actual, null, 2));
+      setJsonError(null);
+    } catch {
+      // JSON crudo inválido: no se puede sincronizar el campo estructurado.
+    }
+  }
+
+  function actualizarOpacidad(valor: string) {
+    try {
+      const actual = JSON.parse(rawJson) as Record<string, unknown>;
+      const n = valor === "" ? undefined : Number(valor);
+      if (n !== undefined && !Number.isNaN(n)) actual.background_opacity = n;
+      else delete actual.background_opacity;
       setRawJson(JSON.stringify(actual, null, 2));
       setJsonError(null);
     } catch {
@@ -93,9 +109,9 @@ export function PresetEditor({
       toast.error("Ponle un nombre al preset");
       return;
     }
-    let datos: Preset;
+    let datos: Record<string, unknown>;
     try {
-      datos = JSON.parse(rawJson) as Preset;
+      datos = JSON.parse(rawJson) as Record<string, unknown>;
     } catch {
       setJsonError("JSON inválido");
       return;
@@ -142,7 +158,7 @@ export function PresetEditor({
         />
       </div>
       <div className="grid grid-cols-3 gap-3">
-        {(["texto", "fondo", "overlay"] as const).map((campo) => (
+        {(["texto", "fondo"] as const).map((campo) => (
           <div key={campo} className="space-y-1.5">
             <Label className="text-xs capitalize">{campo}</Label>
             <div className="flex items-center gap-1.5">
@@ -153,12 +169,28 @@ export function PresetEditor({
               <Input
                 disabled={!puedeEditar}
                 value={typeof parsed[campo] === "string" ? (parsed[campo] as string) : ""}
-                onChange={(e) => actualizarCampo(campo, e.target.value)}
+                onChange={(e) => actualizarCampoColor(campo, e.target.value)}
               />
             </div>
           </div>
         ))}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Opacidad de fondo</Label>
+          <Input
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            disabled={!puedeEditar}
+            value={typeof parsed.background_opacity === "number" ? parsed.background_opacity : ""}
+            onChange={(e) => actualizarOpacidad(e.target.value)}
+          />
+        </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        El campo <code>roles</code> (obligatorio, cosmética por rol de slide) solo se edita en el
+        JSON crudo de abajo.
+      </p>
       <div className="space-y-1.5">
         <Label htmlFor="preset-json">JSON crudo</Label>
         <Textarea

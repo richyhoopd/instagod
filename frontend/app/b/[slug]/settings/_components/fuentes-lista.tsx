@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { NoDisponible } from "@/components/no-disponible";
 import { ApiError } from "@/lib/api";
+import { fuenteLabel } from "@/lib/fuentes";
 import {
   useSources,
   useEditarSource,
@@ -49,6 +50,18 @@ import { cn } from "@/lib/utils";
 // Providers que corren manualmente (traen contenido nuevo con un click);
 // el resto (pexels/pinterest/etc.) se consultan al vuelo al generar.
 const CORRIBLES = new Set(["rss", "newsapi", "ig_accounts"]);
+
+// brand_sources no tiene columna "nombre" (src/db.py) — se arma un resumen
+// legible a partir de `config` para distinguir fuentes del mismo provider.
+function resumenConfig(source: Source): string | null {
+  const c = source.config;
+  if (!c) return null;
+  if (Array.isArray(c.urls) && c.urls.length > 0) return c.urls.join(", ");
+  if (Array.isArray(c.cuentas) && c.cuentas.length > 0) return c.cuentas.join(", ");
+  if (typeof c.query === "string" && c.query) return c.query;
+  if (typeof c.ruta === "string" && c.ruta) return c.ruta;
+  return null;
+}
 
 function FuenteRow({
   source,
@@ -92,10 +105,18 @@ function FuenteRow({
         </button>
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{source.nombre}</p>
-        <Badge variant="outline" className="mt-0.5 text-[10px] font-normal">
-          {source.provider}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <p className="truncate text-sm font-medium">{fuenteLabel(source.provider)}</p>
+          <Badge variant="outline" className="text-[10px] font-normal">
+            #{source.id}
+          </Badge>
+        </div>
+        {resumenConfig(source) && (
+          <p className="truncate text-xs text-muted-foreground">{resumenConfig(source)}</p>
+        )}
+        {source.ultimo_error && (
+          <p className="truncate text-xs text-destructive">{source.ultimo_error}</p>
+        )}
       </div>
       {CORRIBLES.has(source.provider) && (
         <Button
@@ -120,7 +141,7 @@ function FuenteRow({
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>¿Borrar &ldquo;{source.nombre}&rdquo;?</AlertDialogTitle>
+              <AlertDialogTitle>¿Borrar &ldquo;{fuenteLabel(source.provider)}&rdquo;?</AlertDialogTitle>
               <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -145,7 +166,11 @@ export function FuentesLista({
   titulo: string;
   puedeEditar: boolean;
 }) {
+  const otroKind: SourceKind = kind === "imagen" ? "info" : "imagen";
   const sourcesQuery = useSources(slug, kind);
+  // PUT /sources/orden exige el set COMPLETO de fuentes de la marca (los dos
+  // kinds); se pide el otro kind solo para tener sus ids a mano al reordenar.
+  const otroQuery = useSources(slug, otroKind);
   const editar = useEditarSource(slug);
   const borrar = useBorrarSource(slug);
   const ordenar = useOrdenarSources(slug);
@@ -183,13 +208,18 @@ export function FuentesLista({
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    if (!otroQuery.data) {
+      toast.error("No se pudo reordenar: falta cargar las fuentes del otro tipo");
+      return;
+    }
     const oldIndex = orden.findIndex((s) => s.id === active.id);
     const newIndex = orden.findIndex((s) => s.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
     const nuevo = arrayMove(orden, oldIndex, newIndex);
     setOrden(nuevo);
+    const idsCompletos = [...nuevo.map((s) => s.id), ...otroQuery.data.map((s) => s.id)];
     ordenar.mutate(
-      { kind, ids: nuevo.map((s) => s.id) },
+      { ids: idsCompletos },
       {
         onError: (err) => {
           setOrden(orden);
@@ -235,6 +265,9 @@ export function FuentesLista({
                     { id: source.id, kind, activa },
                     {
                       onError: (err) => {
+                        setOrden((prev) =>
+                          prev.map((s) => (s.id === source.id ? { ...s, activa: !activa } : s))
+                        );
                         toast.error(err instanceof ApiError ? err.detalle : "No se pudo actualizar");
                       },
                     }

@@ -5,16 +5,19 @@ import { ApiError, del, get, patch, post, put } from "@/lib/api";
 
 export type SourceKind = "imagen" | "info";
 
-// Esquema de src/image_sources.py + src/news_sources.py aproximado: `config`
-// es libre y depende del provider (url para rss, query para newsapi, etc).
+// api/routers/fuentes_api.py::_resumen_fuente — brand_sources (src/db.py)
+// NO tiene columna "nombre": la fuente se identifica por provider (+ id),
+// no por un nombre editable.
 export interface Source {
   id: number;
   kind: SourceKind;
   provider: string;
-  nombre: string;
   activa: boolean;
   orden: number;
   config: Record<string, unknown> | null;
+  ultimo_run: string | null;
+  ultimo_error: string | null;
+  created_at: string;
 }
 
 export function useSources(slug: string, kind: SourceKind) {
@@ -29,7 +32,6 @@ export function useSources(slug: string, kind: SourceKind) {
 export interface NuevaSource {
   kind: SourceKind;
   provider: string;
-  nombre: string;
   config?: Record<string, unknown>;
 }
 
@@ -45,7 +47,6 @@ export interface EditarSource {
   id: number;
   kind: SourceKind;
   activa?: boolean;
-  nombre?: string;
   config?: Record<string, unknown>;
 }
 
@@ -68,11 +69,18 @@ export function useBorrarSource(slug: string) {
   });
 }
 
+// PUT /sources/orden (src/fuentes.py::reordenar) exige el set COMPLETO de
+// brand_sources de la marca (los dos kinds juntos, ver ValueError("ids") si
+// falta/sobra alguno) — por eso el caller arma `ids` con TODAS las fuentes,
+// no solo las del kind visible, y por eso acá invalidamos ambos kinds.
 export function useOrdenarSources(slug: string) {
   const qc = useQueryClient();
-  return useMutation<void, ApiError, { kind: SourceKind; ids: number[] }>({
+  return useMutation<void, ApiError, { ids: number[] }>({
     mutationFn: ({ ids }) => put<void>(`/brands/${slug}/sources/orden`, { ids }),
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["sources", slug, vars.kind] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sources", slug, "imagen"] });
+      qc.invalidateQueries({ queryKey: ["sources", slug, "info"] });
+    },
   });
 }
 

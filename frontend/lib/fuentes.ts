@@ -5,9 +5,13 @@
 const FUENTE_LABELS: Record<string, string> = {
   pexels: "Pexels",
   pinterest: "Pinterest",
+  unsplash: "Unsplash",
   banco: "Banco de fotos",
   covers: "Covers",
   carpeta: "Carpeta local",
+  ig_accounts: "Cuentas de Instagram",
+  rss: "RSS",
+  newsapi: "NewsAPI",
   manual: "Manual",
 };
 
