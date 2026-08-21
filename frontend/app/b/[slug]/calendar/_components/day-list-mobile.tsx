@@ -27,7 +27,7 @@ export function DayListMobile({
           <div key={key} className="rounded-lg border p-2">
             <p
               className={cn(
-                "mb-1.5 text-sm font-medium capitalize",
+                "mb-1.5 text-sm font-medium",
                 esHoy(dia) && "text-(--brand)"
               )}
             >

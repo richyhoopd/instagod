@@ -64,7 +64,7 @@ export function TabVoz({
   if (promptsQuery.isError) {
     if (promptsQuery.error.status === 404) {
       return (
-        <NoDisponible mensaje="La edición de voz y prompts todavía no está disponible en este servidor." />
+        <NoDisponible mensaje="La edición de voz todavía no está disponible en este servidor." />
       );
     }
     return <NoDisponible mensaje={promptsQuery.error.detalle} />;
@@ -81,7 +81,7 @@ export function TabVoz({
         por_formato: porFormato,
         hashtags: hashtagsNormalizados,
       });
-      toast.success("Prompts guardados");
+      toast.success("Voz guardada");
       setDirty(false);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.detalle : "No se pudo guardar");
@@ -105,6 +105,10 @@ export function TabVoz({
 
   return (
     <div className="max-w-2xl space-y-6">
+      <p className="text-sm text-muted-foreground">
+        Aquí le explicas a la IA cómo habla tu marca. Entre más concreto, más se parecen
+        los textos generados a lo que publicarías tú.
+      </p>
       <div className="space-y-2">
         <Label htmlFor="voz">Voz de la marca</Label>
         <Textarea
@@ -116,11 +120,16 @@ export function TabVoz({
             setVoz(e.target.value);
             setDirty(true);
           }}
-          placeholder="Tono, personalidad y reglas de estilo para el LLM..."
+          placeholder={
+            "p. ej. Habla de tú, con humor seco y orgullo local. Nada de emojis ni signos de exclamación. Cita bandas y lugares reales de la ciudad."
+          }
         />
+        <p className="text-xs text-muted-foreground">
+          Describe tono y personalidad como se lo explicarías a alguien nuevo del equipo.
+        </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="caption_extra">Extra para captions</Label>
+        <Label htmlFor="caption_extra">Instrucciones extra para el caption</Label>
         <Textarea
           id="caption_extra"
           rows={3}
@@ -130,10 +139,18 @@ export function TabVoz({
             setCaptionExtra(e.target.value);
             setDirty(true);
           }}
+          placeholder="p. ej. Cierra siempre invitando a comentar. Menciona la fuente si es noticia."
         />
+        <p className="text-xs text-muted-foreground">
+          El caption es el texto que acompaña la publicación en Instagram.
+        </p>
       </div>
       <div className="space-y-3">
-        <Label>Instrucciones por formato</Label>
+        <Label>Instrucciones por formato (opcional)</Label>
+        <p className="text-xs text-muted-foreground">
+          Si un formato necesita reglas propias, escríbelas aquí; si lo dejas vacío se usa
+          solo la voz general.
+        </p>
         {formatos.map((f) => (
           <div key={f} className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">{formatoLabel(f)}</p>
@@ -150,16 +167,19 @@ export function TabVoz({
         ))}
       </div>
       <div className="space-y-2">
-        <Label>Hashtags de prompts</Label>
+        <Label>Hashtags de la marca</Label>
         <ChipInput
           value={hashtags}
           onChange={(v) => {
             setHashtags(v);
             setDirty(true);
           }}
-          placeholder="#hashtag y Enter"
+          placeholder="Escribe un #hashtag y presiona Enter"
           disabled={!puedeEditar}
         />
+        <p className="text-xs text-muted-foreground">
+          La IA los tiene en cuenta al escribir los captions.
+        </p>
       </div>
       {puedeEditar && (
         <Button onClick={guardarCambios} disabled={guardar.isPending || !dirty}>
@@ -168,7 +188,10 @@ export function TabVoz({
       )}
 
       <div className="space-y-3 border-t pt-6">
-        <Label>Probar generación</Label>
+        <Label>Probar la voz</Label>
+        <p className="text-xs text-muted-foreground">
+          Genera un texto de prueba con la configuración de arriba, sin publicar nada.
+        </p>
         <div className="flex flex-wrap gap-2">
           <Input
             value={temaPrueba}
@@ -181,7 +204,7 @@ export function TabVoz({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">Formato default</SelectItem>
+              <SelectItem value="default">Formato habitual</SelectItem>
               {formatos.map((f) => (
                 <SelectItem key={f} value={f}>
                   {formatoLabel(f)}

@@ -47,7 +47,7 @@ export function PasoTema({
           value={contexto}
           onChange={(e) => onContextoChange(e.target.value)}
           rows={3}
-          placeholder="Datos, fuentes o ángulo que quieras que el motor tome en cuenta..."
+          placeholder="Datos, fuentes o el ángulo que quieres que la IA tome en cuenta..."
         />
       </div>
 

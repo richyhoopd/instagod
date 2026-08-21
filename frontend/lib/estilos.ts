@@ -43,8 +43,54 @@ export function colorSwatch(nombre: string | undefined): string {
   return PALETA[nombre] ?? "#9ca3af";
 }
 
+export const PALETA_NOMBRES = Object.keys(PALETA);
+
+// Catálogos del compilador (config.SLIDESHOW_FUENTES, slideshow_model.py).
+// La API no los expone; si el backend suma opciones hay que reflejarlas aquí.
+export const FUENTES = [
+  "Anton-Regular",
+  "Poppins-Bold",
+  "Poppins-SemiBold",
+  "Tinos-Bold",
+  "Tinos-Regular",
+  "Erode-Semibold",
+  "Erode-Bold",
+  "Marcellus",
+  "Archivo",
+];
+
+export const TAMANOS: { valor: string; label: string }[] = [
+  { valor: "extra_extra_small", label: "Mínimo" },
+  { valor: "extra_small", label: "Muy chico" },
+  { valor: "small", label: "Chico" },
+  { valor: "medium", label: "Mediano" },
+  { valor: "large", label: "Grande" },
+  { valor: "extra_large", label: "Muy grande" },
+];
+
+export const ESTILOS_TEXTO: { valor: string; label: string }[] = [
+  { valor: "background", label: "Con caja de color" },
+  { valor: "outline", label: "Con contorno" },
+  { valor: "text", label: "Solo texto" },
+];
+
+export const ANCLAS: { valor: string; label: string }[] = [
+  { valor: "top", label: "Arriba" },
+  { valor: "center", label: "Al centro" },
+  { valor: "bottom", label: "Abajo" },
+];
+
+export const ROL_LABELS: Record<string, string> = {
+  hook: "Portada (primer slide)",
+  punto: "Slides intermedios",
+  cta: "Cierre (último slide)",
+};
+
 export function estiloLabel(nombre: string): string {
-  return ESTILO_LABELS[nombre] ?? nombre;
+  if (ESTILO_LABELS[nombre]) return ESTILO_LABELS[nombre];
+  // Un identificador tipo "gdlscene_clasico" no debe verse crudo en la UI.
+  const limpio = nombre.replace(/[_-]+/g, " ").trim();
+  return limpio.charAt(0).toUpperCase() + limpio.slice(1);
 }
 
 export function estilosDeMarca(

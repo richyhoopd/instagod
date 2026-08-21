@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BrandAvatar } from "@/components/brand-avatar";
 import { useQueue } from "@/hooks/use-queue";
+import { gruposFaltantes } from "@/lib/secretos";
 import type { Brand } from "@/hooks/use-brands";
 
 export function BrandCard({ marca }: { marca: Brand }) {
@@ -41,14 +42,14 @@ export function BrandCard({ marca }: { marca: Brand }) {
               {conteoPendientes} pendiente{conteoPendientes === 1 ? "" : "s"}
             </Badge>
           )}
-          {marca.creds_faltantes.map((clave) => (
+          {gruposFaltantes(marca.creds_faltantes).map((grupo) => (
             <Badge
-              key={clave}
+              key={grupo}
               variant="outline"
-              className="gap-1 border-red-300 text-red-700 dark:text-red-400"
+              className="gap-1 border-amber-300 text-amber-700 dark:text-amber-400"
             >
               <AlertTriangle className="size-3" />
-              {clave}
+              {grupo} sin conectar
             </Badge>
           ))}
         </CardContent>

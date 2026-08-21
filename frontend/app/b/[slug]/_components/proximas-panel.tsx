@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { CalendarClock, Images, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +13,20 @@ import { formatearFecha } from "@/lib/fecha";
 
 export function ProximasPanel({ slug }: { slug: string }) {
   const { data, isLoading } = useQueue(slug, { estado: "programado" });
-  const proximas = [...(data ?? [])]
-    .sort((a, b) => (a.scheduled_datetime ?? "").localeCompare(b.scheduled_datetime ?? ""))
-    .slice(0, 5);
+  // Se recalcula al montar; suficiente para marcar atrasos de horas o días.
+  const [ahora] = useState(() => Date.now());
+  const esPasada = (iso: string | null) => {
+    const t = iso ? new Date(iso).getTime() : NaN;
+    return !Number.isNaN(t) && t < ahora;
+  };
+  const ordenadas = [...(data ?? [])].sort((a, b) =>
+    (a.scheduled_datetime ?? "").localeCompare(b.scheduled_datetime ?? "")
+  );
+  // Lo que viene va primero; lo programado con fecha ya pasada (no publicado
+  // a tiempo) se muestra al final marcado como atrasado, no como "próximo".
+  const futuras = ordenadas.filter((i) => !esPasada(i.scheduled_datetime));
+  const atrasadas = ordenadas.filter((i) => esPasada(i.scheduled_datetime));
+  const proximas = [...futuras, ...atrasadas].slice(0, 5);
 
   return (
     <Card>
@@ -60,9 +72,14 @@ export function ProximasPanel({ slug }: { slug: string }) {
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm">{item.caption || "(sin caption)"}</p>
+                <p className="truncate text-sm">{item.caption || "Sin caption"}</p>
                 <p className="text-xs text-muted-foreground">
                   {formatearFecha(item.scheduled_datetime)}
+                  {esPasada(item.scheduled_datetime) && (
+                    <span className="ml-1.5 text-amber-600 dark:text-amber-400">
+                      · atrasada, no se publicó
+                    </span>
+                  )}
                 </p>
               </div>
               <EstadoBadge estado={item.estado} />

@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { useBrand } from "@/hooks/use-brands";
 
 const NAV = [
-  { segment: "", label: "Dashboard", icon: LayoutDashboard, soloManager: false },
+  { segment: "", label: "Resumen", icon: LayoutDashboard, soloManager: false },
   { segment: "calendar", label: "Calendario", icon: CalendarDays, soloManager: false },
   { segment: "create", label: "Crear", icon: Sparkles, soloManager: false },
   { segment: "library", label: "Biblioteca", icon: Library, soloManager: false },
@@ -38,7 +38,7 @@ export default function BrandLayout({ children }: { children: React.ReactNode })
 
   return (
     <div style={style} className="flex flex-col gap-6 py-6 md:flex-row md:gap-8">
-      <aside className="shrink-0 md:w-56">
+      <aside className="shrink-0 md:sticky md:top-6 md:w-56 md:self-start">
         <div className="mb-4 flex items-center gap-2">
           {isLoading || !marca ? (
             <>

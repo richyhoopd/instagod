@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Images, Plus, RefreshCw, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,13 +18,24 @@ import { EstadoBadge } from "@/components/estado-badge";
 import { QueueDrawer } from "../calendar/_components/queue-drawer";
 import { primeraImagen, contarImagenes } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
-import { ESTADOS, ESTADO_LABELS, type Estado } from "@/lib/estados";
+import { ESTADOS, ESTADO_LABELS, esEstado, type Estado } from "@/lib/estados";
 import { useQueue } from "@/hooks/use-queue";
 
-export default function LibraryPage() {
+// Los temas generados por el motor traen un prefijo interno tipo
+// "slideshow listicle: ..." que no debe llegar a la UI.
+function temaLimpio(tema: string | null | undefined): string {
+  if (!tema) return "";
+  return tema.replace(/^slideshow\s+[a-z_]+\s*:\s*/i, "").trim();
+}
+
+function LibraryContent() {
   const { slug } = useParams<{ slug: string }>();
   const router = useRouter();
-  const [estadoFiltro, setEstadoFiltro] = useState<Estado | "todos">("todos");
+  const searchParams = useSearchParams();
+  const estadoInicial = searchParams.get("estado");
+  const [estadoFiltro, setEstadoFiltro] = useState<Estado | "todos">(
+    estadoInicial && esEstado(estadoInicial) ? estadoInicial : "todos"
+  );
   const [busqueda, setBusqueda] = useState("");
   const [openQid, setOpenQid] = useState<number | null>(null);
 
@@ -35,7 +46,6 @@ export default function LibraryPage() {
   const items = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return (queueQuery.data ?? [])
-      .filter((i) => i.tipo === "slideshow")
       .filter(
         (i) =>
           !q ||
@@ -46,12 +56,17 @@ export default function LibraryPage() {
   }, [queueQuery.data, busqueda]);
 
   function reusarTema(tema: string) {
-    router.push(`/b/${slug}/create?tema=${encodeURIComponent(tema)}`);
+    router.push(`/b/${slug}/create?tema=${encodeURIComponent(temaLimpio(tema) || tema)}`);
   }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Biblioteca</h1>
+      <div>
+        <h1 className="text-2xl font-semibold">Biblioteca</h1>
+        <p className="text-sm text-muted-foreground">
+          Todo el contenido de la marca. Busca, revisa el detalle o reutiliza un tema.
+        </p>
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <div className="relative min-w-48 flex-1">
@@ -94,8 +109,8 @@ export default function LibraryPage() {
           <Images className="size-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             {busqueda || estadoFiltro !== "todos"
-              ? "No hay carruseles que coincidan con el filtro."
-              : "Todavía no hay carruseles en la biblioteca."}
+              ? "No hay contenido que coincida con la búsqueda o el filtro."
+              : "Todavía no hay contenido. Crea tu primer carrusel y aparecerá aquí."}
           </p>
           <Button size="sm" asChild>
             <Link href={`/b/${slug}/create`}>
@@ -137,7 +152,7 @@ export default function LibraryPage() {
               </button>
               <div className="flex flex-1 flex-col gap-2 p-3">
                 <p className="line-clamp-2 text-sm font-medium">
-                  {item.tema_semilla || item.caption || "(sin tema)"}
+                  {temaLimpio(item.tema_semilla) || item.caption || "Sin tema"}
                 </p>
                 {item.scheduled_datetime && (
                   <p className="text-xs text-muted-foreground">
@@ -160,5 +175,14 @@ export default function LibraryPage() {
 
       <QueueDrawer slug={slug} qid={openQid} onOpenChange={(open) => !open && setOpenQid(null)} />
     </div>
+  );
+}
+
+export default function LibraryPage() {
+  // useSearchParams exige un límite de Suspense al prerenderizar.
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+      <LibraryContent />
+    </Suspense>
   );
 }

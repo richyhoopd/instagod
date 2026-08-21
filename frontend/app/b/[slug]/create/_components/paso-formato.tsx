@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { formatoLabel } from "@/lib/formatos";
+import { formatoDescripcion, formatoLabel } from "@/lib/formatos";
 
 export function PasoFormato({
   formatos,
@@ -15,9 +15,9 @@ export function PasoFormato({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Elige la estructura editorial del carrusel. Si no eliges, se usa el default de la marca.
+        ¿Cómo quieres contar el tema? Cada opción cambia la estructura del carrusel.
       </p>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {formatos.map((f) => {
           const activo = seleccionado ? seleccionado === f : f === formatos[0];
           return (
@@ -25,12 +25,18 @@ export function PasoFormato({
               key={f}
               type="button"
               onClick={() => onChange(f)}
+              aria-pressed={activo}
               className={cn(
-                "rounded-full border px-4 py-2 text-sm transition-colors",
-                activo ? "border-(--brand) bg-(--brand) text-white" : "hover:bg-muted"
+                "rounded-lg border p-3 text-left transition-colors",
+                activo ? "border-(--brand) bg-(--brand)/5" : "hover:bg-muted"
               )}
             >
-              {formatoLabel(f)}
+              <p className={cn("text-sm font-medium", activo && "text-(--brand)")}>
+                {formatoLabel(f)}
+              </p>
+              {formatoDescripcion(f) && (
+                <p className="mt-0.5 text-xs text-muted-foreground">{formatoDescripcion(f)}</p>
+              )}
             </button>
           );
         })}

@@ -170,7 +170,9 @@ export function QueueDrawer({
         <DialogHeader>
           <DialogTitle>
             {item ? (TIPO_LABEL[item.tipo] ?? item.tipo) : "Publicación"}
-            {item ? ` #${item.id}` : ""}
+            {item && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground/60">#{item.id}</span>
+            )}
           </DialogTitle>
           {item && (
             <DialogDescription className="flex items-center gap-2">
@@ -257,7 +259,7 @@ export function QueueDrawer({
                 <AlertDialogHeader>
                   <AlertDialogTitle>¿Eliminar esta publicación?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Esta acción descarta la fila y no se puede deshacer.
+                    Se quitará de la cola de contenido y no se puede deshacer.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -279,10 +281,29 @@ export function QueueDrawer({
                   <Button variant="outline" disabled={enCurso} onClick={onRechazar}>
                     Rechazar
                   </Button>
-                  <Button disabled={enCurso} onClick={onAprobar}>
-                    {aprobar.isPending && <Loader2 className="animate-spin" />}
-                    Aprobar
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button disabled={enCurso}>
+                        {aprobar.isPending && <Loader2 className="animate-spin" />}
+                        Aprobar
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>¿Aprobar esta publicación?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Se programará en el siguiente horario libre y se publicará
+                          automáticamente en el Instagram de la marca.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={onAprobar}>
+                          Aprobar y programar
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </>
               )}
             </div>

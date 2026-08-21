@@ -43,7 +43,7 @@ export default function SettingsPage() {
       <Tabs defaultValue="perfil">
         <TabsList className="flex-wrap">
           <TabsTrigger value="perfil">Perfil</TabsTrigger>
-          <TabsTrigger value="voz">Voz y prompts</TabsTrigger>
+          <TabsTrigger value="voz">Voz</TabsTrigger>
           <TabsTrigger value="estilos">Estilos</TabsTrigger>
           <TabsTrigger value="fuentes">Fuentes</TabsTrigger>
           <TabsTrigger value="conexiones">Conexiones</TabsTrigger>

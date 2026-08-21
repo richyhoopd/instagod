@@ -10,9 +10,9 @@ import { ApiError } from "@/lib/api";
 import { useBrand } from "@/hooks/use-brands";
 import { useTopics, type Topic } from "@/hooks/use-topics";
 import { useCrearSlideshow } from "@/hooks/use-job";
-import { formatosDeMarca } from "@/lib/formatos";
-import { estilosDeMarca } from "@/lib/estilos";
-import { fuentesDeMarca } from "@/lib/fuentes";
+import { formatoLabel, formatosDeMarca } from "@/lib/formatos";
+import { estiloLabel, estilosDeMarca } from "@/lib/estilos";
+import { fuenteLabel, fuentesDeMarca } from "@/lib/fuentes";
 import { WizardSteps } from "./_components/wizard-steps";
 import { PasoTema } from "./_components/paso-tema";
 import { PasoFormato } from "./_components/paso-formato";
@@ -140,7 +140,36 @@ function CreateWizard() {
           onToggle={onToggleFuente}
         />
       )}
-      {paso === 5 && <PasoSlides n={nSlides} onChange={setNSlides} />}
+      {paso === 5 && (
+        <div className="space-y-5">
+          <PasoSlides n={nSlides} onChange={setNSlides} />
+          <div className="rounded-lg border bg-muted/30 p-4 text-sm">
+            <p className="mb-2 font-medium">Resumen antes de generar</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-muted-foreground">
+              <dt>Tema</dt>
+              <dd className="text-foreground">{tema.trim()}</dd>
+              <dt>Formato</dt>
+              <dd className="text-foreground">{formatoLabel(formato ?? formatos[0])}</dd>
+              <dt>Estilo</dt>
+              <dd className="text-foreground">
+                {estilo ? estiloLabel(estilo) : "El habitual de la marca"}
+              </dd>
+              <dt>Imágenes de</dt>
+              <dd className="text-foreground">
+                {fuentesActivas.length > 0
+                  ? fuentesActivas.map(fuenteLabel).join(", ")
+                  : "fuentes estándar"}
+              </dd>
+              <dt>Slides</dt>
+              <dd className="text-foreground">{nSlides}</dd>
+            </dl>
+            <p className="mt-3 text-xs text-muted-foreground">
+              La generación tarda unos minutos. El carrusel queda pendiente de tu
+              aprobación: nada se publica solo.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex justify-between border-t pt-4">
         <Button variant="outline" disabled={paso === 1} onClick={() => setPaso((p) => p - 1)}>

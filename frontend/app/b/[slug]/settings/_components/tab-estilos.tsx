@@ -34,8 +34,8 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
     <div className="max-w-2xl space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Los presets globales del motor son de solo lectura; los propios de la marca los puedes
-          editar o borrar.
+          El estilo define los colores y la tipografía de los carruseles. Los estilos base de
+          instagod no se pueden editar; los de tu marca sí.
         </p>
         {puedeEditar && !nuevo && (
           <Button
@@ -81,13 +81,13 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
                 <span className="truncate text-sm font-medium">{estiloLabel(estilo.nombre)}</span>
               </div>
               <Badge variant="outline" className="w-fit text-[10px] font-normal">
-                {estilo.propio ? "De la marca" : "Global"}
+                {estilo.propio ? "De la marca" : "Base de instagod"}
               </Badge>
             </button>
           );
         })}
         {presets.length === 0 && (
-          <p className="col-span-full text-sm text-muted-foreground">Sin presets configurados.</p>
+          <p className="col-span-full text-sm text-muted-foreground">Todavía no hay estilos. Crea el primero con “Nuevo”.</p>
         )}
       </div>
 

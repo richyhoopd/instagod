@@ -31,7 +31,10 @@ export function TemasPanel({ slug }: { slug: string }) {
           </div>
         )}
         {!isLoading && temas.length === 0 && (
-          <p className="text-sm text-muted-foreground">No hay temas sugeridos por ahora.</p>
+          <p className="text-sm text-muted-foreground">
+            Aún no hay temas sugeridos. Se generan solos cuando la marca tiene fuentes de
+            noticias conectadas en Ajustes → Fuentes.
+          </p>
         )}
         {temas.map((tema) => (
           <div key={tema.id} className="flex items-start justify-between gap-3 rounded-lg border p-2">

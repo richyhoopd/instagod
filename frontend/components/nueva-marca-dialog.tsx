@@ -39,8 +39,21 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+// "La Escena GDL" → "la_escena_gdl": el identificador se arma solo a partir
+// del nombre para no pedirle un "slug" a quien no sabe qué es eso.
+function slugify(nombre: string): string {
+  return nombre
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32);
+}
+
 export function NuevaMarcaDialog() {
   const [open, setOpen] = useState(false);
+  const [slugTocado, setSlugTocado] = useState(false);
   const crear = useCrearMarca();
 
   const {
@@ -48,6 +61,7 @@ export function NuevaMarcaDialog() {
     handleSubmit,
     reset,
     setError,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -81,7 +95,10 @@ export function NuevaMarcaDialog() {
       open={open}
       onOpenChange={(v) => {
         setOpen(v);
-        if (!v) reset();
+        if (!v) {
+          reset();
+          setSlugTocado(false);
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -97,21 +114,38 @@ export function NuevaMarcaDialog() {
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="slug">Slug</Label>
-            <Input id="slug" placeholder="p_ej_gdlscene" {...register("slug")} />
-            {errors.slug && <p className="text-sm text-destructive">{errors.slug.message}</p>}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="nombre">Nombre</Label>
-            <Input id="nombre" placeholder="La Escena GDL" {...register("nombre")} />
+            <Label htmlFor="nombre">Nombre de la marca</Label>
+            <Input
+              id="nombre"
+              placeholder="La Escena GDL"
+              {...register("nombre", {
+                onChange: (e) => {
+                  if (!slugTocado) setValue("slug", slugify(e.target.value));
+                },
+              })}
+            />
             {errors.nombre && <p className="text-sm text-destructive">{errors.nombre.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="ig_handle">Handle de Instagram</Label>
+            <Label htmlFor="ig_handle">Usuario de Instagram</Label>
             <Input id="ig_handle" placeholder="gdlscene" {...register("ig_handle")} />
             {errors.ig_handle && (
               <p className="text-sm text-destructive">{errors.ig_handle.message}</p>
             )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="slug" className="text-muted-foreground">
+              Identificador interno
+            </Label>
+            <Input
+              id="slug"
+              placeholder="se_genera_solo"
+              {...register("slug", { onChange: () => setSlugTocado(true) })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Se genera solo a partir del nombre y no se puede cambiar después.
+            </p>
+            {errors.slug && <p className="text-sm text-destructive">{errors.slug.message}</p>}
           </div>
           <div className="grid grid-cols-[1fr_auto] gap-4">
             <div className="space-y-2">

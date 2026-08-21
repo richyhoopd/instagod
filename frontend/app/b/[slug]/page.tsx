@@ -11,7 +11,7 @@ export default function BrandDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+      <h1 className="text-2xl font-semibold">Resumen</h1>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ProximasPanel slug={slug} />
         <PendientesPanel slug={slug} />

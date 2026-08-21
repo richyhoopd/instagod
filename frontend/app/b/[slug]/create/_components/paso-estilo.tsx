@@ -18,8 +18,8 @@ export function PasoEstilo({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        El estilo define tipografía y colores del carrusel. Si no eliges, se usa el default de la
-        marca.
+        El estilo define los colores y la tipografía del carrusel. Si no eliges, se usa el
+        estilo habitual de la marca.
       </p>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {entradas.map(([nombre, estilo]) => {

@@ -15,8 +15,8 @@ export function TabHorarios({ marca }: { marca: BrandDetail }) {
       <div className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />
         <p>
-          Los horarios de publicación son de solo lectura por ahora: la API todavía no expone un
-          endpoint para editar <code>posting_slots</code>. Edición de horarios próximamente.
+          Estos son los horarios en los que la marca publica cada día. Por ahora no se pueden
+          editar desde aquí; si necesitas cambiarlos, pídeselo al administrador.
         </p>
       </div>
 
@@ -28,7 +28,7 @@ export function TabHorarios({ marca }: { marca: BrandDetail }) {
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Horarios configurados ({slots.length} por día)</p>
         {slots.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin horarios configurados; se usa el default del motor.</p>
+          <p className="text-sm text-muted-foreground">Sin horarios propios; se usan los horarios estándar de instagod.</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {slots.map((slot) => (

@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 import { usePrueba, type TipoPrueba } from "@/hooks/use-pruebas";
 
 const CANALES: { tipo: TipoPrueba; label: string }[] = [
-  { tipo: "telegram", label: "Telegram" },
   { tipo: "instagram", label: "Instagram" },
-  { tipo: "llm", label: "LLM" },
+  { tipo: "telegram", label: "Telegram" },
+  { tipo: "llm", label: "Textos con IA" },
 ];
 
 function SaludChip({ slug, tipo, label }: { slug: string; tipo: TipoPrueba; label: string }) {

@@ -4,11 +4,24 @@
 // marca tiene habilitado (null/vacío → default del motor, "listicle"
 // primero por ser el default editorial histórico).
 export const FORMATO_LABELS: Record<string, string> = {
-  listicle: "Listicle",
+  listicle: "Lista",
   todo_lo_que_sabemos: "Todo lo que sabemos",
   perfil: "Perfil",
   libre: "Libre",
 };
+
+// Una línea por formato para que quien no conoce los términos editoriales
+// pueda elegir sin adivinar.
+export const FORMATO_DESCRIPCIONES: Record<string, string> = {
+  listicle: "Un punto por slide: “5 foros que...”, “7 señales de que...”",
+  todo_lo_que_sabemos: "Junta todo lo que se sabe de un tema o evento en un resumen.",
+  perfil: "Presenta a una persona, banda o lugar: quién es y por qué importa.",
+  libre: "La IA estructura el tema como mejor fluya, sin molde fijo.",
+};
+
+export function formatoDescripcion(formato: string): string {
+  return FORMATO_DESCRIPCIONES[formato] ?? "";
+}
 
 const DEFAULT_FORMATOS = ["listicle", "libre", "perfil", "todo_lo_que_sabemos"];
 

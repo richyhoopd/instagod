@@ -27,7 +27,7 @@ export function WeekView({
           <div key={key} className="flex min-h-40 flex-col gap-1.5 rounded-lg border p-1.5">
             <p
               className={cn(
-                "px-0.5 text-xs font-medium text-muted-foreground capitalize",
+                "px-0.5 text-xs font-medium text-muted-foreground",
                 esHoy(dia) && "text-(--brand)"
               )}
             >

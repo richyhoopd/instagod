@@ -71,16 +71,24 @@ export function formatHora(iso: string | null | undefined): string {
   return fecha.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Solo la primera letra en mayúscula; un `capitalize` de CSS sobre la cadena
+// completa produce "Lunes, 17 De Agosto".
+function capitalizar(txt: string): string {
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
 export function formatDiaCorto(fecha: Date): string {
-  return fecha.toLocaleDateString("es-MX", { weekday: "short", day: "numeric" });
+  return capitalizar(fecha.toLocaleDateString("es-MX", { weekday: "short", day: "numeric" }));
 }
 
 export function formatDiaLargo(fecha: Date): string {
-  return fecha.toLocaleDateString("es-MX", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  return capitalizar(
+    fecha.toLocaleDateString("es-MX", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    })
+  );
 }
 
 export function formatRangoSemana(fecha: Date): string {

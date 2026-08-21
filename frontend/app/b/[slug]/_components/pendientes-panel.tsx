@@ -1,10 +1,22 @@
 "use client";
 
-import { CheckCircle2, Images, ListChecks, XCircle } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Check, Images, ListChecks, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useAprobar, useQueue, useRechazar, type QueueItem } from "@/hooks/use-queue";
 import { primeraImagen, contarImagenes } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
@@ -62,21 +74,45 @@ function PendienteCard({ item, slug }: { item: QueueItem; slug: string }) {
           variant="outline"
           disabled={enCurso}
           onClick={onRechazar}
-          aria-label="Rechazar"
         >
-          <XCircle className="text-destructive" />
+          <X className="text-destructive" />
+          Rechazar
         </Button>
-        <Button size="sm" disabled={enCurso} onClick={onAprobar} aria-label="Aprobar">
-          <CheckCircle2 />
-        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button size="sm" disabled={enCurso}>
+              <Check />
+              Aprobar
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Aprobar esta publicación?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se programará en el siguiente horario libre y se publicará automáticamente
+                en el Instagram de la marca.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={onAprobar}>Aprobar y programar</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );
 }
 
+// El dashboard es un resumen: muestra pocas y manda al calendario para
+// revisar el resto; una cola grande aquí enterraría el resto de paneles.
+const MAX_VISIBLES = 5;
+
 export function PendientesPanel({ slug }: { slug: string }) {
   const { data, isLoading } = useQueue(slug, { estado: "pendiente" });
   const pendientes = data ?? [];
+  const visibles = pendientes.slice(0, MAX_VISIBLES);
+  const restantes = pendientes.length - visibles.length;
 
   return (
     <Card>
@@ -84,6 +120,11 @@ export function PendientesPanel({ slug }: { slug: string }) {
         <CardTitle className="flex items-center gap-2">
           <ListChecks className="size-4" />
           Pendientes de aprobar
+          {pendientes.length > 0 && (
+            <span className="text-sm font-normal text-muted-foreground">
+              {pendientes.length}
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -94,11 +135,21 @@ export function PendientesPanel({ slug }: { slug: string }) {
           </div>
         )}
         {!isLoading && pendientes.length === 0 && (
-          <p className="text-sm text-muted-foreground">No hay nada pendiente de aprobar.</p>
+          <p className="text-sm text-muted-foreground">
+            No hay nada pendiente de aprobar. Lo nuevo que se genere aparecerá aquí.
+          </p>
         )}
-        {pendientes.map((item) => (
+        {visibles.map((item) => (
           <PendienteCard key={item.id} item={item} slug={slug} />
         ))}
+        {restantes > 0 && (
+          <Button variant="outline" size="sm" className="w-full" asChild>
+            <Link href={`/b/${slug}/library?estado=pendiente`}>
+              Revisar {restantes} pendiente{restantes === 1 ? "" : "s"} más
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

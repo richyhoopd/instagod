@@ -16,6 +16,28 @@ import { ApiError } from "@/lib/api";
 import { useActualizarMarca, type BrandDetail } from "@/hooks/use-brands";
 import { useSubirLogo } from "@/hooks/use-logo";
 
+// Zonas horarias comunes del equipo; nadie tiene por qué saber escribir un
+// identificador IANA a mano. Si la marca ya trae otra zona, se agrega tal cual.
+const ZONAS: { valor: string; label: string }[] = [
+  { valor: "America/Mexico_City", label: "Ciudad de México / Guadalajara (Centro)" },
+  { valor: "America/Monterrey", label: "Monterrey" },
+  { valor: "America/Cancun", label: "Cancún (Sureste)" },
+  { valor: "America/Mazatlan", label: "Mazatlán (Pacífico)" },
+  { valor: "America/Hermosillo", label: "Hermosillo (Sonora)" },
+  { valor: "America/Tijuana", label: "Tijuana (Noroeste)" },
+  { valor: "America/Bogota", label: "Bogotá" },
+  { valor: "America/Los_Angeles", label: "Los Ángeles" },
+  { valor: "America/New_York", label: "Nueva York" },
+  { valor: "Europe/Madrid", label: "Madrid" },
+];
+
+function zonasDisponibles(actual: string | null | undefined): { valor: string; label: string }[] {
+  if (actual && !ZONAS.some((z) => z.valor === actual)) {
+    return [...ZONAS, { valor: actual, label: actual }];
+  }
+  return ZONAS;
+}
+
 function parseHashtags(v: string | null | undefined): string[] {
   if (!v) return [];
   return v
@@ -140,7 +162,7 @@ export function TabPerfil({
         {errors.nombre && <p className="text-sm text-destructive">{errors.nombre.message}</p>}
       </div>
       <div className="space-y-2">
-        <Label htmlFor="ig_handle">Handle de Instagram</Label>
+        <Label htmlFor="ig_handle">Usuario de Instagram</Label>
         <Input id="ig_handle" disabled={!puedeEditar} {...register("ig_handle")} />
         {errors.ig_handle && (
           <p className="text-sm text-destructive">{errors.ig_handle.message}</p>
@@ -153,7 +175,19 @@ export function TabPerfil({
         </div>
         <div className="space-y-2">
           <Label htmlFor="timezone">Zona horaria</Label>
-          <Input id="timezone" placeholder="America/Mexico_City" disabled={!puedeEditar} {...register("timezone")} />
+          <select
+            id="timezone"
+            disabled={!puedeEditar}
+            className="border-input bg-transparent dark:bg-input/30 h-9 w-full rounded-md border px-3 text-sm shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+            {...register("timezone")}
+          >
+            <option value="">Sin definir</option>
+            {zonasDisponibles(marca.timezone).map((z) => (
+              <option key={z.valor} value={z.valor}>
+                {z.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="space-y-2">

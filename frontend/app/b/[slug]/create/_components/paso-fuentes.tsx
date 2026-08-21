@@ -15,7 +15,7 @@ export function PasoFuentes({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Fuentes de imagen configuradas para la marca, en el orden en que se intentan.
+        De aquí saca la IA las imágenes del carrusel, en este orden de preferencia.
       </p>
       <div className="space-y-2">
         {disponibles.map((f, i) => {
@@ -41,7 +41,7 @@ export function PasoFuentes({
         })}
         {disponibles.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            La marca no tiene fuentes de imagen configuradas; se usará el default del motor.
+            La marca no tiene fuentes de imagen configuradas; se usarán las fuentes estándar.
           </p>
         )}
       </div>

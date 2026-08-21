@@ -39,6 +39,9 @@ export default function CalendarPage() {
   const [vista, setVista] = useState<Vista>("semana");
   const [ancla, setAncla] = useState(() => new Date());
   const [openQid, setOpenQid] = useState<number | null>(null);
+  // El plan real (pendiente/programado/publicado) es lo importante; lo
+  // rechazado/descartado es historial y apagado por default ahoga el calendario.
+  const [mostrarRechazados, setMostrarRechazados] = useState(false);
 
   const dias = useMemo(
     () => (vista === "semana" ? diasSemana(ancla) : diasMes(ancla)),
@@ -63,6 +66,9 @@ export default function CalendarPage() {
   const itemsByDay = useMemo(() => {
     const map = new Map<string, QueueItem[]>();
     for (const item of queueQuery.data ?? []) {
+      if (!mostrarRechazados && (item.estado === "rechazado" || item.estado === "descartado")) {
+        continue;
+      }
       const key = claveDiaIso(item.scheduled_datetime);
       if (!key) continue;
       const arr = map.get(key) ?? [];
@@ -73,7 +79,7 @@ export default function CalendarPage() {
       arr.sort((a, b) => (a.scheduled_datetime ?? "").localeCompare(b.scheduled_datetime ?? ""));
     }
     return map;
-  }, [queueQuery.data]);
+  }, [queueQuery.data, mostrarRechazados]);
 
   const slotsByDay = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -151,12 +157,15 @@ export default function CalendarPage() {
         onAnterior={irAnterior}
         onSiguiente={irSiguiente}
         onHoy={irHoy}
+        mostrarRechazados={mostrarRechazados}
+        onMostrarRechazadosChange={setMostrarRechazados}
       />
 
       {sinProgramar.length > 0 && (
         <div className="rounded-lg border border-dashed p-3">
           <p className="mb-2 text-sm font-medium text-muted-foreground">
-            Pendientes sin horario — arrástralos a un espacio libre del calendario
+            Pendientes sin horario: arrástralos a un horario libre, o ábrelos para
+            aprobarlos y se programan solos.
           </p>
           <div className="flex flex-wrap gap-2">
             {sinProgramar.map((item) => (
