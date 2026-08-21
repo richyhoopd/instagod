@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -143,6 +144,38 @@ def test_newsapi_fetch_sin_key_sella_ultimo_run_y_no_re_encola_de_inmediato(cx, 
 
     creados = worker.encolar_fuentes_vencidas(cx)
     assert creados == 0
+
+
+def test_newsapi_fetch_finally_no_enmascara_excepcion_si_falla_el_sellado(cx, monkeypatch) -> None:
+    """Re-review: si `db.update` del `finally` revienta (ej. borraron la
+    fuente a mitad del job), NO debe reemplazar/enmascarar la excepción
+    original que se estaba propagando (aquí, el ValueError de la key
+    faltante) — el `finally` la traga y solo avisa."""
+    sid = fuentes.crear(cx, 1, "info", "newsapi", {"query": "cafeterías"})
+    monkeypatch.setattr(handlers.config, "account_creds", lambda slug: {"NEWSAPI_KEY": None})
+
+    def _update_revienta(cx_, tabla, sid_, **campos):
+        raise sqlite3.OperationalError("no such row")
+
+    monkeypatch.setattr(handlers.db, "update", _update_revienta)
+    job = _job(cx, "sourcing.newsapi_fetch", 1, {"source_id": sid})
+
+    with pytest.raises(ValueError, match="Falta NEWSAPI_KEY"):
+        handlers.sourcing_newsapi_fetch(cx, job)
+
+
+def test_rss_fetch_finally_no_revienta_si_falla_el_sellado(cx, monkeypatch) -> None:
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    monkeypatch.setattr(handlers.topics, "fetch_rss", lambda url, **kw: [])
+
+    def _update_revienta(cx_, tabla, sid_, **campos):
+        raise sqlite3.OperationalError("no such row")
+
+    monkeypatch.setattr(handlers.db, "update", _update_revienta)
+    job = _job(cx, "sourcing.rss_fetch", 1, {"source_id": sid})
+
+    resultado = handlers.sourcing_rss_fetch(cx, job)  # no debe lanzar
+    assert resultado == {"nuevos": 0}
 
 
 # ---------- sourcing.ig_scrape ----------
@@ -425,3 +458,24 @@ def test_encolar_fuentes_vencidas_cada_horas_invalido_no_tumba_el_loop(cx) -> No
 
     creados = worker.encolar_fuentes_vencidas(cx)  # no debe lanzar
     assert creados == 1  # nunca corrió -> vencida con el default de 24h
+
+
+def test_encolar_fuentes_vencidas_cada_horas_legacy_cero_no_queda_siempre_vencida(cx) -> None:
+    """Re-review: una fila legacy con cada_horas=0/negativo (de antes de que
+    validar_config exigiera >= 6) haría que timedelta(hours=cada_horas) fuera
+    ~0 — cualquier ultimo_run, por reciente que sea, ya contaría como
+    vencido en el siguiente tick (tormenta de jobs). `max(6, ...)` pone un
+    piso de 6h aunque el dato guardado sea 0 o negativo."""
+    sid = fuentes.crear(cx, 1, "info", "rss", {"urls": ["https://a.com/f.xml"]})
+    db.update(cx, "brand_sources", sid,
+             config_json=json.dumps({"urls": ["https://a.com/f.xml"], "cada_horas": 0}))
+    reciente = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    db.update(cx, "brand_sources", sid, ultimo_run=reciente)
+
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 0  # 1h < piso de 6h -> no vencida todavía
+
+    viejo = (datetime.now(timezone.utc) - timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+    db.update(cx, "brand_sources", sid, ultimo_run=viejo)
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 1  # 7h > piso de 6h -> ahora sí vencida

@@ -43,6 +43,17 @@ def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _sellar_ultimo_run(cx: sqlite3.Connection, source_id: int, error: str | None) -> None:
+    """Sella `ultimo_run`/`ultimo_error` de una fuente. Se llama SIEMPRE desde
+    un `finally` (H3) — si ese `db.update` revienta (ej. borraron la fuente a
+    mitad del job), la excepción original que se estaba propagando NO debe
+    quedar enmascarada por esta falla secundaria de sellado."""
+    try:
+        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
+    except Exception as exc:  # noqa: BLE001 — no enmascarar la excepción original
+        print(f"[jobs] no se pudo sellar ultimo_run de la fuente {source_id}: {exc}")
+
+
 def _fuente_de(cx: sqlite3.Connection, account_id: int, source_id: int, kind: str) -> dict[str, Any]:
     """Fuente de `account_id` con `source_id` y `kind` esperados. ValueError si no
     existe o es de otra cuenta (aislamiento: `fuentes.listar` ya filtra por cuenta,
@@ -124,7 +135,7 @@ def sourcing_rss_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
                 error = str(exc)
         return {"nuevos": nuevos}
     finally:
-        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
+        _sellar_ultimo_run(cx, source_id, error)
 
 
 def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
@@ -155,7 +166,7 @@ def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[
         error = str(exc)
         raise
     finally:
-        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
+        _sellar_ultimo_run(cx, source_id, error)
 
 
 _SHORTCODE_RE = re.compile(r"[^A-Za-z0-9_-]")

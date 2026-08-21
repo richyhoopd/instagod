@@ -19,7 +19,7 @@ router = APIRouter(prefix="/brands/{slug}", tags=["fuentes"])
 _EXT_FOTO = {"jpg", "jpeg", "png", "webp"}
 _MAX_FOTO = 8 * 1024 * 1024
 _MAX_FOTOS_POR_REQUEST = 10
-_NOMBRE_FOTO_RE = re.compile(r"^[a-z0-9_.-]+$")
+_NOMBRE_FOTO_RE = re.compile(r"^[a-z0-9_.-]+\Z")
 _CHUNK = 64 * 1024
 
 

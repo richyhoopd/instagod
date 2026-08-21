@@ -80,6 +80,20 @@ def test_url_segura_acepta_hostname_no_ip_sin_resolver_dns() -> None:
     assert topics.url_segura("https://noticias.ejemplo.com/rss") is True
 
 
+def test_url_segura_rechaza_formas_alternativas_de_loopback() -> None:
+    """Re-review: `ipaddress.ip_address` solo entiende la notación decimal
+    con puntos — rechazaba "2130706433" (decimal), "0x7f000001" (hex),
+    "127.1" (short) y "0x0"/"0" como ValueError, y como no eran IPs
+    `url_segura` las trataba como hostname normal y las dejaba pasar. Todas
+    resuelven a loopback/unspecified vía `socket.inet_aton` (y por lo tanto
+    en el resolver real de cualquier cliente HTTP)."""
+    assert topics.url_segura("http://2130706433/") is False  # 127.0.0.1 decimal
+    assert topics.url_segura("http://0x7f000001/") is False  # 127.0.0.1 hex
+    assert topics.url_segura("http://127.1/") is False  # 127.0.0.1 short
+    assert topics.url_segura("http://0/") is False  # 0.0.0.0
+    assert topics.url_segura("http://0x0/") is False  # 0.0.0.0 hex
+
+
 def test_fetch_rss_bloquea_url_insegura_sin_llamar_a_get() -> None:
     llamado = []
 
@@ -89,6 +103,25 @@ def test_fetch_rss_bloquea_url_insegura_sin_llamar_a_get() -> None:
 
     assert topics.fetch_rss("http://127.0.0.1/feed.xml", _get=_get) == []
     assert llamado == []
+
+
+def test_fetch_rss_no_sigue_redirects() -> None:
+    """Re-review: una URL pública que pasa `url_segura` podría 302 a un host
+    interno (metadata cloud, etc.) — `fetch_rss` no debe perseguir el
+    Location, ni hacer una segunda request."""
+    llamadas = []
+
+    class _RedirResp:
+        status_code = 302
+        headers = {"Location": "http://169.254.169.254/x"}
+
+    def _get(url, **kw):
+        llamadas.append(url)
+        assert kw.get("allow_redirects") is False
+        return _RedirResp()
+
+    assert topics.fetch_rss("https://ejemplo.com/feed.xml", _get=_get) == []
+    assert llamadas == ["https://ejemplo.com/feed.xml"]  # nunca siguió al Location
 
 
 def test_fetch_rss_parsea_rss2() -> None:

@@ -93,9 +93,11 @@ def encolar_fuentes_vencidas(cx) -> int:
             cfg = {}
         # Defensivo (H2): una fila vieja o tocada a mano puede traer un
         # `cada_horas` no numérico ("abc") — nunca debe tumbar el loop del
-        # worker, cae al default.
+        # worker, cae al default. `max(6, ...)` además evita que una fila
+        # legacy con 0/negativo (de antes de que validar_config exigiera
+        # >= 6) quede SIEMPRE vencida y se re-encole en cada tick.
         try:
-            cada_horas = int(cfg["cada_horas"]) if cfg.get("cada_horas") is not None \
+            cada_horas = max(6, int(cfg["cada_horas"])) if cfg.get("cada_horas") is not None \
                 else _CADA_HORAS_DEFAULT
         except (TypeError, ValueError):
             cada_horas = _CADA_HORAS_DEFAULT

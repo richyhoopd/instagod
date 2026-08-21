@@ -15,7 +15,7 @@ from src import db, jobs, marcas, slideshow_script
 
 router = APIRouter(prefix="/brands/{slug}", tags=["perfil"])
 
-_NOMBRE_RE = re.compile(r"^[a-z0-9_]{2,32}$")
+_NOMBRE_RE = re.compile(r"^[a-z0-9_]{2,32}\Z")
 _EXT_LOGO = {"png", "svg", "jpg", "jpeg"}
 _MAX_LOGO = 2 * 1024 * 1024
 _MAX_PRESET_BYTES = 32 * 1024
@@ -92,11 +92,16 @@ def _contexto(m: marcas.Marca, formato: str) -> str:
 
 
 def _prueba_fallida(e: Exception, slug: str) -> ApiError:
-    """Redacta CUALQUIER credencial no vacía de la cuenta (antes redactaba a
-    mano solo 3 secretos puntuales; H8 amplía a todo `account_creds`, que es
-    la fuente de verdad de qué secretos existen para esta marca)."""
+    """Redacta la UNIÓN de credenciales de cuenta + las keys GLOBALES del LLM
+    (DEEPSEEK_API_KEY/ANTHROPIC_API_KEY). Redactar solo `account_creds` (H8)
+    dejaba escapar la key global: `slideshow_script.generar_guion` puede
+    usar cualquiera de las dos según cómo esté configurado el proveedor del
+    LLM para esta instancia, no solo la de la marca (regresión detectada en
+    re-review)."""
     detalle = str(e)
-    for secreto in config.account_creds(slug).values():
+    secretos = [*config.account_creds(slug).values(),
+                config.DEEPSEEK_API_KEY, config.ANTHROPIC_API_KEY]
+    for secreto in secretos:
         if secreto:
             detalle = detalle.replace(secreto, "***")
     return ApiError(502, "prueba_fallida",

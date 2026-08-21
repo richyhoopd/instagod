@@ -294,6 +294,14 @@ def test_fotos_editor_no_puede_mutar(api_cliente, tmp_path, monkeypatch) -> None
     assert r.status_code == 200
 
 
+def test_nombre_foto_re_rechaza_salto_de_linea_final() -> None:
+    # Re-review: con "$" un nombre con "\n" final colaba igual (Python
+    # permite un \n antes del fin de cadena con "$"); "\Z" lo cierra.
+    from api.routers.fuentes_api import _NOMBRE_FOTO_RE
+    assert _NOMBRE_FOTO_RE.match("foto.png\n") is None
+    assert _NOMBRE_FOTO_RE.match("foto.png") is not None
+
+
 def test_fotos_traversal_y_aislamiento_por_marca(api_cliente, monkeypatch, tmp_path) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)

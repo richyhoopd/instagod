@@ -115,6 +115,30 @@ def test_probar_prompt_error_llm_devuelve_502_redactado(api_cliente, monkeypatch
     assert "clave-secreta-123" not in body["detalle"]
 
 
+def test_probar_prompt_error_redacta_key_global_del_llm(api_cliente, monkeypatch) -> None:
+    """Re-review: `generar_guion` puede usar la key GLOBAL del proveedor
+    (DEEPSEEK_API_KEY/ANTHROPIC_API_KEY), no solo `account_creds` de la
+    marca — redactar solo `account_creds` (H8) dejaba escapar la global."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+
+    def _revienta(tema, *, formato="listicle", n_slides=6, contexto=None,
+                  rechazados=None, feedback=None):
+        raise RuntimeError("clave-global-999 inválida en el proveedor")
+
+    from api.routers import perfil
+    monkeypatch.setattr(perfil.slideshow_script, "generar_guion", _revienta)
+    monkeypatch.setattr(perfil.config, "account_creds", lambda slug: {})
+    monkeypatch.setattr(perfil.config, "DEEPSEEK_API_KEY", "clave-global-999")
+
+    r = cli.post("/brands/pensionmas/prompts/probar", json={"tema": "gatos"})
+    assert r.status_code == 502
+    body = r.json()
+    assert body["error"] == "prueba_fallida"
+    assert "clave-global-999" not in body["detalle"]
+
+
 # ---------- presets ----------
 
 def test_presets_listar_marca_propios(api_cliente) -> None:
@@ -181,6 +205,10 @@ def test_nombre_re_rechaza_traversal_y_caracteres_invalidos() -> None:
     assert _NOMBRE_RE.match("..") is None
     assert _NOMBRE_RE.match("a b") is None
     assert _NOMBRE_RE.match("tiktok_bold") is not None
+    # Re-review: con "$" (en vez de "\Z"), un nombre con salto de línea al
+    # final ("tiktok_bold\n") pasaba el regex igual — "$" en Python permite
+    # un \n final antes del fin de cadena.
+    assert _NOMBRE_RE.match("tiktok_bold\n") is None
 
 
 def test_preset_nombre_invalido_en_segmento_unico_da_error_json(api_cliente) -> None:

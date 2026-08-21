@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import ipaddress
 import re
+import socket
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
@@ -23,17 +24,36 @@ _NEWSAPI_URL = "https://newsapi.org/v2/everything"
 _NEWSAPI_TOP = 20
 # Hostnames literales que apuntan a la propia máquina/red aunque no sean IPs
 # (localhost no es una IP, así que `ipaddress` no lo detecta por sí solo).
-_HOSTS_PELIGROSOS = {"localhost", "localhost.localdomain", "0.0.0.0"}
+_HOSTS_PELIGROSOS = {"localhost", "localhost.localdomain", "0.0.0.0", "0"}
+
+
+def _ip_de_host(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """IP de `host` si es un literal IP — en CUALQUIER forma que libc entienda.
+
+    `ipaddress.ip_address` solo acepta la notación decimal-con-puntos
+    estándar; rechaza formas como "2130706433" (decimal), "0x7f000001"
+    (hex) o "127.1" (short) que SÍ resuelven a 127.0.0.1 vía `socket.
+    inet_aton` (y por lo tanto en el resolver real de cualquier cliente
+    HTTP) — sin este fallback esas formas se colaban como "hostname" y
+    `url_segura` las dejaba pasar (bypass real de SSRF)."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    try:
+        return ipaddress.ip_address(socket.inet_ntoa(socket.inet_aton(host)))
+    except (OSError, ValueError):
+        return None
 
 
 def url_segura(url: str) -> bool:
     """True si `url` es http(s) y no apunta a un host loopback/link-local/privado
     (defensa contra SSRF en fuentes RSS, H4).
 
-    Si el host es un literal IP (`http://127.0.0.1/...`) se valida directo con
-    `ipaddress`. Si es un hostname normal, esta función NO resuelve DNS (eso
-    metería una llamada de red al *path* de validación) — solo bloquea los
-    literales peligrosos conocidos (`localhost` y variantes).
+    Si el host es un literal IP —en cualquier notación (decimal/hex/short)—
+    se valida directo. Si es un hostname normal, esta función NO resuelve
+    DNS (eso metería una llamada de red al *path* de validación) — solo
+    bloquea los literales peligrosos conocidos (`localhost` y variantes).
     """
     try:
         p = urlparse(url)
@@ -46,10 +66,9 @@ def url_segura(url: str) -> bool:
         return False
     if host in _HOSTS_PELIGROSOS or host.endswith(".localhost"):
         return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return True  # hostname no-IP: no se resuelve DNS en este path
+    ip = _ip_de_host(host)
+    if ip is None:
+        return True  # hostname no-IP real: no se resuelve DNS en este path
     return not (ip.is_loopback or ip.is_link_local or ip.is_private
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
@@ -126,14 +145,21 @@ def fetch_rss(url: str, *, _get=None) -> list[dict[str, Any]]:
     stdout y devuelve `[]`: una fuente rota nunca debe tronar el job completo.
     Cinturón anti-SSRF (H4): `validar_config` ya rechaza URLs inseguras al
     crear/editar la fuente, pero por si una fila vieja se cuela, se revalida
-    aquí antes de golpear la red.
+    aquí antes de golpear la red. Además NUNCA sigue redirects: una URL
+    pública que valida bien podría 302 a un host interno (169.254.169.254 y
+    similares) y colarse igual — si el servidor redirige, se trata como
+    fuente rota y se devuelve `[]` sin perseguir el `Location`.
     """
     if not url_segura(url):
         print(f"[topics] fetch_rss bloqueado (URL insegura): {url}")
         return []
     get = _get or requests.get
     try:
-        resp = get(url, timeout=15)
+        resp = get(url, timeout=15, allow_redirects=False)
+        status = getattr(resp, "status_code", None)
+        if status is not None and 300 <= status < 400:
+            print(f"[topics] fetch_rss bloqueado (redirect {status}, no se sigue): {url}")
+            return []
         if hasattr(resp, "raise_for_status"):
             resp.raise_for_status()
         crudo = resp.text if hasattr(resp, "text") else resp

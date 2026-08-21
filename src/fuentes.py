@@ -21,7 +21,7 @@ _CATALOGO = {"imagen": PROVIDERS_IMAGEN, "info": PROVIDERS_INFO}
 # @handle de Instagram: solo letras/dígitos/punto/guion bajo (charset real de IG),
 # 1-30 chars tras la @ — un `startswith("@")` a secas dejaba pasar cosas como
 # "@../../evil" que luego se usan para construir un path de archivo (H1).
-_CUENTA_IG_RE = re.compile(r"^@[A-Za-z0-9._]{1,30}$")
+_CUENTA_IG_RE = re.compile(r"^@[A-Za-z0-9._]{1,30}\Z")
 
 
 def _es_entero(v) -> bool:

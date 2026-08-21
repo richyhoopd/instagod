@@ -66,6 +66,9 @@ def test_crear_ig_accounts_rechaza_cuentas_con_traversal(cx) -> None:
         fuentes.crear(cx, 2, "imagen", "ig_accounts", {"cuentas": ["@x/../../y"]})
     with pytest.raises(ValueError, match="config"):
         fuentes.crear(cx, 2, "imagen", "ig_accounts", {"cuentas": ["@" + "x" * 31]})  # >30 chars
+    with pytest.raises(ValueError, match="config"):
+        # Re-review: con "$" un handle con "\n" final colaba igual.
+        fuentes.crear(cx, 2, "imagen", "ig_accounts", {"cuentas": ["@banda1\n"]})
 
 
 def test_crear_rss_valida_config(cx) -> None:
@@ -94,6 +97,15 @@ def test_crear_rss_rechaza_urls_ssrf(cx) -> None:
     """H4: SSRF — loopback, link-local (metadata cloud) y localhost rechazados
     al crear la fuente, antes de que el worker les pegue una sola vez."""
     for url in ("http://169.254.169.254/x", "http://localhost/x", "http://127.0.0.1"):
+        with pytest.raises(ValueError, match="config"):
+            fuentes.crear(cx, 2, "info", "rss", {"urls": [url]})
+
+
+def test_crear_rss_rechaza_formas_alternativas_de_ip_loopback(cx) -> None:
+    """Re-review: bypass de SSRF con IPv4 decimal/hex/short — se rechazan
+    igual al crear la fuente, no solo en `topics.url_segura` aislado."""
+    for url in ("http://2130706433/", "http://0x7f000001/", "http://127.1/",
+                "http://0/", "http://0x0/"):
         with pytest.raises(ValueError, match="config"):
             fuentes.crear(cx, 2, "info", "rss", {"urls": [url]})
 
