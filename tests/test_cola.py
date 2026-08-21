@@ -250,6 +250,15 @@ def test_reprogramar_permite_estado_pendiente(tmp_path):
     assert db.get(cx, "content_queue", qid)["scheduled_datetime"] == "2026-06-11T19:00:00"
 
 
+def test_reprogramar_iso_invalido_lanza_formato(tmp_path):
+    """G4: valida el ISO ANTES de tocar la DB — "mañana" no es una fecha."""
+    cx = _cx(tmp_path)
+    qid = _fila(cx, aprobacion="pendiente", status="listo")
+
+    with pytest.raises(ValueError, match="formato"):
+        cola.reprogramar(cx, qid, "mañana")
+
+
 def test_reprogramar_revive_fila_atorada_reseteando_intentos_y_error(tmp_path):
     """Fix round 1 (revisión Task 6): una fila que el publisher marcó con
     error (marcador "[publicando]" de un crash, o ya topada en MAX_INTENTOS)

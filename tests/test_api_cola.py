@@ -75,6 +75,22 @@ def test_patch_edita_caption_y_reprograma_choque_409(api_cliente) -> None:
     assert r.status_code == 422
 
 
+def test_patch_scheduled_datetime_invalido_422_campo(api_cliente) -> None:
+    """G4: un ISO inválido ("mañana") es 422 validacion/scheduled_datetime,
+    no un 500 ni un 422 genérico de "estado"."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    qid = _item(cx, pid)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    r = cli.patch(f"/brands/pensionmas/queue/{qid}", json={"scheduled_datetime": "mañana"})
+
+    assert r.status_code == 422
+    assert r.json()["error"] == "validacion"
+    assert r.json()["campo"] == "scheduled_datetime"
+    assert "ISO" in r.json()["detalle"]
+
+
 def test_aprobar_no_pendiente_422_y_aprobar_ok(api_cliente, monkeypatch) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)

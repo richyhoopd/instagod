@@ -64,6 +64,9 @@ def editar(slug: str, qid: int, datos: EditarItem, user: dict = Depends(usuario_
         except ValueError as e:
             if str(e) == "choque":
                 raise conflicto("Ese horario ya está ocupado", "scheduled_datetime") from None
+            if str(e) == "formato":
+                raise ApiError(422, "validacion", "scheduled_datetime no es una fecha ISO válida",
+                              "scheduled_datetime") from None
             raise ApiError(422, "validacion", "No se puede reprogramar en este estado",
                           "scheduled_datetime") from None
     return cola.detalle(cx, qid)

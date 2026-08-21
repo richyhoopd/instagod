@@ -8,6 +8,7 @@ sobre filas crudas de `content_queue` vía `src.db`.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from src import db
@@ -112,7 +113,15 @@ def reprogramar(cx, queue_id: int, nueva_iso: str) -> None:
     ValueError("choque") si otra fila programada/en_sheet/publicada de la
     MISMA cuenta ya ocupa ese minuto (comparación normalizada a
     "YYYY-MM-DDTHH:MM", excluyendo la propia fila).
+
+    ValueError("formato") si `nueva_iso` no es una fecha ISO válida (p. ej.
+    texto libre desde un input mal validado en el front).
     """
+    try:
+        datetime.fromisoformat(nueva_iso)
+    except ValueError:
+        raise ValueError("formato") from None
+
     fila = db.get(cx, "content_queue", queue_id)
     if fila is None or estado_de(fila) not in _EDITABLES:
         raise ValueError("estado")
