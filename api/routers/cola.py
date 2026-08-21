@@ -1,7 +1,7 @@
 """Cola de contenido del portal: listar, editar, aprobar/rechazar, regenerar, slots."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api.deps import get_cx, marca_para, usuario_actual
@@ -124,7 +124,8 @@ def eliminar(slug: str, qid: int, user: dict = Depends(usuario_actual), cx=Depen
 
 
 @router.get("/slots/proximos")
-def slots_proximos(slug: str, n: int = 5, user: dict = Depends(usuario_actual),
+def slots_proximos(slug: str, n: int = Query(5, ge=1, le=50),
+                   user: dict = Depends(usuario_actual),
                    cx=Depends(get_cx)) -> list[str]:
     fila, _ = marca_para(slug, cx, user)
     marca = marcas.cargar_por_id(cx, fila["id"])

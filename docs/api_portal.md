@@ -40,29 +40,32 @@ Precedencia de credenciales por marca: DB (`brand_secrets`) → `.env` con sufij
 
 ### Endpoints de cola y jobs
 
-- `GET /brands/{slug}/queue` — lista de filas pendientes de la marca (estados: generando, pendiente, programado, publicado, rechazado, error, descartado).
+- `GET /brands/{slug}/queue` — lista de filas de la marca (estados de fila, ver abajo).
 - `GET /brands/{slug}/queue/{qid}` — detalle de una fila (caption, medios, estado, timestamps).
-- `PATCH /brands/{slug}/queue/{qid}` — editar caption de una fila (solo en estado pendiente).
+- `PATCH /brands/{slug}/queue/{qid}` — editar `caption` y/o `scheduled_datetime` (reprograma) de una fila. `scheduled_datetime` acepta estado pendiente/programado/error (error es la vía para revivir una fila atorada por el publisher); `caption` solo pendiente/programado.
 - `DELETE /brands/{slug}/queue/{qid}` — descartar una fila.
 - `POST /brands/{slug}/queue/{qid}/aprobar` — aprobar y pasar a estado programado.
 - `POST /brands/{slug}/queue/{qid}/rechazar` — rechazar (terminal).
 - `POST /brands/{slug}/queue/{qid}/regenerar` — descartar fila vieja y crear una nueva (retorna nuevo `job_id` para seguimiento).
-- `GET /brands/{slug}/slots/proximos?n=5` — próximos `n` slots libres de la marca (UTC).
+- `GET /brands/{slug}/slots/proximos?n=5` — próximos `n` slots libres de la marca, en la TZ de la marca (no UTC). `n` entre 1 y 50.
 - `POST /brands/{slug}/slideshows` — crear slideshow; retorna `202 {job_id}` (use polling en `/jobs/{jid}`).
-- `GET /brands/{slug}/jobs[?estado=generando|error]` — lista de jobs; filtro opcional por estado derivado.
+- `GET /brands/{slug}/jobs[?estado=cola|corriendo|ok|error|cancelado]` — lista de jobs; filtro opcional por estado.
 - `GET /brands/{slug}/jobs/{jid}` — detalle de un job (progreso, errores, queue_id asociado).
-- `POST /brands/{slug}/jobs/{jid}/cancel` — cancelar un job en progreso.
+- `POST /brands/{slug}/jobs/{jid}/cancel` — cancela el job solo si sigue en estado `cola` (uno ya `corriendo` no se puede cancelar a medias).
 
 ### Estados de la cola
 
-La columna `cola.estado` puede ser:
-- `generando` — el worker está procesando.
+Los estados de **FILA** (`content_queue`, columna derivada `estado` que ve el portal, `src/cola.py::estado_de`) son:
+- `generando` — el worker está procesando (EXCLUSIVO del flujo API: `origen='api'`).
+- `borrador` — fila legacy (plan mensual u otro generador viejo, `origen != 'api'`) todavía sin aprobación. Visible en el portal pero **no** aprobable desde ahí (la compuerta de aprobar/rechazar exige `pendiente`).
 - `pendiente` — espera aprobación humana (botones en Telegram y portal).
 - `programado` — aprobado, esperando slot.
 - `publicado` — ya se publicó.
 - `rechazado` — rechazado por humano (terminal).
 - `error` — fallo durante worker o publisher; visible en portal para reprogramar.
 - `descartado` — descartado por humano o regeneración.
+
+Los estados de **JOB** (`jobs`, columna cruda `estado`) son otro vocabulario, no lo de arriba: `cola` (esperando worker), `corriendo`, `ok`, `error`, `cancelado`.
 
 ### Procesos worker y publisher
 
@@ -90,6 +93,9 @@ Variables de entorno:
 - **Marca CON `SHEET_ID` definido**: publica automáticamente por Google Sheets / GitHub Actions. El publisher DB la salta.
 - **Marca SIN `SHEET_ID`**: publica el publisher DB desde la cola en la base de datos.
 - **Garantía**: un único publicador por marca activo a la vez.
+- **Marcas con Sheet**: la fila queda en estado `programado` hasta que corre `sync_sheet` (que la refleja como `en_sheet`) — Actions publica igual aunque el portal todavía la muestre `programado`, no es un bug.
+- **Cuidado al activar `SHEET_ID` en una marca que ya tiene filas en `programado`** (publisher DB): esas filas quedan huérfanas — ningún lado las toma (el publisher DB las salta porque la marca ya tiene Sheet; nunca se escribieron al Sheet). Re-apruébalas (para que tomen el camino `en_sheet`) o quita el `SHEET_ID` de nuevo.
+- En una marca **sin Sheet**, un `anuncio` aprobado no sale instantáneo: lo toma el publisher DB en su siguiente ciclo (hasta `PUBLISH_EVERY` segundos después), no al momento de aprobar.
 
 ### Regenerar vs descartar
 

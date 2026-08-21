@@ -74,6 +74,8 @@ def _error_seguro(exc: Exception, creds: dict | None) -> str:
     for secreto in secretos:
         if secreto:
             msg = msg.replace(str(secreto), "***")
+    # Truncado a 200: mismo tope que approval._error_seguro y que la columna
+    # `error` espera guardar (evita filas gigantes por un traceback largo).
     return msg[:200]
 
 

@@ -54,6 +54,27 @@ def test_aprobar_sin_sheet_id_usa_slot_db_y_queda_programado(tmp_path, monkeypat
     assert llamado["account_id"] == 1
 
 
+def test_aprobar_sin_sheet_resetea_error_e_intentos_de_reaprobacion(tmp_path, monkeypatch) -> None:
+    """G7: una fila re-aprobada no debe seguir viéndose como error (residuo
+    de un intento de publicación fallido previo, p. ej. tras un rechazo y
+    una nueva aprobación manual sobre la misma fila)."""
+    monkeypatch.delenv("SHEET_ID", raising=False)
+    monkeypatch.delenv("SHEET_ID__GDLSCENE", raising=False)
+    cx = _cx(tmp_path)
+    qid = approval.encolar_pendiente(cx, tipo="meme", caption="c", imagen_url="u")
+    db.update(cx, "content_queue", qid, error="viejo error de publicación", intentos=3)
+
+    hueco = datetime(2026, 6, 11, 19, 0)
+    monkeypatch.setattr(scheduler, "next_free_slot_db",
+                        lambda cx_, account_id, *, now=None, slots=None: hueco)
+
+    approval.aprobar(cx, qid, ahora=datetime(2026, 6, 10, 10, 0), user_id=7)
+
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["error"] is None
+    assert fila["intentos"] == 0
+
+
 def test_aprobar_con_sheet_id_conserva_en_sheet(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SHEET_ID", "SHEET-TEST")
     cx = _cx(tmp_path)

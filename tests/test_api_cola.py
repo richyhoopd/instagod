@@ -222,3 +222,13 @@ def test_slots_proximos_devuelve_n_isos(api_cliente) -> None:
     assert len(slots) == 3
     for s in slots:
         datetime.fromisoformat(s)
+
+
+def test_slots_proximos_n_fuera_de_rango_422(api_cliente) -> None:
+    """G7: n=0 (y n>50) es 422 — sin límite, un n gigante golpea al scheduler
+    con una consulta cara."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+    assert cli.get("/brands/pensionmas/slots/proximos?n=0").status_code == 422
+    assert cli.get("/brands/pensionmas/slots/proximos?n=51").status_code == 422

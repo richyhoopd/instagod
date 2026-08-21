@@ -193,7 +193,9 @@ _MIGRATIONS = {
         "creado_por": "INTEGER",
         "aprobado_por": "INTEGER",
         "ig_media_id": "TEXT",
-        # 'legacy' (Sheet/Actions) | 'portal' (creado desde el portal DB-driven).
+        # Valores: 'api' (creado desde el portal, jobs/handlers.py vía
+        # generate_slideshow con creado_por) | 'legacy' (default: plan
+        # mensual/generadores viejos) | 'telegram' (flujo interactivo bot.py).
         "origen": "TEXT NOT NULL DEFAULT 'legacy'",
         "tg_chat_id": "TEXT",
         "tg_message_id": "TEXT",

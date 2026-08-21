@@ -89,17 +89,23 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
         except Exception as exc:
             # El espejo al Sheet falló, pero la aprobación NO se revierte:
             # cae a 'programado' (la toma el publisher DB) con el error
-            # a la vista, accionable, sin bloquear al aprobador.
+            # a la vista, accionable, sin bloquear al aprobador. `intentos`
+            # sí se resetea (ciclo de aprobación nuevo, no de publicación).
             db.update(cx, "content_queue", queue_id, aprobacion="aprobado",
                       status="programado", scheduled_datetime=slot.isoformat(),
-                      aprobado_por=user_id, error=("espejo sheet: " + str(exc))[:200])
+                      aprobado_por=user_id, error=("espejo sheet: " + str(exc))[:200],
+                      intentos=0)
         else:
             db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
                       sheet_row_id=str(sheet_row), scheduled_datetime=slot.isoformat(),
-                      aprobado_por=user_id)
+                      aprobado_por=user_id, error=None, intentos=0)
     else:
+        # Reset error/intentos: una fila re-aprobada (p. ej. tras revivirla
+        # con reprogramar, o una re-aprobación manual) no debe seguir
+        # viéndose como error de un intento de publicación viejo.
         db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="programado",
-                  scheduled_datetime=slot.isoformat(), aprobado_por=user_id)
+                  scheduled_datetime=slot.isoformat(), aprobado_por=user_id,
+                  error=None, intentos=0)
     # La foto del meme queda usada (mismo contrato que el plan mensual): no se
     # vuelve a sugerir aunque el clasificador la siga viendo usable.
     if fila.get("photo_id"):
