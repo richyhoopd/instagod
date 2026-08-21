@@ -50,6 +50,9 @@ class EditarMarca(BaseModel):
     timezone: str | None = None
     color_marca: str | None = None
     activa: bool | None = None
+    descripcion: str | None = Field(default=None, max_length=600)
+    sitio_web: str | None = Field(default=None, max_length=200)
+    hashtags_default: str | None = Field(default=None, max_length=400)
 
     @field_validator("color_marca")
     @classmethod
