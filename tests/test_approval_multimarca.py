@@ -67,16 +67,29 @@ def test_aprobar_gdlscene_sigue_igual(tmp_path, monkeypatch) -> None:
     assert slots is None            # malla global (POSTS_PER_DAY aplica)
 
 
-def test_aprobar_sin_sheet_de_marca_revienta_accionable(tmp_path, monkeypatch) -> None:
+def test_aprobar_sin_sheet_de_marca_usa_slot_db_y_queda_programado(tmp_path, monkeypatch) -> None:
+    """Spec Fase 2 (Task 3): sin SHEET_ID de la marca YA NO truena — usa la
+    malla propia contra content_queue (scheduler.next_free_slot_db) y deja
+    la fila 'programado' para que la tome el publisher DB (sin doble
+    publicación con Actions, que solo mira marcas CON Sheet)."""
+    from src import scheduler
     cx, mid = _cx(tmp_path)
     qid = approval.encolar_pendiente(cx, tipo="slideshow", caption="c",
                                      imagen_url="u", account_id=mid)
     monkeypatch.delenv("SHEET_ID__PENSIONMAS", raising=False)
-    with pytest.raises(RuntimeError, match="SHEET_ID__PENSIONMAS"):
-        approval.aprobar(cx, qid, _escribir_sheet=lambda **kw: 1,
-                         _slot_meme=lambda a, s, sl: _ahora())
-    # la fila NO quedó aprobada
-    assert db.get(cx, "content_queue", qid)["aprobacion"] == "pendiente"
+    llamadas = {}
+
+    def _fake_next_free_slot_db(cx_, account_id, *, now=None, slots=None):
+        llamadas["slot_db"] = (account_id, tuple(slots) if slots else slots)
+        return _ahora()
+
+    monkeypatch.setattr(scheduler, "next_free_slot_db", _fake_next_free_slot_db)
+    approval.aprobar(cx, qid, _escribir_sheet=lambda **kw: 1,
+                     _slot_meme=lambda a, s, sl: _ahora())
+    assert llamadas["slot_db"] == (mid, ("10:00", "18:00"))
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["aprobacion"] == "aprobado" and fila["status"] == "programado"
+    assert fila["sheet_row_id"] is None
 
 
 def test_enviar_a_telegram_usa_bot_de_la_marca(monkeypatch) -> None:

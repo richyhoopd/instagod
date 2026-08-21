@@ -37,11 +37,18 @@ def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
 
 def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             ventana_trafico: str = "meme", audiencia: list[dict[str, Any]] | None = None,
+            user_id: int | None = None,
             _escribir_sheet: Callable[..., int] | None = None,
             _publicar: Callable[[], None] | None = None,
             _slot_meme: Callable[[datetime, str | None, list[str] | None], datetime] | None = None,
             ) -> datetime:
-    """Aprueba: elige slot o publica inmediato (anuncios), escribe Sheet, marca en_sheet."""
+    """Aprueba: elige slot, escribe Sheet si la marca lo usa (legacy) o deja
+    'programado' para que el publisher DB la tome (Fase 2, sin Sheet).
+
+    Regla anti-doble-publicación: marca CON SHEET_ID publica por Sheet/Actions
+    (status='en_sheet'); marca SIN SHEET_ID publica el publisher DB
+    (status='programado'). Ya NO es error que falte SHEET_ID.
+    """
     # OJO timezone: usar la hora de la cuenta (config.TIMEZONE), NO datetime.now()
     # naive. La máquina puede estar en otro huso (+04) y el "inmediato" saldría
     # con fecha futura que get_due_rows (que compara en CST) nunca ve vencida.
@@ -55,8 +62,6 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     marca = marcas_mod.cargar_por_id(cx, fila.get("account_id") or 1)
     creds = _creds_de(marca.slug)
     sheet_id = creds.get("SHEET_ID")
-    if not sheet_id:
-        raise RuntimeError(f"Falta SHEET_ID__{marca.slug.upper()} en el .env")
     # malla propia solo si la marca la define; None = malla global de gdlscene
     slots = marca.posting_slots
     # Anuncios/agendas se publican de inmediato; memes van a la malla editorial
@@ -66,16 +71,35 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     inmediato = fila.get("tipo") == "anuncio"
     if inmediato:
         slot = ahora
-    else:
+    elif sheet_id:
         slot = (_slot_meme or _siguiente_hueco)(ahora, sheet_id, slots)
-    escribir = _escribir_sheet or _sheet_real
-    sheet_row = escribir(caption=fila.get("caption"),
-                         imagen=fila.get("imagen_url"),
-                         scheduled=slot.isoformat(),
-                         sheet_id=sheet_id,
-                         banda=marca.ig_handle or f"@{marca.slug}")
-    db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
-              sheet_row_id=str(sheet_row), scheduled_datetime=slot.isoformat())
+    else:
+        from src import scheduler
+        slot = scheduler.next_free_slot_db(cx, fila.get("account_id") or 1,
+                                           now=ahora, slots=slots)
+
+    if sheet_id:
+        escribir = _escribir_sheet or _sheet_real
+        try:
+            sheet_row = escribir(caption=fila.get("caption"),
+                                 imagen=fila.get("imagen_url"),
+                                 scheduled=slot.isoformat(),
+                                 sheet_id=sheet_id,
+                                 banda=marca.ig_handle or f"@{marca.slug}")
+        except Exception as exc:
+            # El espejo al Sheet falló, pero la aprobación NO se revierte:
+            # cae a 'programado' (la toma el publisher DB) con el error
+            # a la vista, accionable, sin bloquear al aprobador.
+            db.update(cx, "content_queue", queue_id, aprobacion="aprobado",
+                      status="programado", scheduled_datetime=slot.isoformat(),
+                      aprobado_por=user_id, error=f"espejo sheet: {str(exc)[:200]}")
+        else:
+            db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="en_sheet",
+                      sheet_row_id=str(sheet_row), scheduled_datetime=slot.isoformat(),
+                      aprobado_por=user_id)
+    else:
+        db.update(cx, "content_queue", queue_id, aprobacion="aprobado", status="programado",
+                  scheduled_datetime=slot.isoformat(), aprobado_por=user_id)
     # La foto del meme queda usada (mismo contrato que el plan mensual): no se
     # vuelve a sugerir aunque el clasificador la siga viendo usable.
     if fila.get("photo_id"):
@@ -119,8 +143,10 @@ def _publicar_ahora() -> None:
         print(f"[approval] No se pudo lanzar publish.py: {e}", file=_sys.stderr)
 
 
-def rechazar(cx, queue_id: int) -> None:
-    db.update(cx, "content_queue", queue_id, aprobacion="rechazado", status="descartado")
+def rechazar(cx, queue_id: int, *, user_id: int | None = None) -> None:
+    """Rechaza: quien resuelve también queda registrado en `aprobado_por`."""
+    db.update(cx, "content_queue", queue_id, aprobacion="rechazado", status="descartado",
+              aprobado_por=user_id)
 
 
 def _sheet_real(*, caption, imagen, scheduled, sheet_id=None,
@@ -246,7 +272,7 @@ def _urls_de_imagen(imagen_url: str) -> list[str]:
 
 def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
                       *, regenerable: bool = False,
-                      account_slug: str = "gdlscene") -> None:
+                      account_slug: str = "gdlscene", cx=None) -> None:
     """Manda la propuesta a Telegram con botones Aprobar/Rechazar (y 🔄/🎨 si
     es un meme individual regenerable).
 
@@ -256,6 +282,10 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
     - Sin imagen: sendMessage solo texto + botones (fallback).
 
     Usa requests (trae certifi, sin problemas de certs de red).
+
+    Con `cx`: guarda `tg_chat_id`/`tg_message_id` del mensaje final (el que
+    lleva los botones) para que `notificar_resolucion` pueda editarlo luego.
+    Sin `cx` (llamadas legacy): comportamiento idéntico al de antes.
     """
     import json
 
@@ -294,6 +324,7 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
             timeout=20,
         )
         r2.raise_for_status()
+        final = r2
 
     elif len(urls) == 1:
         r = requests.post(
@@ -307,6 +338,7 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
             timeout=20,
         )
         r.raise_for_status()
+        final = r
 
     else:
         # Sin imagen: solo texto + botones
@@ -320,3 +352,64 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
             timeout=20,
         )
         r.raise_for_status()
+        final = r
+
+    if cx is not None:
+        import sys
+        try:
+            resultado = final.json()["result"]
+            db.update(cx, "content_queue", queue_id,
+                      tg_chat_id=str(resultado["chat"]["id"]),
+                      tg_message_id=str(resultado["message_id"]))
+        except (KeyError, ValueError) as exc:
+            print(f"[approval] no se pudo leer message_id/chat.id de Telegram "
+                 f"para queue {queue_id}: {exc}", file=sys.stderr)
+
+
+def notificar_resolucion(cx, queue_id: int, texto: str) -> bool:
+    """Avisa la resolución (aprobado/rechazado/programado) en el chat de
+    Telegram donde se mandó la propuesta: quita los botones del mensaje
+    original y contesta `texto` en reply.
+
+    Tolerante: sin tg_chat_id/tg_message_id en la fila, sin token de la marca,
+    o cualquier fallo de red/API → devuelve False (aviso a stderr), NUNCA
+    lanza — esto corre desde el publisher/daemon y no debe tumbarlo.
+    """
+    import sys
+
+    try:
+        fila = db.get(cx, "content_queue", queue_id)
+        if not fila or not fila.get("tg_chat_id") or not fila.get("tg_message_id"):
+            return False
+        from src import marcas as marcas_mod
+        marca = marcas_mod.cargar_por_id(cx, fila.get("account_id") or 1)
+        creds = _creds_de(marca.slug)
+        token = creds.get("TELEGRAM_BOT_TOKEN")
+        if not token:
+            return False
+
+        import json
+
+        import requests
+        base_url = f"https://api.telegram.org/bot{token}"
+        chat_id = fila["tg_chat_id"]
+        message_id = fila["tg_message_id"]
+
+        r1 = requests.post(
+            f"{base_url}/editMessageReplyMarkup",
+            data={"chat_id": chat_id, "message_id": message_id,
+                 "reply_markup": json.dumps({"inline_keyboard": []})},
+            timeout=20,
+        )
+        r1.raise_for_status()
+        r2 = requests.post(
+            f"{base_url}/sendMessage",
+            data={"chat_id": chat_id, "text": texto, "reply_to_message_id": message_id},
+            timeout=20,
+        )
+        r2.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"[approval] notificar_resolucion falló para queue {queue_id}: {exc}",
+             file=sys.stderr)
+        return False
