@@ -102,7 +102,12 @@ def regenerar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str
 
 
 def sourcing_rss_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
-    """payload: {source_id}. Baja cada URL de la fuente RSS y guarda temas nuevos."""
+    """payload: {source_id}. Baja cada URL de la fuente RSS y guarda temas nuevos.
+
+    `ultimo_run` se sella en un `finally`: pase lo que pase (URLs rotas o un
+    fallo inesperado a mitad del loop), la fuente deja de estar "vencida" y
+    `encolar_fuentes_vencidas` no la re-encola en el siguiente tick (H3).
+    """
     payload = json.loads(job["payload_json"] or "{}")
     source_id = payload["source_id"]
     fuente = _fuente_de(cx, job["account_id"], source_id, "info")
@@ -110,39 +115,47 @@ def sourcing_rss_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
 
     nuevos = 0
     error: str | None = None
-    for url in urls:
-        try:
-            items = topics.fetch_rss(url)
-            nuevos += topics.guardar(cx, job["account_id"], items, "rss")
-        except Exception as exc:  # noqa: BLE001 — una URL rota no debe tumbar las demás
-            error = str(exc)
-    db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
-    return {"nuevos": nuevos}
+    try:
+        for url in urls:
+            try:
+                items = topics.fetch_rss(url)
+                nuevos += topics.guardar(cx, job["account_id"], items, "rss")
+            except Exception as exc:  # noqa: BLE001 — una URL rota no debe tumbar las demás
+                error = str(exc)
+        return {"nuevos": nuevos}
+    finally:
+        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
 
 
 def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
-    """payload: {source_id}. Usa NEWSAPI_KEY de la marca; sin key, error accionable."""
+    """payload: {source_id}. Usa NEWSAPI_KEY de la marca; sin key, error accionable.
+
+    `ultimo_run` se sella en un `finally` que envuelve TODO el cuerpo (incluida
+    la validación de la key): antes, un `ValueError("Falta NEWSAPI_KEY")`
+    reventaba antes de tocar `brand_sources`, así que la fuente seguía
+    "vencida" y el siguiente `encolar_fuentes_vencidas` la re-encolaba de
+    inmediato — tormenta de jobs en error (H3).
+    """
     payload = json.loads(job["payload_json"] or "{}")
     source_id = payload["source_id"]
     fuente = _fuente_de(cx, job["account_id"], source_id, "info")
     slug = _marca_de(cx, job["account_id"])
-    key = config.account_creds(slug).get("NEWSAPI_KEY")
-    if not key:
-        raise ValueError("Falta NEWSAPI_KEY")
-
     cfg = fuente["config"]
+
+    error: str | None = None
     try:
+        key = config.account_creds(slug).get("NEWSAPI_KEY")
+        if not key:
+            raise ValueError("Falta NEWSAPI_KEY")
         items = topics.fetch_newsapi(cfg["query"], key, idioma=cfg.get("idioma", "es"),
                                      pais=cfg.get("pais"), estricto=True)
-    except RuntimeError as exc:
-        # `estricto=True` ya nos devuelve el mensaje redactado (sin la key):
-        # lo dejamos en ultimo_error para la GUI y volvemos a lanzar para que
-        # el worker cierre el job en error.
-        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=str(exc))
+        nuevos = topics.guardar(cx, job["account_id"], items, "newsapi")
+        return {"nuevos": nuevos}
+    except Exception as exc:  # noqa: BLE001 — se sella el error y se relanza (job en error)
+        error = str(exc)
         raise
-    nuevos = topics.guardar(cx, job["account_id"], items, "newsapi")
-    db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=None)
-    return {"nuevos": nuevos}
+    finally:
+        db.update(cx, "brand_sources", source_id, ultimo_run=_ts(), ultimo_error=error)
 
 
 _SHORTCODE_RE = re.compile(r"[^A-Za-z0-9_-]")

@@ -126,6 +126,25 @@ def test_newsapi_fetch_error_marca_ultimo_error_y_termina_job_en_error(cx, monke
     assert "clave-999" not in (fila_fuente["ultimo_error"] or "")
 
 
+def test_newsapi_fetch_sin_key_sella_ultimo_run_y_no_re_encola_de_inmediato(cx, monkeypatch) -> None:
+    """H3: antes, el ValueError("Falta NEWSAPI_KEY") reventaba ANTES de tocar
+    brand_sources, así que la fuente seguía "vencida" y el siguiente
+    `encolar_fuentes_vencidas` la re-encolaba de inmediato — tormenta de jobs."""
+    sid = fuentes.crear(cx, 1, "info", "newsapi", {"query": "cafeterías"})
+    monkeypatch.setattr(handlers.config, "account_creds", lambda slug: {"NEWSAPI_KEY": None})
+    job = _job(cx, "sourcing.newsapi_fetch", 1, {"source_id": sid})
+
+    worker._despachar(cx, job)
+
+    fila_job = db.get(cx, "jobs", job["id"])
+    assert fila_job["estado"] == "error"
+    fila_fuente = db.get(cx, "brand_sources", sid)
+    assert fila_fuente["ultimo_run"] is not None
+
+    creados = worker.encolar_fuentes_vencidas(cx)
+    assert creados == 0
+
+
 # ---------- sourcing.ig_scrape ----------
 
 class _FakeSession:
