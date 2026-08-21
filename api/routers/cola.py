@@ -80,8 +80,12 @@ def aprobar(slug: str, qid: int, user: dict = Depends(usuario_actual), cx=Depend
         raise ApiError(422, "validacion", "Solo se puede aprobar un item pendiente", "estado")
     try:
         slot = approval.aprobar(cx, qid, user_id=user["id"])
-    except Exception as e:  # noqa: BLE001
-        raise ApiError(422, "validacion", str(e)) from e
+    except (ValueError, RuntimeError) as e:
+        # Mensaje FIJO (nunca str(e)): puede traer detalle interno (p. ej.
+        # el error del espejo al Sheet). Cualquier otra excepción sube tal
+        # cual (bug real, no un error de usuario recuperable con 422).
+        raise ApiError(422, "validacion",
+                       "No se pudo aprobar: revisa slots y estado de la fila") from e
     approval.notificar_resolucion(cx, qid, f"✅ Aprobado desde el portal para {slot}")
     return {"ok": True, "scheduled_datetime": slot.isoformat()}
 

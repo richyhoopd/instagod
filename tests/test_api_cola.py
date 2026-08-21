@@ -118,6 +118,45 @@ def test_aprobar_no_pendiente_422_y_aprobar_ok(api_cliente, monkeypatch) -> None
     assert llamadas and llamadas[0][0] == qid
 
 
+def test_aprobar_valueerror_o_runtimeerror_422_mensaje_fijo(api_cliente, monkeypatch) -> None:
+    """G6: solo (ValueError, RuntimeError) de approval.aprobar se traducen a
+    422 con mensaje FIJO (nunca str(e), que podría filtrar detalle interno);
+    cualquier otra excepción sube tal cual (bug real, no error de usuario)."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    qid = _item(cx, pid)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    def _revienta_runtime(cx, qid, **kw):
+        raise RuntimeError("detalle interno sensible que no debe salir")
+
+    monkeypatch.setattr("src.approval.aprobar", _revienta_runtime)
+    r = cli.post(f"/brands/pensionmas/queue/{qid}/aprobar")
+    assert r.status_code == 422
+    body = r.json()
+    assert body["error"] == "validacion"
+    assert body["detalle"] == "No se pudo aprobar: revisa slots y estado de la fila"
+    assert "sensible" not in body["detalle"]
+
+
+def test_aprobar_excepcion_no_contemplada_no_se_traga(api_cliente, monkeypatch) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    qid = _item(cx, pid)
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    def _revienta_attr(cx, qid, **kw):
+        raise AttributeError("bug real, no error de usuario")
+
+    monkeypatch.setattr("src.approval.aprobar", _revienta_attr)
+    try:
+        r = cli.post(f"/brands/pensionmas/queue/{qid}/aprobar")
+    except AttributeError:
+        pass
+    else:
+        assert r.status_code == 500
+
+
 def test_rechazar_no_pendiente_422_y_rechazar_ok(api_cliente, monkeypatch) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)
