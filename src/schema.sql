@@ -380,3 +380,30 @@ CREATE TABLE IF NOT EXISTS brand_secrets (
     updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, clave)
 );
+
+-- -----------------------------------------------------------------------------
+-- Fase 2 (spec 2026-08-20): cola de jobs asíncronos del portal (generación de
+-- sets de imágenes, publicaciones, etc). Un worker toma filas en estado
+-- 'cola', reporta progreso/heartbeat mientras corre y deja el resultado en
+-- resultado_json al terminar.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS jobs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo         TEXT NOT NULL,
+    account_id   INTEGER NOT NULL DEFAULT 1,
+    payload_json TEXT,
+    estado       TEXT NOT NULL DEFAULT 'cola',
+    progreso     INTEGER NOT NULL DEFAULT 0,
+    log          TEXT,
+    resultado_json TEXT,
+    queue_id     INTEGER,
+    creado_por   INTEGER,
+    worker_id    TEXT,
+    heartbeat    TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at   TEXT,
+    finished_at  TEXT,
+    CHECK (estado IN ('cola','corriendo','ok','error','cancelado'))
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_estado ON jobs(estado);
+CREATE INDEX IF NOT EXISTS idx_jobs_account ON jobs(account_id);

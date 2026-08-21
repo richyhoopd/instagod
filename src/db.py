@@ -63,6 +63,9 @@ TABLES: dict[str, set[str]] = {
         # Motor de slideshows: contrato completo del set (JSON) para
         # regenerar/re-estilar y para el futuro export a video.
         "slideshow_json",
+        # Fase 2 (portal): trazabilidad de publicación DB-driven.
+        "publicado_en", "error", "creado_por", "aprobado_por", "ig_media_id",
+        "origen", "tg_chat_id", "tg_message_id",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -85,6 +88,12 @@ TABLES: dict[str, set[str]] = {
     "magic_links": {"token_hash", "user_id", "expira", "usado_at"},
     "sessions": {"token_hash", "user_id", "expira", "ua"},
     "brand_secrets": {"account_id", "clave", "valor_cifrado", "updated_by", "updated_at"},
+    # Fase 2 (spec 2026-08-20): cola de jobs asíncronos del portal.
+    "jobs": {
+        "tipo", "account_id", "payload_json", "estado", "progreso", "log",
+        "resultado_json", "queue_id", "creado_por", "worker_id", "heartbeat",
+        "started_at", "finished_at",
+    },
 }
 
 # Estados de content_queue (espejo del CHECK en schema.sql).
@@ -175,6 +184,17 @@ _MIGRATIONS = {
         # Motor de slideshows: contrato completo del set (JSON) para
         # regenerar/re-estilar y para el futuro export a video.
         "slideshow_json": "TEXT",
+        # Fase 2 (portal, spec 2026-08-20): trazabilidad de publicación
+        # DB-driven (publisher/jobs) además de la vía Sheet/Actions legacy.
+        "publicado_en": "TEXT",
+        "error": "TEXT",
+        "creado_por": "INTEGER",
+        "aprobado_por": "INTEGER",
+        "ig_media_id": "TEXT",
+        # 'legacy' (Sheet/Actions) | 'portal' (creado desde el portal DB-driven).
+        "origen": "TEXT NOT NULL DEFAULT 'legacy'",
+        "tg_chat_id": "TEXT",
+        "tg_message_id": "TEXT",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
@@ -239,6 +259,14 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         evento_ids         TEXT,
         rechazados         TEXT,
         slideshow_json     TEXT,
+        publicado_en       TEXT,
+        error              TEXT,
+        creado_por         INTEGER,
+        aprobado_por       INTEGER,
+        ig_media_id        TEXT,
+        origen             TEXT    NOT NULL DEFAULT 'legacy',
+        tg_chat_id         TEXT,
+        tg_message_id      TEXT,
         CHECK (tipo   IN ('meme','anuncio','slideshow')),
         CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))
     )
@@ -248,7 +276,8 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "tema_semilla", "status", "scheduled_datetime", "sheet_row_id",
     "created_at", "updated_at", "meme_url", "account_id", "template",
     "formato_patron", "aprobacion", "caption", "imagen_url", "evento_ids",
-    "rechazados", "slideshow_json",
+    "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
+    "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
 )
 
 
