@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import sqlite3
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,6 +19,7 @@ from src import (
     compose,
     db,
     generate_slideshow,
+    host,
     ingest_ig,
     jobs,
     marcas,
@@ -110,6 +112,34 @@ def regenerar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str
     )
     db.update(cx, "jobs", job["id"], queue_id=nuevo_qid)
     return {"queue_id": nuevo_qid}
+
+
+def rerender_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {queue_id}. Re-renderiza los PNGs desde el slideshow_json
+    guardado (editado por el portal) SIN volver a llamar al LLM ni re-elegir
+    fondos, sube a Cloudinary y actualiza imagen_url. El estado no cambia.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    queue_id = payload["queue_id"]
+    fila = db.get(cx, "content_queue", queue_id)
+    if fila is None or not fila["slideshow_json"]:
+        raise ValueError(f"No existe slideshow en content_queue.id={queue_id}")
+    show = slideshow_model.desde_json(fila["slideshow_json"])
+
+    jobs.progresar(cx, job["id"], 20, "render")
+    pngs = []
+    for i in range(len(show.slides)):
+        ctx = slideshow_compile.contexto_slide(show, i)
+        pngs.append(compose.render_card("slide.html", ctx, prefix=f"slide{i}"))
+
+    jobs.progresar(cx, job["id"], 70, "subiendo")
+    ts = int(time.time())
+    urls = [host.upload(str(p), public_id=f"ss{ts}_{i}")
+            for i, p in enumerate(pngs)]
+
+    db.update(cx, "content_queue", queue_id, imagen_url=json.dumps(urls))
+    db.update(cx, "jobs", job["id"], queue_id=queue_id)
+    return {"queue_id": queue_id}
 
 
 def sourcing_rss_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
@@ -277,6 +307,7 @@ def preset_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
+    "slideshow.rerender": rerender_slideshow,
     "sourcing.rss_fetch": sourcing_rss_fetch,
     "sourcing.newsapi_fetch": sourcing_newsapi_fetch,
     "sourcing.ig_scrape": sourcing_ig_scrape,

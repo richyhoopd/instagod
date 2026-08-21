@@ -182,3 +182,62 @@ def test_generar_reporta_progreso_creciente_hasta_100(monkeypatch, _cx_slideshow
     assert reportes == sorted(reportes)
     assert reportes[-1] == 100
     assert reportes[0] < reportes[-1]
+
+
+# ---------- slideshow.rerender (Fase 4: edición slide por slide) ----------
+
+def _show_json_valido():
+    slides = [
+        {"image_urls": ["https://cdn/x.jpg"], "image_layout": "single",
+         "text_items": [{"text": "hook"}], "is_cta": False,
+         "background_opacity": 0.35, "duration": 3.0, "source": "manual"},
+        {"image_urls": [], "image_layout": "single",
+         "text_items": [{"text": "cierre"}], "is_cta": True,
+         "background_opacity": 0.0, "duration": 3.0, "source": "manual"},
+    ]
+    return json.dumps({"title": "t", "aspect_ratio": "4:5", "slides": slides,
+                       "caption": "cap", "language": "es",
+                       "brief": {"tema": "t", "estilo": "tiktok_bold"},
+                       "formato": "listicle", "account_slug": "gdlscene"})
+
+
+def test_rerender_slideshow_renderiza_sube_y_actualiza_imagen_url(cx, monkeypatch) -> None:
+    renders, subidas = [], []
+
+    def _fake_render(template, ctx, **kw):
+        renders.append(kw.get("prefix"))
+        return f"/tmp/{kw.get('prefix')}.png"
+
+    def _fake_upload(path, public_id=None):
+        subidas.append(public_id)
+        return f"https://cdn/{public_id}.jpg"
+
+    monkeypatch.setattr(handlers.compose, "render_card", _fake_render)
+    monkeypatch.setattr(handlers.host, "upload", _fake_upload)
+
+    qid = db.insert(cx, "content_queue", tipo="slideshow", status="programado",
+                    aprobacion="aprobado", caption="cap", imagen_url="[]",
+                    account_id=1, slideshow_json=_show_json_valido())
+    jid = jobs.crear(cx, "slideshow.rerender", 1, {"queue_id": qid}, creado_por=3)
+    job = db.get(cx, "jobs", jid)
+
+    resultado = handlers.rerender_slideshow(cx, job)
+
+    assert resultado == {"queue_id": qid}
+    fila = db.get(cx, "content_queue", qid)
+    urls = json.loads(fila["imagen_url"])
+    assert len(urls) == 2 and all(u.startswith("https://cdn/") for u in urls)
+    assert len(renders) == 2
+    assert fila["status"] == "programado"  # el estado no cambia
+    assert db.get(cx, "jobs", jid)["queue_id"] == qid
+
+
+def test_rerender_slideshow_fila_inexistente(cx) -> None:
+    jid = jobs.crear(cx, "slideshow.rerender", 1, {"queue_id": 999})
+    job = db.get(cx, "jobs", jid)
+    with pytest.raises(ValueError):
+        handlers.rerender_slideshow(cx, job)
+
+
+def test_rerender_slideshow_registrado_en_handlers(cx) -> None:
+    assert handlers.HANDLERS["slideshow.rerender"] is handlers.rerender_slideshow

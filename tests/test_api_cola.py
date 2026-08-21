@@ -232,3 +232,74 @@ def test_slots_proximos_n_fuera_de_rango_422(api_cliente) -> None:
     H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
     assert cli.get("/brands/pensionmas/slots/proximos?n=0").status_code == 422
     assert cli.get("/brands/pensionmas/slots/proximos?n=51").status_code == 422
+
+
+# ---------- PUT /queue/{qid}/slides (edición slide por slide) ----------
+
+def _show_json_api(n=2):
+    import json
+    slides = [{"image_urls": [], "image_layout": "single",
+               "text_items": [{"text": f"texto {i}"}], "is_cta": False,
+               "background_opacity": 0.35, "duration": 3.0, "source": "manual"}
+              for i in range(n)]
+    return json.dumps({"title": "t", "aspect_ratio": "4:5", "slides": slides,
+                       "caption": "cap", "language": "es",
+                       "brief": {"tema": "t", "estilo": "tiktok_bold"},
+                       "formato": "listicle", "account_slug": "pensionmas"})
+
+
+def test_editar_slides_202_encola_rerender(api_cliente) -> None:
+    import json
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    qid = _item(cx, pid, tipo="slideshow", status="programado", aprobacion="aprobado",
+                slideshow_json=_show_json_api())
+    uid = H.usuario("e@x.com", marcas=[(pid, "editor")])
+    H.login(uid)
+
+    r = cli.put(f"/brands/pensionmas/queue/{qid}/slides", json={"slides": [
+        {"texts": ["hook nuevo"], "image_url": "https://cdn.example.com/a.jpg"},
+        {"texts": ["texto 1"], "image_url": None},
+    ]})
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+    job = db.get(cx, "jobs", job_id)
+    assert job["tipo"] == "slideshow.rerender" and job["account_id"] == pid
+    assert job["creado_por"] == uid
+    assert json.loads(job["payload_json"]) == {"queue_id": qid}
+    show = json.loads(db.get(cx, "content_queue", qid)["slideshow_json"])
+    assert show["slides"][0]["text_items"][0]["text"] == "hook nuevo"
+
+
+def test_editar_slides_422_por_estructura_y_estado(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    qid = _item(cx, pid, tipo="slideshow", status="programado", aprobacion="aprobado",
+                slideshow_json=_show_json_api())
+    publicado = _item(cx, pid, tipo="slideshow", status="publicado", aprobacion="aprobado",
+                      slideshow_json=_show_json_api())
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+
+    # estructura que no coincide (1 slide en vez de 2)
+    r = cli.put(f"/brands/pensionmas/queue/{qid}/slides",
+                json={"slides": [{"texts": ["a"], "image_url": None}]})
+    assert r.status_code == 422
+    # estado no editable
+    r = cli.put(f"/brands/pensionmas/queue/{publicado}/slides", json={"slides": [
+        {"texts": ["a"], "image_url": None}, {"texts": ["b"], "image_url": None}]})
+    assert r.status_code == 422
+    # url insegura
+    r = cli.put(f"/brands/pensionmas/queue/{qid}/slides", json={"slides": [
+        {"texts": ["a"], "image_url": "http://localhost/x.jpg"},
+        {"texts": ["b"], "image_url": None}]})
+    assert r.status_code == 422
+
+
+def test_editar_slides_qid_ajeno_404(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    otra = _marca(cx, "otra")
+    qid_otra = _item(cx, otra, tipo="slideshow", slideshow_json=_show_json_api())
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+    r = cli.put(f"/brands/pensionmas/queue/{qid_otra}/slides", json={"slides": []})
+    assert r.status_code == 404
