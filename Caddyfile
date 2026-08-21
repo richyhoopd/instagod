@@ -1,0 +1,6 @@
+# API_DOMAIN viene del .env (p.ej. api.midominio.com → HTTPS automático con Let's Encrypt).
+# Si no hay dominio, API_DOMAIN=":80" y Caddy sirve por IP sin TLS (sólo para pruebas).
+{$API_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy api:8100
+}

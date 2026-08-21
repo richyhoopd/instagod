@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.server.example
 secrets/
 *.json.key
 google-sa.json

@@ -1,0 +1,80 @@
+# instagod en servidor: API + worker + publisher (+ daemon gdlscene opcional) + Caddy.
+# Uso: docker compose up -d --build
+#      docker compose --profile gdlscene up -d   (si además migras el daemon de Telegram)
+# Todos leen el mismo .env y comparten ./data (SQLite WAL + fotos).
+x-app: &app
+  build: .
+  image: instagod:latest
+  env_file: .env
+  environment:
+    ENV: prod
+    DB_PATH: /app/data/gdlscene.db
+  volumes:
+    - ./data:/app/data
+    - ./out:/app/out
+    - ./secrets:/app/secrets:ro
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  api:
+    <<: *app
+    container_name: instagod-api
+    expose: ["8100"]
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    <<: *app
+    container_name: instagod-worker
+    command: ["python", "-m", "src.jobs.worker"]
+    mem_limit: 2g
+    depends_on:
+      api: { condition: service_healthy }
+
+  publisher:
+    <<: *app
+    container_name: instagod-publisher
+    command: ["python", "-m", "src.publisher"]
+    mem_limit: 512m
+    depends_on:
+      api: { condition: service_healthy }
+
+  # Daemon de aprobación por Telegram (gdlscene). Sólo UNO puede escuchar al bot:
+  # levántalo aquí únicamente después de apagar el de launchd en la Mac.
+  daemon:
+    <<: *app
+    container_name: instagod-daemon
+    command: ["python", "-m", "src.approval_daemon"]
+    mem_limit: 512m
+    profiles: ["gdlscene"]
+    depends_on:
+      api: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: instagod-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Dominio de la API (api.midominio.com). Sin dominio: ":80" sirve por IP sin TLS.
+      API_DOMAIN: ${API_DOMAIN:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:
