@@ -14,6 +14,7 @@ import argparse
 import json
 import time
 
+import config
 from src import (
     approval,
     compose,
@@ -67,7 +68,10 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
                                            contexto=contexto_full)
     hints = [sl["image_hint"] for sl in guion["slides"]]
     _reportar(40, "imágenes")
-    imagenes = image_sources.resolver(hints, list(fuentes), cx=cx, slug=m.slug)
+    imagenes = image_sources.resolver(
+        hints, list(fuentes), cx=cx, slug=m.slug,
+        providers=image_sources.providers_default(
+            cx, slug=m.slug, creds=config.account_creds(m.slug)))
     sin_imagen = sum(1 for i in imagenes if i is None)
     if sin_imagen:
         print(f"[slideshow] {sin_imagen}/{len(imagenes)} slides sin imagen "

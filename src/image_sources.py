@@ -150,14 +150,18 @@ class PexelsProvider:
 
     nombre = "pexels"
 
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key
+
     def buscar(self, hint: str, n: int = 3) -> list[ImagenCandidata]:
-        if not config.PEXELS_API_KEY:
+        key = self.api_key or config.PEXELS_API_KEY
+        if not key:
             return []
         try:
             r = requests.get(
                 "https://api.pexels.com/v1/search",
                 params={"query": hint, "per_page": n, "orientation": "portrait"},
-                headers={"Authorization": config.PEXELS_API_KEY},
+                headers={"Authorization": key},
                 timeout=20,
             )
             r.raise_for_status()
@@ -174,6 +178,40 @@ class PexelsProvider:
             if ruta:
                 out.append(ImagenCandidata(str(ruta), "pexels",
                                            credito=f.get("photographer")))
+        return out
+
+
+class UnsplashProvider:
+    """Búsqueda en Unsplash (API oficial). Sin `access_key` → [] (aviso, sin red)."""
+
+    nombre = "unsplash"
+
+    def __init__(self, access_key: str | None = None):
+        self.access_key = access_key
+
+    def buscar(self, hint: str, n: int = 3) -> list[ImagenCandidata]:
+        if not self.access_key:
+            print("[image_sources] unsplash sin access_key configurada, se omite")
+            return []
+        try:
+            r = requests.get(
+                "https://api.unsplash.com/search/photos",
+                params={"query": hint, "per_page": n, "client_id": self.access_key},
+                timeout=15,
+            )
+            r.raise_for_status()
+            resultados = r.json().get("results", [])
+        except (requests.RequestException, ValueError):
+            print("[image_sources] unsplash falló")
+            return []
+        out = []
+        for res in resultados[:n]:
+            url = ((res.get("urls") or {}).get("regular"))
+            if not url:
+                continue
+            nombre = ((res.get("user") or {}).get("name"))
+            credito = f"{nombre} / Unsplash" if nombre else "Unsplash"
+            out.append(ImagenCandidata(url, "unsplash", credito=credito))
         return out
 
 
@@ -274,17 +312,22 @@ class CarpetaProvider:
         return [ImagenCandidata(str(p), "carpeta") for p in con_match[:n]]
 
 
-def providers_default(cx=None, slug: str | None = None) -> dict:
+def providers_default(cx=None, slug: str | None = None,
+                       creds: dict | None = None) -> dict:
     """Providers disponibles. banco/covers requieren DB; carpeta requiere slug
-    (y que exista data/brands/<slug>/fotos)."""
+    (y que exista data/brands/<slug>/fotos). `creds` (estilo `account_creds`)
+    alimenta las API keys por marca de unsplash/pexels; sin `creds`, pexels
+    cae a la config global y unsplash queda sin key (aviso, sin red)."""
+    creds = creds or {}
     out: dict = {}
     if cx is not None:
         out["banco"] = BancoProvider(cx)
         out["covers"] = CoversProvider(cx)
     if slug and (BRANDS_DIR / slug / "fotos").is_dir():
         out["carpeta"] = CarpetaProvider(BRANDS_DIR / slug / "fotos")
-    out["pexels"] = PexelsProvider()
+    out["pexels"] = PexelsProvider(creds.get("PEXELS_API_KEY"))
     out["pinterest"] = PinterestProvider()
+    out["unsplash"] = UnsplashProvider(creds.get("UNSPLASH_ACCESS_KEY"))
     return out
 
 
