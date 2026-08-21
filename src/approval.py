@@ -398,13 +398,19 @@ def notificar_resolucion(cx, queue_id: int, texto: str) -> bool:
         chat_id = fila["tg_chat_id"]
         message_id = fila["tg_message_id"]
 
-        r1 = requests.post(
-            f"{base_url}/editMessageReplyMarkup",
-            data={"chat_id": chat_id, "message_id": message_id,
-                 "reply_markup": json.dumps({"inline_keyboard": []})},
-            timeout=20,
-        )
-        r1.raise_for_status()
+        try:
+            r1 = requests.post(
+                f"{base_url}/editMessageReplyMarkup",
+                data={"chat_id": chat_id, "message_id": message_id,
+                     "reply_markup": json.dumps({"inline_keyboard": []})},
+                timeout=20,
+            )
+            r1.raise_for_status()
+        except Exception as exc:
+            # Quitar los botones es best-effort (mensaje ya editado/borrado,
+            # permisos, etc.): NO debe impedir el aviso de abajo — sigue.
+            print(f"[approval] no se pudieron quitar los botones en queue {queue_id}: "
+                 f"{_error_seguro(exc, token=token, chat_id=chat_id)}", file=sys.stderr)
         r2 = requests.post(
             f"{base_url}/sendMessage",
             data={"chat_id": chat_id, "text": texto, "reply_to_message_id": message_id},

@@ -237,3 +237,33 @@ def test_notificar_resolucion_no_filtra_token(tmp_path, monkeypatch, capsys) -> 
     assert approval.notificar_resolucion(cx, qid, "x") is False
     captured = capsys.readouterr()
     assert "tok_tg_999" not in captured.err
+
+
+def test_notificar_resolucion_edit_falla_pero_sendmessage_corre(tmp_path, monkeypatch) -> None:
+    """G1: quitar los botones (editMessageReplyMarkup) es best-effort, en su
+    propio try/except — si falla, el aviso (sendMessage) debe correr igual;
+    si no, el aprobador jamás se entera de la resolución."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok-gdl")
+    cx = _cx(tmp_path)
+    qid = approval.encolar_pendiente(cx, tipo="meme", caption="c", imagen_url="u")
+    db.update(cx, "content_queue", qid, tg_chat_id="-100", tg_message_id="42")
+
+    import requests
+
+    llamadas = []
+
+    class _RespOK:
+        def raise_for_status(self):
+            pass
+
+    def _post(url, data=None, timeout=None):
+        llamadas.append(url)
+        if "editMessageReplyMarkup" in url:
+            raise requests.HTTPError("400 Bad Request")
+        return _RespOK()
+
+    monkeypatch.setattr(requests, "post", _post)
+
+    assert approval.notificar_resolucion(cx, qid, "x") is True
+    assert any("editMessageReplyMarkup" in u for u in llamadas)
+    assert any("sendMessage" in u for u in llamadas)
