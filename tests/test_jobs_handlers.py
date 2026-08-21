@@ -98,6 +98,28 @@ def test_regenerar_slideshow_descarta_la_fila_vieja_y_usa_el_brief(cx, monkeypat
     assert llamada["creado_por"] == 3
 
 
+def test_regenerar_slideshow_usa_la_marca_del_job_no_la_del_brief(cx, monkeypatch) -> None:
+    """G2: el brief guardado puede traer una marca vieja/equivocada (la fila
+    pudo migrar de cuenta); regenerar_slideshow debe usar SIEMPRE la marca
+    real del job (account_id), nunca `brief["marca"]`."""
+    registro = []
+    monkeypatch.setattr(handlers.generate_slideshow, "generar", _fake_generar(registro))
+    otra_id = db.insert(cx, "accounts", slug="pensionmas", ig_handle="@p",
+                        nombre="Pension+", ciudad="CDMX")
+
+    brief = {"tema": "x", "formato": "listicle", "estilo": "e", "fuentes": ["pexels"],
+              "n_slides": 6, "contexto": None, "aspect": "4:5", "marca": "gdlscene"}
+    qid = db.insert(cx, "content_queue", tipo="slideshow", status="publicado",
+                    caption="cap", imagen_url="[]", account_id=otra_id,
+                    slideshow_json=json.dumps({"brief": brief}))
+    jid = jobs.crear(cx, "slideshow.regenerar", otra_id, {"queue_id": qid}, creado_por=3)
+    job = db.get(cx, "jobs", jid)
+
+    handlers.regenerar_slideshow(cx, job)
+
+    assert registro[0]["marca"] == "pensionmas"
+
+
 # ---------- smoke test real de progreso en generate_slideshow.generar ----------
 
 @pytest.fixture()

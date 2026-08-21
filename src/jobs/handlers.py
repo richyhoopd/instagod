@@ -57,7 +57,7 @@ def regenerar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str
     fuentes = brief.get("fuentes")
     nuevo_qid = generate_slideshow.generar(
         cx, brief["tema"],
-        marca=brief.get("marca", "gdlscene"),
+        marca=_marca_de(cx, job["account_id"]),
         formato=brief.get("formato"),
         estilo=brief.get("estilo"),
         fuentes=tuple(fuentes) if fuentes else None,
