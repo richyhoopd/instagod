@@ -22,12 +22,14 @@ def _es_entero(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _validar_config(provider: str, config: dict | None) -> None:
+def validar_config(kind: str, provider: str, config: dict | None) -> None:
     """ValueError("config") si `config` no cumple el esquema del provider.
 
     ig_accounts/rss/newsapi tienen esquema obligatorio; el resto de providers
     (carpeta/pinterest/pexels/unsplash/banco/covers) aceptan config opcional
-    sin más validación.
+    sin más validación. `kind` no cambia las reglas (los nombres de provider
+    ya son únicos por kind) pero se recibe para que `crear`/`actualizar`
+    llamen siempre con el contexto completo de la fuente.
     """
     config = config or {}
     if provider == "ig_accounts":
@@ -68,7 +70,7 @@ def crear(cx, account_id, kind, provider, config: dict | None = None, *, orden=N
     catalogo = _CATALOGO.get(kind)
     if catalogo is None or provider not in catalogo:
         raise ValueError("provider")
-    _validar_config(provider, config)
+    validar_config(kind, provider, config)
     if orden is None:
         fila = db.rows(
             cx, "SELECT COALESCE(MAX(orden), -1) AS m FROM brand_sources "
@@ -98,14 +100,25 @@ def listar(cx, account_id, kind=None) -> list[dict]:
 
 
 def actualizar(cx, source_id, *, config=None, activa=None) -> None:
-    """Actualiza config y/o el flag `activa` de una fuente existente."""
+    """Actualiza config y/o el flag `activa` de una fuente existente.
+
+    ValueError("fuente") si `source_id` no existe; ValueError("config") si el
+    `config` nuevo no cumple el esquema del provider de esa fuente (misma
+    validación que `crear`).
+    """
     campos: dict = {}
     if config is not None:
         campos["config_json"] = json.dumps(config)
     if activa is not None:
         campos["activa"] = 1 if activa else 0
-    if campos:
-        db.update(cx, "brand_sources", source_id, **campos)
+    if not campos:
+        return
+    fila = db.get(cx, "brand_sources", source_id)
+    if fila is None:
+        raise ValueError("fuente")
+    if config is not None:
+        validar_config(fila["kind"], fila["provider"], config)
+    db.update(cx, "brand_sources", source_id, **campos)
 
 
 def borrar(cx, source_id) -> None:

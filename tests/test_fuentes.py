@@ -104,6 +104,27 @@ def test_actualizar_config_y_activa(cx) -> None:
     assert json.loads(fila["config_json"]) == {"query": "pensiones mx"}
 
 
+def test_actualizar_con_config_invalida_revienta(cx) -> None:
+    sid = fuentes.crear(cx, 2, "info", "rss", {"urls": ["https://x.com/feed"]})
+    with pytest.raises(ValueError, match="config"):
+        fuentes.actualizar(cx, sid, config={})  # rss sin urls
+
+
+def test_actualizar_de_fuente_inexistente_revienta(cx) -> None:
+    with pytest.raises(ValueError, match="fuente"):
+        fuentes.actualizar(cx, 999999, config={"query": "x"})
+    with pytest.raises(ValueError, match="fuente"):
+        fuentes.actualizar(cx, 999999, activa=False)
+
+
+def test_actualizar_edicion_valida_persiste(cx) -> None:
+    sid = fuentes.crear(cx, 2, "info", "rss", {"urls": ["https://x.com/feed"]})
+    fuentes.actualizar(cx, sid, config={"urls": ["https://y.com/feed", "https://z.com/feed"]})
+    fila = db.get(cx, "brand_sources", sid)
+    import json
+    assert json.loads(fila["config_json"]) == {"urls": ["https://y.com/feed", "https://z.com/feed"]}
+
+
 def test_borrar(cx) -> None:
     sid = fuentes.crear(cx, 2, "imagen", "pexels")
     fuentes.borrar(cx, sid)
