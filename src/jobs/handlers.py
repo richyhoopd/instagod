@@ -7,6 +7,7 @@ avance vía `jobs.progresar` (el worker no sabe nada del payload interno).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
@@ -144,6 +145,9 @@ def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[
     return {"nuevos": nuevos}
 
 
+_SHORTCODE_RE = re.compile(r"[^A-Za-z0-9_-]")
+
+
 def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     """payload: {source_id}. Descarga hasta `max_por_cuenta` fotos por cada @cuenta
     a `data/brands/<slug>/fotos/`. Best-effort por cuenta: una cuenta rota o privada
@@ -163,10 +167,13 @@ def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
 
     dest_dir = config.BASE_DIR / "data" / "brands" / slug / "fotos"
     dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir_resuelta = dest_dir.resolve()
 
     total = 0
     errores: list[str] = []
     for cuenta in cuentas:
+        # `cuenta` ya pasó por `_CUENTA_IG_RE` en `validar_config` (solo
+        # [A-Za-z0-9._] tras la @), así que `handle` no puede traer "../".
         handle = cuenta.lstrip("@")
         try:
             user = ingest_ig.fetch_profile(session, handle)
@@ -182,11 +189,18 @@ def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
         for item in items:
             if bajadas >= max_por_cuenta:
                 break
-            shortcode = item.get("code") or f"post{bajadas}"
+            shortcode = _SHORTCODE_RE.sub("", str(item.get("code") or ""))[:40]
             for i, url in ingest_ig._image_urls(item):
                 if bajadas >= max_por_cuenta:
                     break
-                dest = dest_dir / f"{handle}_{shortcode}_{i}.jpg"
+                nombre = f"{handle}_{shortcode}_{i}.jpg"
+                dest = dest_dir / nombre
+                # Contención: pase lo que pase con `nombre`, el archivo JAMÁS
+                # se escribe fuera de `dest_dir` (H1). Con handle y shortcode
+                # ya saneados esto no debería disparar nunca; es cinturón.
+                if dest.resolve().parent != dest_dir_resuelta:
+                    errores.append(f"@{handle}: nombre de archivo inseguro, item salteado")
+                    continue
                 if dest.exists():
                     continue
                 if ingest_ig._download(session, url, dest):

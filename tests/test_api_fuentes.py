@@ -52,6 +52,19 @@ def test_sources_crear_valida_provider_y_config(api_cliente) -> None:
     assert r.status_code == 422 and r.json()["campo"] == "config"
 
 
+def test_sources_ig_accounts_cuenta_con_traversal_422(api_cliente) -> None:
+    """H1: un @handle tipo path-traversal se rechaza en la creación (nunca
+    llega a construir un nombre de archivo con él)."""
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("m@x.com", marcas=[(pid, "manager")]))
+
+    r = cli.post("/brands/pensionmas/sources", json={
+        "kind": "imagen", "provider": "ig_accounts", "config": {"cuentas": ["@../../evil"]},
+    })
+    assert r.status_code == 422 and r.json()["campo"] == "config"
+
+
 def test_sources_patch_delete_y_ownership(api_cliente) -> None:
     cli, cx, H = api_cliente
     pid = _marca(cx)

@@ -9,6 +9,7 @@ no tiene filas en `brand_sources`, cae al `fuentes_imagen` legacy del perfil
 from __future__ import annotations
 
 import json
+import re
 
 from src import db
 
@@ -16,6 +17,11 @@ PROVIDERS_IMAGEN = ("carpeta", "ig_accounts", "pinterest", "pexels", "unsplash",
 PROVIDERS_INFO = ("rss", "newsapi")
 
 _CATALOGO = {"imagen": PROVIDERS_IMAGEN, "info": PROVIDERS_INFO}
+
+# @handle de Instagram: solo letras/dígitos/punto/guion bajo (charset real de IG),
+# 1-30 chars tras la @ — un `startswith("@")` a secas dejaba pasar cosas como
+# "@../../evil" que luego se usan para construir un path de archivo (H1).
+_CUENTA_IG_RE = re.compile(r"^@[A-Za-z0-9._]{1,30}$")
 
 
 def _es_entero(v) -> bool:
@@ -35,7 +41,7 @@ def validar_config(kind: str, provider: str, config: dict | None) -> None:
     if provider == "ig_accounts":
         cuentas = config.get("cuentas")
         if not isinstance(cuentas, list) or not cuentas or not all(
-            isinstance(c, str) and c.startswith("@") for c in cuentas
+            isinstance(c, str) and _CUENTA_IG_RE.match(c) for c in cuentas
         ):
             raise ValueError("config")
         max_por_cuenta = config.get("max_por_cuenta")

@@ -57,6 +57,17 @@ def test_crear_ig_accounts_valida_config(cx) -> None:
     assert sid > 0
 
 
+def test_crear_ig_accounts_rechaza_cuentas_con_traversal(cx) -> None:
+    """H1: un `startswith('@')` a secas dejaba pasar handles tipo path-traversal
+    que luego se usan para construir el nombre del archivo destino."""
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "imagen", "ig_accounts", {"cuentas": ["@../../evil"]})
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "imagen", "ig_accounts", {"cuentas": ["@x/../../y"]})
+    with pytest.raises(ValueError, match="config"):
+        fuentes.crear(cx, 2, "imagen", "ig_accounts", {"cuentas": ["@" + "x" * 31]})  # >30 chars
+
+
 def test_crear_rss_valida_config(cx) -> None:
     with pytest.raises(ValueError, match="config"):
         fuentes.crear(cx, 2, "info", "rss", {})  # sin urls

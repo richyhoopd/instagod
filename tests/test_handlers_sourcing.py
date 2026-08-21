@@ -187,6 +187,41 @@ def test_ig_scrape_respeta_max_por_cuenta(cx, monkeypatch, tmp_path) -> None:
     assert resultado["bajadas"] == 1
 
 
+def test_ig_scrape_code_malicioso_no_escapa_la_carpeta(cx, monkeypatch, tmp_path) -> None:
+    """H1: un `code` de post con path-traversal ("../../x") no debe terminar
+    escribiendo un archivo fuera de data/brands/<slug>/fotos — el nombre se
+    sanea y, de todos modos, se verifica contención antes de escribir."""
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    sid = fuentes.crear(cx, 1, "imagen", "ig_accounts",
+                        {"cuentas": ["@banda1"], "max_por_cuenta": 2})
+    monkeypatch.setattr(handlers.ingest_ig, "get_session", lambda: _FakeSession())
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_profile",
+                        lambda session, handle: {"id": "1", "is_private": False})
+    monkeypatch.setattr(handlers.ingest_ig, "fetch_posts",
+                        lambda session, user_id, count: [{"code": "../../evil"}])
+    monkeypatch.setattr(handlers.ingest_ig, "_image_urls",
+                        lambda item: [(0, "https://img/x.jpg")])
+
+    descargas = []
+
+    def _fake_download(session, url, dest):
+        descargas.append(dest)
+        dest.write_bytes(b"jpg")
+        return True
+
+    monkeypatch.setattr(handlers.ingest_ig, "_download", _fake_download)
+
+    job = _job(cx, "sourcing.ig_scrape", 1, {"source_id": sid})
+    resultado = handlers.sourcing_ig_scrape(cx, job)
+
+    dest_dir = tmp_path / "data" / "brands" / "gdlscene" / "fotos"
+    fuera = [p for p in dest_dir.parent.parent.rglob("*.jpg") if p.parent != dest_dir]
+    assert fuera == []  # nunca se escribió fuera de fotos/
+    for p in descargas:
+        assert p.parent == dest_dir
+        assert ".." not in p.name
+
+
 def test_ig_scrape_sesion_no_sana_revienta_sin_loop(cx, monkeypatch) -> None:
     sid = fuentes.crear(cx, 1, "imagen", "ig_accounts", {"cuentas": ["@banda1"]})
 
