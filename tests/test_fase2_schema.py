@@ -91,3 +91,44 @@ def test_migracion_db_vieja_sin_columnas_nuevas(tmp_path) -> None:
     fila = db.rows(cx, "SELECT tipo, caption, origen FROM content_queue WHERE tipo='meme'")[0]
     assert fila == {"tipo": "meme", "caption": "vieja", "origen": "legacy"}
     cx.close()
+
+
+def test_migracion_check_status_admite_programado(tmp_path) -> None:
+    """DB vieja con CHECK(status) sin 'programado': init_db debe ensancharlo.
+
+    Antes de esta migración, 'programado' (el status que usa el publisher DB
+    sin Sheet, Task 3) reventaba con IntegrityError al no estar en el CHECK.
+    """
+    path = tmp_path / "vieja_status.db"
+    schema_viejo = db.SCHEMA_PATH.read_text(encoding="utf-8").replace(
+        "CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))",
+        "CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))",
+    )
+    assert "'programado'" not in schema_viejo, (
+        "el reemplazo del schema viejo no tumbó el CHECK(status) con "
+        "'programado' (¿cambió el formato en schema.sql?)"
+    )
+    cx = sqlite3.connect(path)
+    cx.execute("PRAGMA foreign_keys = ON")
+    cx.executescript(schema_viejo)
+    for col, ddl in db._MIGRATIONS["content_queue"].items():
+        cx.execute(f"ALTER TABLE content_queue ADD COLUMN {col} {ddl}")
+    cx.execute("INSERT OR IGNORE INTO accounts (id, slug, ig_handle, nombre, ciudad) "
+               "VALUES (1,'gdlscene','gdlscene','La Escena GDL','Guadalajara')")
+    cx.commit()
+    cx.close()
+
+    cx = db.connect(path)
+    db.init_db(cx)
+
+    qid = db.insert(cx, "content_queue", tipo="meme", caption="x", imagen_url="http://x/1.jpg",
+                    status="borrador", aprobacion="pendiente")
+    db.update(cx, "content_queue", qid, status="programado")  # antes: IntegrityError
+    assert db.get(cx, "content_queue", qid)["status"] == "programado"
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.insert(cx, "content_queue", tipo="meme", caption="x", imagen_url="x",
+                  status="basura")
+
+    db.init_db(cx)  # segunda corrida: idempotente, no revienta
+    cx.close()

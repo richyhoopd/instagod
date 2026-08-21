@@ -142,13 +142,13 @@ CREATE TABLE IF NOT EXISTS content_queue (
     event_id           INTEGER REFERENCES events(id)  ON DELETE SET NULL,
     tema_semilla       TEXT,
     status             TEXT    NOT NULL DEFAULT 'borrador',
-                                                        -- borrador|listo|en_sheet|publicado|descartado
+                                                        -- borrador|listo|en_sheet|programado|publicado|descartado
     scheduled_datetime TEXT,                            -- lo asigna scheduler.py tras aprobar
     sheet_row_id       TEXT,                            -- id de la fila en el Sheet (para rastrear)
     created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
     CHECK (tipo   IN ('meme','anuncio','slideshow')),
-    CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))
+    CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
 );
 CREATE INDEX IF NOT EXISTS idx_queue_status        ON content_queue(status);
 CREATE INDEX IF NOT EXISTS idx_queue_band          ON content_queue(band_id);

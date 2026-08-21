@@ -268,7 +268,7 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         tg_chat_id         TEXT,
         tg_message_id      TEXT,
         CHECK (tipo   IN ('meme','anuncio','slideshow')),
-        CHECK (status IN ('borrador','listo','en_sheet','publicado','descartado'))
+        CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
 """
 _CONTENT_QUEUE_REBUILD_COLS = (
@@ -282,23 +282,23 @@ _CONTENT_QUEUE_REBUILD_COLS = (
 
 
 def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
-    """Ensancha el CHECK(tipo) de content_queue para admitir 'slideshow'.
+    """Ensancha los CHECK(tipo)/CHECK(status) de content_queue.
 
     SQLite no soporta ALTER de un CHECK ya creado: hay que reconstruir la
     tabla (procedimiento oficial de sqlite.org "Making Other Kinds Of Table
     Schema Changes", incluye el PRAGMA foreign_key_check antes del commit).
-    Idempotente: solo corre si el CHECK viejo (sin 'slideshow') sigue en
-    sqlite_master; en DBs nuevas ya sale de schema.sql con el CHECK correcto
-    y esto es un no-op.
+    Idempotente: solo corre si el CHECK viejo (sin 'slideshow' o sin
+    'programado') sigue en sqlite_master; en DBs nuevas ya sale de schema.sql
+    con el CHECK correcto y esto es un no-op.
     """
     row = cx.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_queue'"
     ).fetchone()
-    # OJO: no basta con buscar "slideshow" a secas — la columna slideshow_json
-    # (agregada arriba vía ALTER TABLE ADD COLUMN) ya deja esa subcadena en el
-    # sql guardado aunque el CHECK siga viejo. Hay que buscar el literal
-    # exacto del CHECK IN (...).
-    if row is None or "'slideshow'" in row[0]:
+    # OJO: no basta con buscar "slideshow"/"programado" a secas — la columna
+    # slideshow_json (agregada arriba vía ALTER TABLE ADD COLUMN) ya deja esa
+    # subcadena en el sql guardado aunque el CHECK siga viejo. Hay que buscar
+    # el literal exacto de cada CHECK IN (...).
+    if row is None or ("'slideshow'" in row[0] and "'programado'" in row[0]):
         return
 
     # Columnas de la tabla VIEJA (ya con todo lo que _MIGRATIONS le haya
