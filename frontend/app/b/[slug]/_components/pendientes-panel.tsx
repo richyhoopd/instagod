@@ -75,7 +75,7 @@ function PendienteCard({ item, slug }: { item: QueueItem; slug: string }) {
 }
 
 export function PendientesPanel({ slug }: { slug: string }) {
-  const { data, isLoading } = useQueue(slug, "pendiente");
+  const { data, isLoading } = useQueue(slug, { estado: "pendiente" });
   const pendientes = data ?? [];
 
   return (

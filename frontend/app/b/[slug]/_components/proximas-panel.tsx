@@ -9,7 +9,7 @@ import { primeraImagen, contarImagenes } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
 
 export function ProximasPanel({ slug }: { slug: string }) {
-  const { data, isLoading } = useQueue(slug, "programado");
+  const { data, isLoading } = useQueue(slug, { estado: "programado" });
   const proximas = [...(data ?? [])]
     .sort((a, b) => (a.scheduled_datetime ?? "").localeCompare(b.scheduled_datetime ?? ""))
     .slice(0, 5);

@@ -9,7 +9,7 @@ import { useQueue } from "@/hooks/use-queue";
 import type { Brand } from "@/hooks/use-brands";
 
 export function BrandCard({ marca }: { marca: Brand }) {
-  const pendientes = useQueue(marca.slug, "pendiente");
+  const pendientes = useQueue(marca.slug, { estado: "pendiente" });
   const conteoPendientes = pendientes.data?.length ?? 0;
 
   return (

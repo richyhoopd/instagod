@@ -20,6 +20,16 @@ export function primeraImagen(url: string | null | undefined): string | null {
   return v || null;
 }
 
+export function listaImagenes(url: string | null | undefined): string[] {
+  if (!url) return [];
+  const v = url.trim();
+  if (v.startsWith("[")) {
+    const arr = parseArray(v);
+    return arr ?? [];
+  }
+  return v ? [v] : [];
+}
+
 export function contarImagenes(url: string | null | undefined): number {
   if (!url) return 0;
   const v = url.trim();
