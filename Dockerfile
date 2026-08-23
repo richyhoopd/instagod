@@ -28,7 +28,9 @@ RUN pip install -r requirements.txt \
 COPY . .
 
 # Usuario sin privilegios; data/ y out/ son volúmenes montados desde el host.
-RUN useradd -m -u 1000 instagod \
+# APP_UID debe coincidir con el dueño de data/ en el host (ubuntu en Oracle = 1001).
+ARG APP_UID=1000
+RUN useradd -m -u ${APP_UID} instagod \
     && mkdir -p /app/data /app/out /app/secrets \
     && chown -R instagod:instagod /app /ms-playwright
 USER instagod

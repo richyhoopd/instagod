@@ -3,7 +3,10 @@
 #      docker compose --profile gdlscene up -d   (si además migras el daemon de Telegram)
 # Todos leen el mismo .env y comparten ./data (SQLite WAL + fotos).
 x-app: &app
-  build: .
+  build:
+    context: .
+    args:
+      APP_UID: ${APP_UID:-1000}
   image: instagod:latest
   env_file: .env
   environment:

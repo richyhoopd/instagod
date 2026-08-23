@@ -73,6 +73,9 @@ sin ella los secretos cifrados por marca son irrecuperables.
 
 ## 4. Levantar
 
+Si el usuario del host no es uid 1000 (`id -u`; en la imagen Ubuntu de Oracle `ubuntu` es 1001),
+pon `APP_UID=<uid>` en `.env` para que el contenedor pueda escribir `data/`.
+
 ```bash
 cd /opt/instagod
 docker compose up -d --build        # primera vez: ~5–10 min (Chromium, OpenCV, onnxruntime)
