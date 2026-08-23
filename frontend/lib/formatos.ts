@@ -48,3 +48,16 @@ export function temaLimpio(tema: string | null | undefined): string {
   if (!tema) return "";
   return tema.replace(/^slideshow\s+[a-z_]+\s*:\s*/i, "").trim();
 }
+
+// Relación de aspecto del carrusel (generate_slideshow --aspect). 9:16 es el
+// formato de TikTok / Reels / Stories; con zonas seguras en el motor.
+export const ASPECTS: { value: string; label: string; hint: string }[] = [
+  { value: "4:5", label: "4:5 · Feed", hint: "Instagram feed (vertical clásico)" },
+  { value: "9:16", label: "9:16 · TikTok / Reels / Stories", hint: "Pantalla completa vertical" },
+  { value: "1:1", label: "1:1 · Cuadrado", hint: "Feed cuadrado, LinkedIn, X" },
+  { value: "16:9", label: "16:9 · Horizontal", hint: "YouTube, presentaciones" },
+];
+export const ASPECT_DEFAULT = "4:5";
+export function aspectLabel(v: string): string {
+  return ASPECTS.find((a) => a.value === v)?.label ?? v;
+}

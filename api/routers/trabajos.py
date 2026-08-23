@@ -1,6 +1,8 @@
 """Trabajos asíncronos del portal: slideshows y su cola de jobs."""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -31,7 +33,7 @@ class NuevoSlideshow(BaseModel):
     estilo: str | None = None
     fuentes: list[str] | None = None
     n_slides: int = Field(default=6, ge=1, le=10)
-    aspect: str = "4:5"
+    aspect: Literal["4:5", "9:16", "1:1", "16:9"] = "4:5"
     contexto: str | None = None
 
 

@@ -11,7 +11,7 @@ import { useBrand } from "@/hooks/use-brands";
 import { useTopics, type Topic } from "@/hooks/use-topics";
 import { useCrearSlideshow } from "@/hooks/use-job";
 import { useEstadoFuentes } from "@/hooks/use-sources";
-import { formatoLabel, formatosDeMarca } from "@/lib/formatos";
+import { ASPECT_DEFAULT, aspectLabel, formatoLabel, formatosDeMarca } from "@/lib/formatos";
 import { estiloLabel, estilosDeMarca } from "@/lib/estilos";
 import { fuenteLabel, fuentesDeMarca } from "@/lib/fuentes";
 import { WizardSteps } from "./_components/wizard-steps";
@@ -42,6 +42,7 @@ function CreateWizard() {
   );
   const [temaSyncId, setTemaSyncId] = useState<number | undefined>(undefined);
   const [formato, setFormato] = useState<string | undefined>(undefined);
+  const [aspect, setAspect] = useState<string>(ASPECT_DEFAULT);
   const [estilo, setEstilo] = useState<string | undefined>(undefined);
   const [fuentesSel, setFuentesSel] = useState<string[] | null>(null);
   const [nSlides, setNSlides] = useState(6);
@@ -75,6 +76,7 @@ function CreateWizard() {
         estilo,
         fuentes: fuentesActivas,
         n_slides: nSlides,
+        aspect,
         contexto: contexto.trim() || undefined,
         topic_id: topicId,
       });
@@ -130,7 +132,13 @@ function CreateWizard() {
         />
       )}
       {paso === 2 && (
-        <PasoFormato formatos={formatos} seleccionado={formato} onChange={setFormato} />
+        <PasoFormato
+          formatos={formatos}
+          seleccionado={formato}
+          onChange={setFormato}
+          aspect={aspect}
+          onAspectChange={setAspect}
+        />
       )}
       {paso === 3 && (
         <PasoEstilo slug={slug} estilos={estilos} seleccionado={estilo} onChange={setEstilo} />
@@ -153,6 +161,8 @@ function CreateWizard() {
               <dd className="text-foreground">{tema.trim()}</dd>
               <dt>Formato</dt>
               <dd className="text-foreground">{formatoLabel(formato ?? formatos[0])}</dd>
+              <dt>Pantalla</dt>
+              <dd className="text-foreground">{aspectLabel(aspect)}</dd>
               <dt>Estilo</dt>
               <dd className="text-foreground">
                 {estilo ? estiloLabel(estilo) : "El habitual de la marca"}

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { EstadoBadge } from "@/components/estado-badge";
 import { ImageCarousel } from "../../calendar/_components/image-carousel";
+import { SlideEditor, slidesDe } from "../../calendar/_components/slide-editor";
 import { ApiError } from "@/lib/api";
 import { formatearFecha } from "@/lib/fecha";
 import { listaImagenes } from "@/lib/imagenes";
@@ -47,6 +48,8 @@ export function ResultadoCarrusel({
 
   const [slotElegido, setSlotElegido] = useState<string | null>(null);
   const [slotSyncId, setSlotSyncId] = useState<number | null>(null);
+  const [editandoSlides, setEditandoSlides] = useState(false);
+  const [slideIdx, setSlideIdx] = useState(0);
 
   // Preselecciona el primer slot libre cuando llega la lista (una vez por qid).
   if (slotsQuery.data && slotSyncId !== qid) {
@@ -96,8 +99,34 @@ export function ResultadoCarrusel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ImageCarousel imagenes={listaImagenes(item.imagen_url)} />
+        <ImageCarousel imagenes={listaImagenes(item.imagen_url)} onIndexChange={setSlideIdx} />
         {item.caption && <p className="text-sm whitespace-pre-line">{item.caption}</p>}
+
+        {puedeResolver && item.tipo === "slideshow" && slidesDe(item.slides_data) && (
+          <div className="space-y-2 rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">¿Algo que cambiar?</p>
+                <p className="text-xs text-muted-foreground">
+                  Edita el texto o la imagen de cada slide antes de aprobar.
+                </p>
+              </div>
+              <Button size="sm" variant={editandoSlides ? "outline" : "default"}
+                onClick={() => setEditandoSlides((v) => !v)}>
+                {editandoSlides ? "Cerrar editor" : "Editar slides"}
+              </Button>
+            </div>
+            {editandoSlides && (
+              <SlideEditor
+                key={item.id}
+                slug={slug}
+                qid={item.id}
+                slides={slidesDe(item.slides_data)!}
+                slideIdx={slideIdx}
+              />
+            )}
+          </div>
+        )}
 
         {puedeResolver && (
           <div className="space-y-3 rounded-lg border p-3">
