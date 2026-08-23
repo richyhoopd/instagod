@@ -55,7 +55,10 @@ def compilar(guion: dict[str, Any], *, estilo: str, imagenes: list,
         rol = sl.get("rol", "punto")
         r = preset["roles"].get(rol, preset["roles"]["punto"])
         item = TextItem(text=sl["text"], font=r["font"], font_size=r["font_size"],
-                        text_color=preset["texto"], text_style=r["text_style"],
+                        text_color=r.get("color", preset["texto"]),
+                        text_style=r["text_style"],
+                        text_align=r.get("text_align", "center"),
+                        text_anchor=r.get("text_anchor", "center"),
                         text_vertical_anchor=r["text_vertical_anchor"])
         slides.append(Slide(
             image_urls=[img.ruta_o_url] if img else [],

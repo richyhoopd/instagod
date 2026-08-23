@@ -14,7 +14,8 @@
     <input name="tema" required placeholder="p.ej. cafeterías de especialidad en GDL">
   </label>
   <label>Marca
-    <select name="marca">
+    <select name="marca" hx-get="/slideshows/estilos" hx-target="#galeria-estilos"
+            hx-trigger="change" hx-include="this">
       {% for m in marcas_activas %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
     </select>
   </label>
@@ -24,12 +25,9 @@
       {% for f in formatos %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
     </select>
   </label>
-  <label>Estilo
-    <select name="estilo">
-      <option value="">(default del perfil)</option>
-      {% for e in estilos %}<option value="{{ e }}">{{ e }}</option>{% endfor %}
-    </select>
-  </label>
+  <label>Estilo</label>
+  <div id="galeria-estilos" hx-get="/slideshows/estilos?marca={{ marca_inicial }}"
+       hx-trigger="load" class="muted">cargando estilos…</div>
   <label>Fuentes (orden, separadas por coma; vacío = default del perfil)
     <input name="fuentes" placeholder="banco,covers,pexels,pinterest">
   </label>

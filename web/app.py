@@ -1574,9 +1574,48 @@ def slideshows_vista(request: Request) -> HTMLResponse:
         cx.close()
     return templates.TemplateResponse(request, "slideshows.html", {
         "formatos": sorted(config.SLIDESHOW_FORMATOS),
-        "estilos": sorted(config.SLIDESHOW_ESTILOS),
         "marcas_activas": marcas_activas,
+        "marca_inicial": marcas_activas[0] if marcas_activas else "gdlscene",
     })
+
+
+@app.get("/slideshows/estilos", response_class=HTMLResponse)
+def slideshows_estilos(request: Request, marca: str = "gdlscene") -> HTMLResponse:
+    """Fragmento HTMX: galería de estilos (con miniatura) de UNA marca."""
+    from src import marcas as marcas_mod
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        try:
+            m = marcas_mod.cargar(cx, marca)
+        except ValueError:
+            return HTMLResponse(f"⚠️ marca desconocida {marca!r}", status_code=404)
+        estilos = sorted(marcas_mod.estilos_de(m))
+    finally:
+        cx.close()
+    return templates.TemplateResponse(request, "_estilos_galeria.html", {
+        "marca": m.slug, "estilos": estilos,
+        "default": next(iter(m.estilos), None),
+    })
+
+
+@app.get("/slideshows/preview/{marca}/{estilo}.png")
+def slideshows_preview(marca: str, estilo: str):
+    """Miniatura del estilo (render real del motor, cacheado por hash)."""
+    from fastapi.responses import FileResponse
+
+    from src import estilo_preview
+    cx = db.connect()
+    try:
+        db.init_db(cx)
+        try:
+            png = estilo_preview.png_de(cx, marca, estilo)
+        except (KeyError, ValueError):
+            raise HTTPException(404, f"estilo {estilo!r} no existe para {marca!r}")
+    finally:
+        cx.close()
+    return FileResponse(png, media_type="image/png",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/slideshows/generar", response_class=HTMLResponse)

@@ -1,0 +1,17 @@
+<div style="display:flex; flex-wrap:wrap; gap:10px;">
+  <label style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+    <input type="radio" name="estilo" value="" checked>
+    <div style="width:120px; height:150px; border:1px dashed #999; border-radius:6px;
+                display:flex; align-items:center; justify-content:center;
+                font-size:12px; color:#777; text-align:center;">default<br>del perfil</div>
+    {% if default %}<span class="muted" style="font-size:11px;">({{ default }})</span>{% endif %}
+  </label>
+  {% for e in estilos %}
+  <label style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
+    <input type="radio" name="estilo" value="{{ e }}">
+    <img src="/slideshows/preview/{{ marca }}/{{ e }}.png" loading="lazy" alt="{{ e }}"
+         style="width:120px; border-radius:6px; display:block;">
+    <span style="font-size:11px;">{{ e }}</span>
+  </label>
+  {% endfor %}
+</div>

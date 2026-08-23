@@ -26,6 +26,37 @@ ESTILOS_GDLSCENE = {
 }
 
 ESTILOS_PENSIONMAS = {
+    # postal: la foto manda, texto sin caja; solido: navy casi pleno.
+    "pension_postal": {
+        "texto": "blanco", "fondo": "navy", "background_opacity": 0.3,
+        "overlay": "navy",
+        "chrome": {"handle": "@pensionmas", "logo": None},
+        "roles": {
+            "hook": {"font": "Erode-Bold", "font_size": "extra_large",
+                     "text_style": "text", "text_vertical_anchor": "top",
+                     "text_align": "left", "text_anchor": "left"},
+            "punto": {"font": "Erode-Semibold", "font_size": "large",
+                      "text_style": "text", "text_vertical_anchor": "center",
+                      "text_align": "left", "text_anchor": "left"},
+            "cta": {"font": "Poppins-SemiBold", "font_size": "medium",
+                    "color": "oro", "text_style": "text",
+                    "text_vertical_anchor": "bottom"},
+        },
+    },
+    "pension_solido": {
+        "texto": "blanco", "fondo": "navy", "background_opacity": 0.85,
+        "overlay": "navy",
+        "chrome": {"handle": "@pensionmas", "logo": None},
+        "roles": {
+            "hook": {"font": "Erode-Bold", "font_size": "extra_large",
+                     "text_style": "text", "text_vertical_anchor": "center"},
+            "punto": {"font": "Erode-Semibold", "font_size": "large",
+                      "text_style": "text", "text_vertical_anchor": "center"},
+            "cta": {"font": "Poppins-SemiBold", "font_size": "medium",
+                    "color": "oro", "text_style": "text",
+                    "text_vertical_anchor": "bottom"},
+        },
+    },
     "pensionmas": {
         "texto": "blanco", "fondo": "navy", "background_opacity": 0.3,
         "chrome": {"handle": "@pensionmas", "logo": None},
@@ -41,6 +72,40 @@ ESTILOS_PENSIONMAS = {
 }
 
 ESTILOS_MELAQUECAPITAL = {
+    # postal: portada de carrusel (foto a sangre, hook arriba-izq, CTA latón);
+    # solido: el slide "de texto" de la guía, olivo casi pleno.
+    "melaque_postal": {
+        "texto": "hueso", "fondo": "olivo", "background_opacity": 0.3,
+        "overlay": "olivo",
+        "chrome": {"handle": "@melaquecapital",
+                   "logo": "data/brands/melaquecapital/mark.svg",
+                   "font": "Archivo"},
+        "roles": {
+            "hook": {"font": "Marcellus", "font_size": "extra_large",
+                     "text_style": "text", "text_vertical_anchor": "top",
+                     "text_align": "left", "text_anchor": "left"},
+            "punto": {"font": "Marcellus", "font_size": "large",
+                      "text_style": "text", "text_vertical_anchor": "center",
+                      "text_align": "left", "text_anchor": "left"},
+            "cta": {"font": "Archivo", "font_size": "medium", "color": "laton",
+                    "text_style": "text", "text_vertical_anchor": "bottom"},
+        },
+    },
+    "melaque_solido": {
+        "texto": "hueso", "fondo": "olivo", "background_opacity": 0.85,
+        "overlay": "olivo",
+        "chrome": {"handle": "@melaquecapital",
+                   "logo": "data/brands/melaquecapital/mark.svg",
+                   "font": "Archivo"},
+        "roles": {
+            "hook": {"font": "Marcellus", "font_size": "extra_large",
+                     "text_style": "text", "text_vertical_anchor": "center"},
+            "punto": {"font": "Marcellus", "font_size": "large",
+                      "text_style": "text", "text_vertical_anchor": "center"},
+            "cta": {"font": "Archivo", "font_size": "medium", "color": "laton",
+                    "text_style": "text", "text_vertical_anchor": "bottom"},
+        },
+    },
     "melaquecapital": {
         # El verde ocupa la superficie; el latón es el único acento; nunca
         # negro sobre foto (caja y overlay en olivo). Marcellus tiene un solo
@@ -127,6 +192,24 @@ _PERFIL_GDLSCENE = {
 }
 
 
+def _fusionar_estilos(cx, account_id: int, semilla: dict) -> None:
+    """Agrega presets NUEVOS a un estilos_json ya poblado sin tocar los que
+    existen (editados a mano incluidos). Con el campo vacío no hace nada:
+    _completar ya lo siembra entero."""
+    fila = db.get(cx, "accounts", account_id)
+    crudo = (fila.get("estilos_json") or "").strip()
+    if not crudo:
+        return
+    try:
+        actuales = json.loads(crudo)
+    except ValueError:
+        return  # malformado: no adivinamos, marcas._json_o ya avisa en runtime
+    nuevos = {k: v for k, v in semilla.items() if k not in actuales}
+    if nuevos:
+        db.update(cx, "accounts", account_id,
+                  estilos_json=json.dumps({**actuales, **nuevos}, ensure_ascii=False))
+
+
 def _completar(cx, account_id: int, perfil: dict) -> None:
     fila = db.get(cx, "accounts", account_id)
     faltantes = {k: v for k, v in perfil.items() if not (fila.get(k) or "").strip()}
@@ -150,6 +233,8 @@ def sembrar(cx) -> None:
             nombre="Melaque West Coast Real Estate", ciudad="Melaque",
             color_marca="#223124", activa=1)
     _completar(cx, por_slug["melaquecapital"], _PERFIL_MELAQUECAPITAL)
+    _fusionar_estilos(cx, por_slug["pensionmas"], ESTILOS_PENSIONMAS)
+    _fusionar_estilos(cx, por_slug["melaquecapital"], ESTILOS_MELAQUECAPITAL)
     print("Seeds de marca aplicados (gdlscene + pensionmas + melaquecapital).")
 
 

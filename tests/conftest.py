@@ -25,6 +25,15 @@ def api_cliente(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DB_PATH", str(tmp_path / "api.db"))
     importlib.reload(config)
+    # El reload evalúa DB_PATH con el env temporal; monkeypatch restaura el
+    # env al terminar pero NO el módulo → sin este finalizer, todos los tests
+    # posteriores heredan la DB temporal muerta.
+    import os
+
+    def _restaurar_config():
+        os.environ.pop("DB_PATH", None)
+        importlib.reload(config)
+
     # Limpiar env vars de marcas DESPUÉS del reload (que carga .env)
     for key in ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
                 "IG_SCRAPER_UA", "SHEET_ID",
@@ -64,3 +73,4 @@ def api_cliente(tmp_path, monkeypatch):
 
     yield cli, cx, H
     cx.close()
+    _restaurar_config()

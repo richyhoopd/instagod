@@ -57,3 +57,39 @@ def test_sembrar_crea_melaquecapital_completo(tmp_path) -> None:
     voz = m.voz.lower()
     assert "moneda" in voz and "ejido" in voz          # reglas de copy
     assert "sin gente" in voz or "personas reconocibles" in voz
+
+
+def test_pensionmas_tiene_estilos_alternos(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    marcas_seed.sembrar(cx)
+    m = marcas.cargar(cx, "pensionmas")
+    assert set(m.estilos) == {"pensionmas", "pension_postal", "pension_solido"}
+    assert m.estilos["pension_postal"]["roles"]["cta"]["color"] == "oro"
+    assert m.estilos["pension_solido"]["background_opacity"] >= 0.8
+
+
+def test_sembrar_agrega_presets_nuevos_sin_pisar_los_editados(tmp_path) -> None:
+    """DB viva: estilos_json ya poblado gana nuevas claves, las suyas intactas."""
+    import json
+    cx = _cx(tmp_path)
+    marcas_seed.sembrar(cx)
+    m = marcas.cargar(cx, "melaquecapital")
+    editado = dict(m.estilos["melaquecapital"], background_opacity=0.77)
+    db.update(cx, "accounts", m.id,
+              estilos_json=json.dumps({"melaquecapital": editado}))
+    marcas_seed.sembrar(cx)
+    m2 = marcas.cargar(cx, "melaquecapital")
+    assert m2.estilos["melaquecapital"]["background_opacity"] == 0.77  # no pisado
+    assert "melaque_postal" in m2.estilos                              # agregado
+
+
+def test_melaquecapital_tiene_estilos_alternos(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    marcas_seed.sembrar(cx)
+    m = marcas.cargar(cx, "melaquecapital")
+    assert set(m.estilos) == {"melaquecapital", "melaque_postal", "melaque_solido"}
+    postal = m.estilos["melaque_postal"]
+    assert postal["roles"]["hook"]["text_style"] == "text"
+    assert postal["roles"]["hook"]["text_align"] == "left"
+    assert postal["roles"]["cta"]["color"] == "laton"
+    assert m.estilos["melaque_solido"]["background_opacity"] >= 0.8

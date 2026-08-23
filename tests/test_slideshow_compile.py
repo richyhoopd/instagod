@@ -190,3 +190,26 @@ def test_font_faces_incluyen_marcellus_y_archivo() -> None:
     faces = {f["name"]: f["fmt"] for f in sc.contexto_slide(s, 0)["font_faces"]}
     assert faces["Marcellus"] == "woff2"
     assert faces["Archivo"] == "woff2"
+
+
+def test_rol_puede_pisar_color_alineacion_y_ancla() -> None:
+    """Estilos "postal": CTA en latón, hook alineado a la izquierda, sin caja."""
+    estilos = {"postal": {
+        "texto": "hueso", "fondo": "olivo", "background_opacity": 0.3,
+        "roles": {
+            "hook": {"font": "Marcellus", "font_size": "extra_large",
+                     "text_style": "text", "text_vertical_anchor": "top",
+                     "text_align": "left", "text_anchor": "left"},
+            "punto": {"font": "Marcellus", "font_size": "large",
+                      "text_style": "text", "text_vertical_anchor": "center"},
+            "cta": {"font": "Archivo", "font_size": "medium", "color": "laton",
+                    "text_style": "text", "text_vertical_anchor": "bottom"},
+        }}}
+    s = sc.compilar(_guion(), estilo="postal", imagenes=[_Img("/tmp/a.jpg")] * 3,
+                    estilos=estilos)
+    hook, cta = s.slides[0].text_items[0], s.slides[2].text_items[0]
+    assert hook.text_align == "left" and hook.text_anchor == "left"
+    assert hook.text_color == "hueso"          # sin override usa el del preset
+    assert cta.text_color == "laton"           # override por rol
+    assert s.slides[1].text_items[0].text_align == "center"  # default intacto
+    assert sm.validar(s) == []

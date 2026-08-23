@@ -7,6 +7,9 @@ from src import instagram, sheets
 
 
 def test_marcas_en_env(monkeypatch) -> None:
+    import os
+    for k in [k for k in os.environ if k.startswith("SHEET_ID__")]:
+        monkeypatch.delenv(k)  # el .env real crece con cada marca nueva
     monkeypatch.setenv("SHEET_ID__PENSIONMAS", "S2")
     monkeypatch.setenv("SHEET_ID__TELCO", "S3")
     ms = config.marcas_en_env()
