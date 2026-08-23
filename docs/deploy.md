@@ -56,7 +56,7 @@ rsync -az --delete --exclude-from=.dockerignore --exclude .git ./ ubuntu@$IP:/op
 scp .env ubuntu@$IP:/opt/instagod/.env
 scp -r secrets/ ubuntu@$IP:/opt/instagod/secrets/
 # datos (SQLite + fotos ≈ 4 GB; tarda según tu subida). Repetible: sólo copia lo nuevo.
-rsync -az --info=progress2 data/ ubuntu@$IP:/opt/instagod/data/
+rsync -azL data/ ubuntu@$IP:/opt/instagod/data/   # -L: copia el destino de symlinks (data/brands/*/fotos suele ser symlink local)
 ```
 
 En la VM, edita `/opt/instagod/.env` y agrega/ajusta el bloque de
