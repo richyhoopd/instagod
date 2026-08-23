@@ -127,6 +127,25 @@ marcas con `SHEET_ID`, así que no hay doble publicación mientras conviven.
 3. Cuando quieras que el publisher del server publique gdlscene: quita
    `SHEET_ID` del `.env` del server y desactiva `publish.yml` en Actions.
 
+
+### Estado real (2026-08-23) — migración hecha
+
+- VM Oracle `instagod` (A1.Flex 2/12, Querétaro), IP `159.54.144.79`, alias SSH `instagod-vm`.
+  API pública: `https://159-54-144-79.sslip.io` (Caddy + Let's Encrypt, sin dominio propio).
+- En la VM corren `api`, `worker`, `publisher`, `daemon` (profile `gdlscene`) y `caddy`.
+  La DB de verdad es `/opt/instagod/data/gdlscene.db` en la VM.
+- Jobs de gdlscene en `crontab -l` de `ubuntu` (UTC; CDMX = UTC-6): novedades 15:00,
+  releases 16:00, segments 00:00, ig_insights 03:30, rerank lun 14:00, ig_token lun 16:15.
+  Logs en `data/logs/cron-*.log`. Cada job corre `docker compose run --rm --no-deps -T api python -m ...`.
+- En la Mac quedaron: `web-sync` (thescene-web; antes ejecuta `~/.oci/pull_db_from_vm.sh`, que baja
+  snapshot de la DB y `data/covers` de la VM) y el bot interactivo `bot.py` (manual). Los demás
+  plists están renombrados `.disabled` en `~/Library/LaunchAgents`.
+- gdlscene sigue publicando por GitHub Actions (`publish.yml`, tiene `SHEET_ID`); el publisher
+  de la VM la salta. Para pasar gdlscene al publisher del server: quitar `SHEET_ID` del `.env`
+  de la VM y desactivar `publish.yml`.
+- Magic links sin Resend: `~/.oci/portal_link.sh correo [--crear --nombre X] [--ttl min]`.
+- `APP_UID=1001` en `.env` (ubuntu en la imagen de Oracle es uid 1001).
+
 ## 8. Operación
 
 ```bash
