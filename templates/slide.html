@@ -28,8 +28,7 @@
   .zonas {
     position:absolute; inset:0; display:flex; flex-direction:column;
     justify-content:space-between;
-    padding:{{ (height * 0.06) | round | int }}px 0
-            {{ (height * (0.10 if chrome else 0.06)) | round | int }}px 0;
+    padding:{{ pad_top }}px {{ pad_right }}px {{ pad_bottom }}px {{ pad_left }}px;
   }
   .zona { display:flex; flex-direction:column; width:100%; }
   .zona.top { justify-content:flex-start; }
@@ -57,7 +56,8 @@
   .txt.estilo-text span.linea { text-shadow:0 2px 14px rgba(0,0,0,.55); }
 
   .chrome {
-    position:absolute; left:0; right:0; bottom:{{ (height * 0.025) | round | int }}px;
+    position:absolute; left:{{ pad_left }}px; right:{{ pad_right }}px;
+    bottom:{{ chrome_bottom }}px;
     display:flex; align-items:center; justify-content:center; gap:14px;
     font-family:'{{ chrome.font if chrome else 'Poppins-SemiBold' }}',sans-serif;
     font-size:{{ (width * 0.028) | round | int }}px;

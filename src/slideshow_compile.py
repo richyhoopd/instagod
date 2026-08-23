@@ -88,6 +88,21 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
     width, height = ASPECT_RATIOS[s.aspect_ratio]
     cols, rows = IMAGE_LAYOUTS[sl.image_layout]
     escala = width / 1080
+    # Zonas seguras: en 9:16 la UI de TikTok tapa 250px arriba, 470px abajo y
+    # 200px a la derecha (medidas de 1080x1920; IG tapa menos — se usa la caja
+    # de TikTok para que la misma pieza sirva en ambos). El resto de aspects
+    # conserva los márgenes históricos (6% / 10% con chrome / chrome al 2.5%).
+    tiene_chrome = bool(s.brief.get("chrome"))
+    if s.aspect_ratio == "9:16":
+        pad_top = round(250 * escala)
+        chrome_bottom = round(470 * escala)
+        pad_bottom = round((470 + (110 if tiene_chrome else 0)) * escala)
+        pad_left, pad_right = round(84 * escala), round(200 * escala)
+    else:
+        pad_top = round(height * 0.06)
+        chrome_bottom = round(height * 0.025)
+        pad_bottom = round(height * (0.10 if tiene_chrome else 0.06))
+        pad_left = pad_right = 0
     caja_marca = s.brief.get("caja")
     items = []
     for t in sl.text_items:
@@ -125,6 +140,11 @@ def contexto_slide(s: Slideshow, idx: int) -> dict[str, Any]:
         "grid_cols": cols,
         "grid_rows": rows,
         "overlay_opacity": sl.background_opacity,
+        "pad_top": pad_top,
+        "pad_bottom": pad_bottom,
+        "pad_left": pad_left,
+        "pad_right": pad_right,
+        "chrome_bottom": chrome_bottom,
         "overlay_color": (config.SLIDESHOW_PALETA[s.brief["overlay"]]
                           if s.brief.get("overlay") else "#000"),
         "chrome": chrome,

@@ -213,3 +213,29 @@ def test_rol_puede_pisar_color_alineacion_y_ancla() -> None:
     assert cta.text_color == "laton"           # override por rol
     assert s.slides[1].text_items[0].text_align == "center"  # default intacto
     assert sm.validar(s) == []
+
+
+def test_contexto_slide_916_respeta_zonas_seguras_tiktok() -> None:
+    """9:16: la UI de TikTok tapa 250px arriba, 470px abajo y 200px a la
+    derecha (en 1080x1920). El texto y el chrome viven dentro del recuadro."""
+    s = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=[_Img("/tmp/a.jpg")] * 3,
+                    aspect_ratio="9:16")
+    ctx = sc.contexto_slide(s, 0)
+    assert ctx["pad_top"] == 250
+    assert ctx["pad_bottom"] >= 470
+    assert ctx["pad_right"] == 200
+    assert ctx["pad_left"] > 0
+    assert ctx["chrome_bottom"] >= 470          # el pie de marca también
+
+
+def test_contexto_slide_45_conserva_margenes_historicos() -> None:
+    s = sc.compilar(_guion(), estilo="tiktok_bold", imagenes=[_Img("/tmp/a.jpg")] * 3)
+    ctx = sc.contexto_slide(s, 0)
+    assert ctx["pad_top"] == round(1350 * 0.06)
+    assert ctx["pad_bottom"] == round(1350 * 0.06)      # sin chrome
+    assert ctx["pad_left"] == 0 and ctx["pad_right"] == 0
+    ctx2 = sc.contexto_slide(
+        sc.compilar(_guion(), estilo="melaquecapital", imagenes=[None] * 3,
+                    estilos=_preset_mwrs()), 0)
+    assert ctx2["pad_bottom"] == round(1350 * 0.10)     # con chrome
+    assert ctx2["chrome_bottom"] == round(1350 * 0.025)
