@@ -32,6 +32,15 @@ class EditarItem(BaseModel):
     scheduled_datetime: str | None = None
 
 
+class SlideEdit(BaseModel):
+    texts: list[str]
+    image_url: str | None = None
+
+
+class EditarSlides(BaseModel):
+    slides: list[SlideEdit]
+
+
 @router.get("/queue")
 def listar(slug: str, desde: str | None = None, hasta: str | None = None,
           estado: str | None = None, user: dict = Depends(usuario_actual),
@@ -70,6 +79,31 @@ def editar(slug: str, qid: int, datos: EditarItem, user: dict = Depends(usuario_
             raise ApiError(422, "validacion", "No se puede reprogramar en este estado",
                           "scheduled_datetime") from None
     return cola.detalle(cx, qid)
+
+
+_ERRORES_SLIDES = {
+    "estado": "No se pueden editar los slides en este estado",
+    "tipo": "Este item no es un carrusel editable",
+    "estructura": "Los slides no coinciden con los del carrusel (número de slides/textos, o texto vacío)",
+    "url": "La URL de fondo no es válida",
+    "foto": "Esa foto no existe en el banco de la marca",
+}
+
+
+@router.put("/queue/{qid}/slides", status_code=202)
+def editar_slides(slug: str, qid: int, datos: EditarSlides,
+                  user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
+    """Aplica textos/fondos por slide y encola el re-render (sin LLM)."""
+    fila, _ = marca_para(slug, cx, user)
+    _item_de_marca(cx, fila["id"], qid)
+    try:
+        cola.editar_slides(cx, qid, [s.model_dump() for s in datos.slides])
+    except ValueError as e:
+        detalle_err = _ERRORES_SLIDES.get(str(e), "Slides inválidos")
+        raise ApiError(422, "validacion", detalle_err, "slides") from None
+    job_id = jobs.crear(cx, "slideshow.rerender", fila["id"], {"queue_id": qid},
+                        creado_por=user["id"])
+    return {"job_id": job_id}
 
 
 @router.post("/queue/{qid}/aprobar")

@@ -78,7 +78,7 @@ def _to_src(value: str | None) -> str:
         return ""
     if value.startswith(("http://", "https://", "data:", "file://")):
         return value
-    return Path(value).resolve().as_uri()
+    return config._resolve(value).resolve().as_uri()
 
 
 def _onion_html(caption: str) -> str:

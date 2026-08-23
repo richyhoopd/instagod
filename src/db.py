@@ -129,7 +129,11 @@ def es_musical(band: dict[str, Any]) -> bool:
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     """Conexión SQLite con FK activas y filas como dict-like (sqlite3.Row)."""
     path = Path(db_path) if db_path else config.resolve_db_path()
-    cx = sqlite3.connect(path)
+    # check_same_thread=False: FastAPI corre la dependencia get_cx y el endpoint
+    # sync en hilos distintos del threadpool, así que la conexión abierta en un
+    # hilo se usa en otro. El acceso por request es serial (una conexión por
+    # request, sin concurrencia sobre el mismo objeto), así que es seguro.
+    cx = sqlite3.connect(path, check_same_thread=False)
     cx.row_factory = sqlite3.Row
     cx.execute("PRAGMA foreign_keys = ON")
     # WAL + busy_timeout: varios procesos (api, daemon, worker, publisher) escriben

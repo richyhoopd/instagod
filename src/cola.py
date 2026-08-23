@@ -168,6 +168,68 @@ def editar_caption(cx, queue_id: int, caption: str) -> None:
     db.update(cx, "content_queue", queue_id, caption=caption)
 
 
+def _resolver_image_url(cx, fila: dict[str, Any], valor: str | None,
+                        actual: str | None) -> str | None:
+    """Valida/traduce el fondo pedido para un slide.
+
+    None → sin foto; el valor ya guardado pasa tal cual (re-mandar el estado
+    actual nunca falla); "/brands/<slug>/files/fotos/<nombre>" → ruta local
+    del banco (ValueError("foto") si no existe); http(s) → url_segura o
+    ValueError("url"). Cualquier otra cosa (file://, rutas arbitrarias) se
+    rechaza: el render la cargaría con Playwright vía file://.
+    """
+    from src import image_sources
+    from src.topics import url_segura
+
+    if valor is None or valor == actual:
+        return valor
+    slug = db.rows(cx, "SELECT slug FROM accounts WHERE id = ?",
+                   (fila["account_id"],))
+    prefijo = f"/brands/{slug[0]['slug']}/files/fotos/" if slug else None
+    if prefijo and valor.startswith(prefijo):
+        nombre = valor[len(prefijo):]
+        ruta = image_sources.BRANDS_DIR / slug[0]["slug"] / "fotos" / nombre
+        if "/" in nombre or ".." in nombre or not ruta.is_file():
+            raise ValueError("foto")
+        return str(ruta)
+    if not url_segura(valor):
+        raise ValueError("url")
+    return valor
+
+
+def editar_slides(cx, queue_id: int, slides: list[dict[str, Any]]) -> None:
+    """Aplica textos y foto de fondo por slide sobre `slideshow_json`.
+
+    `slides` trae el estado COMPLETO deseado: un dict por slide con
+    `texts` (uno por text_item, mismo orden) e `image_url` (None = fondo
+    sólido). La estructura debe coincidir con la guardada — esto edita, no
+    agrega ni quita slides/textos. No re-renderiza: el caller encola el job
+    `slideshow.rerender` después.
+
+    ValueError("estado" | "tipo" | "estructura" | "url" | "foto").
+    """
+    fila = db.get(cx, "content_queue", queue_id)
+    if fila is None or estado_de(fila) not in _EDITABLES:
+        raise ValueError("estado")
+    if fila["tipo"] != "slideshow" or not fila["slideshow_json"]:
+        raise ValueError("tipo")
+    show = json.loads(fila["slideshow_json"])
+    if len(slides) != len(show["slides"]):
+        raise ValueError("estructura")
+    for pedido, slide in zip(slides, show["slides"]):
+        textos = pedido.get("texts") or []
+        if len(textos) != len(slide["text_items"]):
+            raise ValueError("estructura")
+        if any(not (t or "").strip() for t in textos):
+            raise ValueError("estructura")
+        actual = (slide.get("image_urls") or [None])[0]
+        url = _resolver_image_url(cx, fila, pedido.get("image_url"), actual)
+        for item, texto in zip(slide["text_items"], textos):
+            item["text"] = texto.strip()
+        slide["image_urls"] = [url] if url else []
+    db.update(cx, "content_queue", queue_id, slideshow_json=json.dumps(show))
+
+
 def eliminar(cx, queue_id: int) -> None:
     """Descarta la fila (status='descartado'). Solo si el estado derivado es
     pendiente/rechazado/error; ValueError("estado") si no."""

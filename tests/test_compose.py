@@ -62,6 +62,15 @@ def test_to_src_ruta_local_a_file_uri() -> None:
     assert Path("fotos/banda.jpg").resolve().as_uri() == src   # absoluta + file://
 
 
+def test_to_src_ruta_relativa_ancla_a_raiz_del_repo(monkeypatch, tmp_path) -> None:
+    # El worker puede correr con cwd fuera del repo (p. ej. un worktree):
+    # "data/..." debe apuntar al repo, no al cwd.
+    import config
+    monkeypatch.chdir(tmp_path)
+    src = _to_src("data/brands/x/mark.svg")
+    assert src == (config.BASE_DIR / "data/brands/x/mark.svg").resolve().as_uri()
+
+
 # ---------- _onion_html: resalta contenido, deja stopwords planas, escapa HTML ----------
 
 def test_onion_html_resalta_contenido_y_no_stopwords() -> None:

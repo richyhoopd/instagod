@@ -358,3 +358,145 @@ def test_eliminar_fila_publicada_lanza(tmp_path):
 
     with pytest.raises(ValueError, match="estado"):
         cola.eliminar(cx, qid)
+
+
+# ---------- editar_slides (Fase 4: edición slide por slide) ----------
+
+def _show_json(n=2, con_foto=False):
+    import json
+    slides = []
+    for i in range(n):
+        slides.append({
+            "image_urls": (["https://res.cloudinary.com/d/x.jpg"] if con_foto else []),
+            "image_layout": "single",
+            "text_items": [{"text": f"texto {i}", "font_size": "large"}],
+            "is_cta": False, "background_opacity": 0.35,
+            "duration": 3.0, "source": "manual",
+        })
+    return json.dumps({"title": "t", "aspect_ratio": "4:5", "slides": slides,
+                       "caption": "cap", "language": "es",
+                       "brief": {"tema": "t", "estilo": "tiktok_bold"},
+                       "formato": "listicle", "account_slug": "gdlscene"})
+
+
+def _fila_slideshow(cx, **overrides):
+    campos = dict(tipo="slideshow", status="programado", aprobacion="aprobado",
+                  account_id=1, slideshow_json=_show_json())
+    campos.update(overrides)
+    return db.insert(cx, "content_queue", **campos)
+
+
+def test_editar_slides_cambia_textos_y_fondo(tmp_path):
+    import json
+    cx = _cx(tmp_path)
+    qid = _fila_slideshow(cx)
+    cola.editar_slides(cx, qid, [
+        {"texts": ["hook nuevo"], "image_url": "https://cdn.example.com/a.jpg"},
+        {"texts": ["texto 1"], "image_url": None},
+    ])
+    show = json.loads(db.get(cx, "content_queue", qid)["slideshow_json"])
+    assert show["slides"][0]["text_items"][0]["text"] == "hook nuevo"
+    assert show["slides"][0]["image_urls"] == ["https://cdn.example.com/a.jpg"]
+    assert show["slides"][1]["image_urls"] == []
+    # el resto del estilo del text_item no se toca
+    assert show["slides"][0]["text_items"][0]["font_size"]
+
+
+def test_editar_slides_estado_no_editable(tmp_path):
+    cx = _cx(tmp_path)
+    qid = _fila_slideshow(cx, status="publicado")
+    with pytest.raises(ValueError, match="estado"):
+        cola.editar_slides(cx, qid, [{"texts": ["a"], "image_url": None},
+                                     {"texts": ["b"], "image_url": None}])
+
+
+def test_editar_slides_solo_slideshow(tmp_path):
+    cx = _cx(tmp_path)
+    qid = _fila(cx, tipo="meme", status="borrador", aprobacion="pendiente")
+    with pytest.raises(ValueError, match="tipo"):
+        cola.editar_slides(cx, qid, [{"texts": ["a"], "image_url": None}])
+
+
+def test_editar_slides_estructura_debe_coincidir(tmp_path):
+    cx = _cx(tmp_path)
+    qid = _fila_slideshow(cx)
+    # número de slides distinto
+    with pytest.raises(ValueError, match="estructura"):
+        cola.editar_slides(cx, qid, [{"texts": ["a"], "image_url": None}])
+    # número de textos distinto en un slide
+    with pytest.raises(ValueError, match="estructura"):
+        cola.editar_slides(cx, qid, [{"texts": ["a", "b"], "image_url": None},
+                                     {"texts": ["c"], "image_url": None}])
+
+
+def test_editar_slides_texto_vacio_invalido(tmp_path):
+    cx = _cx(tmp_path)
+    qid = _fila_slideshow(cx)
+    with pytest.raises(ValueError, match="estructura"):
+        cola.editar_slides(cx, qid, [{"texts": ["   "], "image_url": None},
+                                     {"texts": ["b"], "image_url": None}])
+
+
+def test_editar_slides_url_insegura_rechazada(tmp_path):
+    cx = _cx(tmp_path)
+    qid = _fila_slideshow(cx)
+    with pytest.raises(ValueError, match="url"):
+        cola.editar_slides(cx, qid, [
+            {"texts": ["a"], "image_url": "http://127.0.0.1/x.jpg"},
+            {"texts": ["b"], "image_url": None},
+        ])
+    with pytest.raises(ValueError, match="url"):
+        cola.editar_slides(cx, qid, [
+            {"texts": ["a"], "image_url": "file:///etc/passwd"},
+            {"texts": ["b"], "image_url": None},
+        ])
+
+
+def test_editar_slides_valor_actual_pasa_sin_validar(tmp_path):
+    # Re-mandar el valor ya guardado (p. ej. ruta local elegida por carpeta)
+    # nunca falla, aunque no sea una URL http.
+    import json
+    cx = _cx(tmp_path)
+    qid = _fila_slideshow(cx)
+    show = json.loads(db.get(cx, "content_queue", qid)["slideshow_json"])
+    show["slides"][0]["image_urls"] = ["data/brands/x/fotos/local.jpg"]
+    db.update(cx, "content_queue", qid, slideshow_json=json.dumps(show))
+    cola.editar_slides(cx, qid, [
+        {"texts": ["a"], "image_url": "data/brands/x/fotos/local.jpg"},
+        {"texts": ["b"], "image_url": None},
+    ])
+    fila = json.loads(db.get(cx, "content_queue", qid)["slideshow_json"])
+    assert fila["slides"][0]["image_urls"] == ["data/brands/x/fotos/local.jpg"]
+
+
+def test_editar_slides_foto_del_banco_se_traduce_a_ruta_local(tmp_path, monkeypatch):
+    import json
+    from src import image_sources
+    cx = _cx(tmp_path)
+    db.insert(cx, "accounts", slug="pmas", ig_handle="@p", nombre="P", ciudad="X")
+    cuenta = db.rows(cx, "SELECT id FROM accounts WHERE slug='pmas'")[0]["id"]
+    qid = _fila_slideshow(cx, account_id=cuenta)
+    monkeypatch.setattr(image_sources, "BRANDS_DIR", tmp_path / "brands")
+    fotos = tmp_path / "brands" / "pmas" / "fotos"
+    fotos.mkdir(parents=True)
+    (fotos / "playa.jpg").write_bytes(b"x")
+    cola.editar_slides(cx, qid, [
+        {"texts": ["a"], "image_url": "/brands/pmas/files/fotos/playa.jpg"},
+        {"texts": ["b"], "image_url": None},
+    ])
+    show = json.loads(db.get(cx, "content_queue", qid)["slideshow_json"])
+    assert show["slides"][0]["image_urls"] == [str(fotos / "playa.jpg")]
+
+
+def test_editar_slides_foto_del_banco_inexistente(tmp_path, monkeypatch):
+    from src import image_sources
+    cx = _cx(tmp_path)
+    db.insert(cx, "accounts", slug="pmas", ig_handle="@p", nombre="P", ciudad="X")
+    cuenta = db.rows(cx, "SELECT id FROM accounts WHERE slug='pmas'")[0]["id"]
+    qid = _fila_slideshow(cx, account_id=cuenta)
+    monkeypatch.setattr(image_sources, "BRANDS_DIR", tmp_path / "brands")
+    with pytest.raises(ValueError, match="foto"):
+        cola.editar_slides(cx, qid, [
+            {"texts": ["a"], "image_url": "/brands/pmas/files/fotos/no-existe.jpg"},
+            {"texts": ["b"], "image_url": None},
+        ])
