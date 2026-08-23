@@ -47,6 +47,10 @@ CLOUDINARY_API_SECRET = _get("CLOUDINARY_API_SECRET")
 PEXELS_API_KEY = _get("PEXELS_API_KEY")
 # Pinterest es scraping best-effort (sin API oficial): apagado por default.
 SOURCING_PINTEREST = (_get("SOURCING_PINTEREST", "0") or "0") == "1"
+# Proveedores de imagen que NO operan en este servidor (p.ej. Pinterest bloquea IPs de
+# datacenter). Lista separada por comas; el portal los marca como no disponibles.
+FUENTES_NO_DISPONIBLES = frozenset(
+    x.strip() for x in (_get("FUENTES_NO_DISPONIBLES", "") or "").split(",") if x.strip())
 
 # ---------- Telegram ----------
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN")

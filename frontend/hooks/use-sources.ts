@@ -89,3 +89,20 @@ export function useCorrerSource(slug: string) {
     mutationFn: (id) => post<{ job_id: number }>(`/brands/${slug}/sources/${id}/run`),
   });
 }
+
+// GET /brands/{slug}/sources/estado — qué proveedores operan en ESTE servidor
+// (sin API key, bloqueado por IP de datacenter, etc.). El wizard lo usa para no
+// prometer imágenes que no van a llegar.
+export interface EstadoFuente {
+  ok: boolean;
+  motivo: string | null;
+}
+
+export function useEstadoFuentes(slug: string) {
+  return useQuery<Record<string, EstadoFuente>, ApiError>({
+    queryKey: ["sources-estado", slug],
+    queryFn: () => get<Record<string, EstadoFuente>>(`/brands/${slug}/sources/estado`),
+    enabled: !!slug,
+    staleTime: 5 * 60_000,
+  });
+}

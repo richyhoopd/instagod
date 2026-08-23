@@ -372,3 +372,22 @@ def test_topics_ownership(api_cliente) -> None:
 
     r = cli.post(f"/brands/pensionmas/topics/{tid_otra}/descartar")
     assert r.status_code == 404
+
+
+# ---------- estado de proveedores ----------
+
+def test_sources_estado_marca_sin_key_y_bloqueados(api_cliente, monkeypatch) -> None:
+    cli, cx, H = api_cliente
+    import config
+    pid = _marca(cx)
+    H.login(H.usuario("v@x.com", marcas=[(pid, "editor")]))
+    monkeypatch.setattr(config, "FUENTES_NO_DISPONIBLES", frozenset({"pinterest"}))
+    monkeypatch.setattr(config, "account_creds",
+                        lambda slug: {"PEXELS_API_KEY": None, "UNSPLASH_ACCESS_KEY": "u", "NEWSAPI_KEY": None})
+    r = cli.get("/brands/pensionmas/sources/estado")
+    assert r.status_code == 200
+    e = r.json()
+    assert e["pexels"] == {"ok": False, "motivo": "sin API key"}
+    assert e["unsplash"]["ok"] is True
+    assert e["pinterest"] == {"ok": False, "motivo": "no disponible en este servidor"}
+    assert e["carpeta"]["ok"] is True and e["banco"]["ok"] is True

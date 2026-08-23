@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api";
 import { useBrand } from "@/hooks/use-brands";
 import { useTopics, type Topic } from "@/hooks/use-topics";
 import { useCrearSlideshow } from "@/hooks/use-job";
+import { useEstadoFuentes } from "@/hooks/use-sources";
 import { formatoLabel, formatosDeMarca } from "@/lib/formatos";
 import { estiloLabel, estilosDeMarca } from "@/lib/estilos";
 import { fuenteLabel, fuentesDeMarca } from "@/lib/fuentes";
@@ -28,6 +29,7 @@ function CreateWizard() {
   const searchParams = useSearchParams();
   const { data: marca, isLoading: brandLoading } = useBrand(slug);
   const { data: topics, isLoading: topicsLoading } = useTopics(slug);
+  const { data: estadoFuentes } = useEstadoFuentes(slug);
 
   const temaInicial = searchParams.get("tema") ?? "";
   const topicIdInicial = Number(searchParams.get("topic"));
@@ -131,12 +133,13 @@ function CreateWizard() {
         <PasoFormato formatos={formatos} seleccionado={formato} onChange={setFormato} />
       )}
       {paso === 3 && (
-        <PasoEstilo estilos={estilos} seleccionado={estilo} onChange={setEstilo} />
+        <PasoEstilo slug={slug} estilos={estilos} seleccionado={estilo} onChange={setEstilo} />
       )}
       {paso === 4 && (
         <PasoFuentes
           disponibles={fuentesDisponibles}
           activas={fuentesActivas}
+          estado={estadoFuentes}
           onToggle={onToggleFuente}
         />
       )}

@@ -100,6 +100,33 @@ def _fuente_de_marca(cx, account_id: int, sid: int) -> dict:
     return fila
 
 
+_MOTIVO_KEY = {"pexels": "PEXELS_API_KEY", "unsplash": "UNSPLASH_ACCESS_KEY",
+               "newsapi": "NEWSAPI_KEY"}
+
+
+def estado_fuentes(slug: str) -> dict[str, dict]:
+    """Qué proveedores operan para esta marca en ESTE servidor: falta de API key
+    (resuelta con la precedencia de config.account_creds) o bloqueo del server
+    (config.FUENTES_NO_DISPONIBLES). ok=True para los que no dependen de nada externo."""
+    creds = config.account_creds(slug)
+    out: dict[str, dict] = {}
+    for prov in ("pexels", "unsplash", "pinterest", "newsapi", "rss", "banco",
+                 "covers", "carpeta", "ig_accounts", "manual"):
+        motivo = None
+        if prov in config.FUENTES_NO_DISPONIBLES:
+            motivo = "no disponible en este servidor"
+        elif prov in _MOTIVO_KEY and not creds.get(_MOTIVO_KEY[prov]):
+            motivo = "sin API key"
+        out[prov] = {"ok": motivo is None, "motivo": motivo}
+    return out
+
+
+@router.get("/sources/estado")
+def estado_sources(slug: str, user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
+    fila, _ = marca_para(slug, cx, user)
+    return estado_fuentes(fila["slug"])
+
+
 @router.get("/sources")
 def listar_sources(slug: str, kind: str | None = None, user: dict = Depends(usuario_actual),
                    cx=Depends(get_cx)) -> list[dict]:

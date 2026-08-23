@@ -380,3 +380,29 @@ def test_patch_brand_campos_extendidos(api_cliente) -> None:
     assert r.status_code == 422 and r.json()["campo"] == "sitio_web"
     r = cli.patch("/brands/pensionmas", json={"hashtags_default": "x" * 401})
     assert r.status_code == 422 and r.json()["campo"] == "hashtags_default"
+
+
+# ---------- preview real de estilo ----------
+
+def test_preview_estilo_sirve_png_y_404_si_no_existe(api_cliente, monkeypatch, tmp_path) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    H.login(H.usuario("v@x.com", marcas=[(pid, "editor")]))
+    from src import estilo_preview
+    png = tmp_path / "p.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    llamadas = []
+
+    def falso_png_de(cx_, slug, estilo):
+        llamadas.append((slug, estilo))
+        if estilo == "no_existe":
+            raise KeyError(estilo)
+        return png
+    monkeypatch.setattr(estilo_preview, "png_de", falso_png_de)
+    r = cli.get("/brands/pensionmas/estilos/editorial/preview.png")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert r.content.startswith(b"\x89PNG") and llamadas == [("pensionmas", "editorial")]
+    assert cli.get("/brands/pensionmas/estilos/no_existe/preview.png").status_code == 404
+    assert cli.get("/brands/pensionmas/estilos/..%2Fx/preview.png").status_code in (404, 422)
+    H.logout()
+    assert cli.get("/brands/pensionmas/estilos/editorial/preview.png").status_code == 401

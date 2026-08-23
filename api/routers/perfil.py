@@ -237,6 +237,24 @@ def subir_logo(slug: str, archivo: UploadFile = File(...),
     return {"logo_path": rel}
 
 
+# ---------- preview real de estilos (wizard) ----------
+
+@router.get("/estilos/{nombre}/preview.png")
+def preview_estilo(slug: str, nombre: str, user: dict = Depends(usuario_actual),
+                   cx=Depends(get_cx)) -> FileResponse:
+    """Miniatura renderizada por el motor (src/estilo_preview): foto del banco de la
+    marca + tipografía/colores reales del preset. Cache por hash del preset."""
+    _valida_nombre_preset(nombre)
+    fila, _ = marca_para(slug, cx, user)
+    from src import estilo_preview
+    try:
+        png = estilo_preview.png_de(cx, fila["slug"], nombre)
+    except (KeyError, ValueError):
+        raise no_encontrado(f"el estilo {nombre!r}")
+    return FileResponse(png, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=300"})
+
+
 # ---------- archivos servidos ----------
 
 @router.get("/files/previews/{nombre}.png")
