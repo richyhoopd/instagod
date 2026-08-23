@@ -12,7 +12,7 @@ requests
 pytz
 tweepy           # crosspost a X/Twitter (OAuth 1.0)
 curl_cffi        # ingesta IG (Fase 2): TLS de navegador real, evita el 429 anti-bot
-opencv-python    # clasificación de fotos (Fase 3): caras Haar + nitidez Laplaciano
+opencv-python<5    # clasificación de fotos (Fase 3): caras Haar + nitidez Laplaciano
 spotipy          # enriquecimiento Spotify (Fase 4): popularity, géneros, releases
 # OCR de flyers (Fase 3): binario del sistema, `brew install tesseract tesseract-lang`
 fastapi          # GUI local de curación (web/)

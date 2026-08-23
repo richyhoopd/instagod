@@ -29,15 +29,21 @@ def test_magic_link_flujo_completo(api_cliente, monkeypatch) -> None:
     assert len(enviados) == 1 and enviados[0]["to"] == ["ana@x.com"]
     url = enviados[0]["_url"]
     assert url.startswith("http://api.test/auth/callback?token=")
+    # GET no consume el token (vistas previas de chats/correo): devuelve la página que
+    # hace el POST; el link sigue válido después.
     r = cli.get(url, follow_redirects=False)
-    assert r.status_code == 302
+    assert r.status_code == 200 and 'method="post"' in r.text
+    assert "set-cookie" not in r.headers
+    token = url.split("token=", 1)[1]
+    r = cli.post(url, data={"token": token}, follow_redirects=False)
+    assert r.status_code == 303
     assert r.headers["location"] == "http://front.test/brands"
     assert "instagod_session=" in r.headers["set-cookie"]
     assert "HttpOnly" in r.headers["set-cookie"]
     me = cli.get("/me").json()
     assert me["email"] == "ana@x.com" and me["is_admin"] is False
     assert me["marcas"][0]["slug"] == "gdlscene" and me["marcas"][0]["rol"] == "editor"
-    r = cli.get(url, follow_redirects=False)              # segundo uso: inválido
+    r = cli.post(url, data={"token": token}, follow_redirects=False)   # segundo uso: inválido
     assert r.headers["location"] == "http://front.test/login?error=link_invalido"
     assert users.por_id(cx, uid)["last_login"]
 
