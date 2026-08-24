@@ -95,6 +95,78 @@ def test_magic_link_en_dev_sin_resend_imprime_url(api_cliente, capsys) -> None:
     assert "/auth/callback?token=" in capsys.readouterr().out
 
 
+def test_login_password_flujo_completo(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    uid = H.usuario("mauses@x.com", marcas=[(1, "editor")])
+    users.set_password(cx, uid, "123123cece")
+    r = cli.post("/auth/login", json={"email": "Mauses@X.com", "password": "123123cece"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert "instagod_session=" in r.headers["set-cookie"]
+    assert "HttpOnly" in r.headers["set-cookie"]
+    me = cli.get("/me").json()
+    assert me["email"] == "mauses@x.com"
+    assert me["marcas"][0]["slug"] == "gdlscene" and me["marcas"][0]["rol"] == "editor"
+    assert users.por_id(cx, uid)["last_login"]
+
+
+def test_login_password_incorrecta_401(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    uid = H.usuario("ana@x.com")
+    users.set_password(cx, uid, "correcta123")
+    r = cli.post("/auth/login", json={"email": "ana@x.com", "password": "incorrecta"})
+    assert r.status_code == 401 and r.json()["error"] == "credenciales_invalidas"
+    assert "set-cookie" not in r.headers
+
+
+def test_login_sin_password_configurada_401(api_cliente) -> None:
+    cli, _, H = api_cliente
+    H.usuario("ana@x.com")
+    r = cli.post("/auth/login", json={"email": "ana@x.com", "password": "loquesea1"})
+    assert r.status_code == 401 and r.json()["error"] == "credenciales_invalidas"
+
+
+def test_login_email_desconocido_mismo_error(api_cliente) -> None:
+    cli, _, _ = api_cliente
+    r = cli.post("/auth/login", json={"email": "nadie@x.com", "password": "loquesea1"})
+    assert r.status_code == 401 and r.json()["error"] == "credenciales_invalidas"
+
+
+def test_login_usuario_inactivo_401(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    uid = H.usuario("ana@x.com")
+    users.set_password(cx, uid, "correcta123")
+    db.update(cx, "users", uid, activo=0)
+    r = cli.post("/auth/login", json={"email": "ana@x.com", "password": "correcta123"})
+    assert r.status_code == 401 and r.json()["error"] == "credenciales_invalidas"
+
+
+def test_login_password_rate_limit(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    uid = H.usuario("ana@x.com")
+    users.set_password(cx, uid, "correcta123")
+    for _ in range(5):
+        cli.post("/auth/login", json={"email": "ana@x.com", "password": "incorrecta"})
+    r = cli.post("/auth/login", json={"email": "ana@x.com", "password": "correcta123"})
+    assert r.status_code == 429 and r.json()["error"] == "demasiados_intentos"
+
+
+def test_set_password_corta_falla(api_cliente) -> None:
+    _, cx, H = api_cliente
+    uid = H.usuario("ana@x.com")
+    import pytest
+    with pytest.raises(ValueError):
+        users.set_password(cx, uid, "corta")
+
+
+def test_admin_users_no_expone_password_hash(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    uid = H.usuario("ana@x.com")
+    users.set_password(cx, uid, "correcta123")
+    H.login(H.usuario("admin@x.com", admin=True))
+    filas = cli.get("/users").json()
+    assert filas and all("password_hash" not in f for f in filas)
+
+
 def test_logout_y_verify(api_cliente) -> None:
     cli, _, H = api_cliente
     uid = H.usuario("r@x.com", admin=True)

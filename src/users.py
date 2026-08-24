@@ -22,6 +22,10 @@ class LinkInvalido(ValueError):
     """Magic link inexistente, usado, expirado o de usuario inactivo."""
 
 
+class CredencialesInvalidas(ValueError):
+    """Email inexistente, contraseña incorrecta, sin contraseña o usuario inactivo."""
+
+
 def _fmt(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -101,6 +105,37 @@ def rol_en(cx: sqlite3.Connection, user: dict, account_id: int) -> str | None:
     r = cx.execute("SELECT rol FROM brand_members WHERE user_id=? AND account_id=?",
                    (user["id"], account_id)).fetchone()
     return r[0] if r else None
+
+
+# ---------- contraseñas ----------
+
+_SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1}   # parámetros recomendados para login interactivo
+PASSWORD_MIN = 8
+
+
+def _hash_password(password: str, salt: bytes) -> str:
+    h = hashlib.scrypt(password.encode("utf-8"), salt=salt, **_SCRYPT)
+    return f"scrypt${salt.hex()}${h.hex()}"
+
+
+def set_password(cx: sqlite3.Connection, user_id: int, password: str) -> None:
+    if len(password) < PASSWORD_MIN:
+        raise ValueError(f"La contraseña debe tener al menos {PASSWORD_MIN} caracteres")
+    db.update(cx, "users", user_id, password_hash=_hash_password(password, secrets.token_bytes(16)))
+
+
+def verificar_password(cx: sqlite3.Connection, email: str, password: str) -> dict:
+    """Usuario si las credenciales son válidas; CredencialesInvalidas si no."""
+    u = por_email(cx, email)
+    guardado = (u or {}).get("password_hash") or ""
+    try:
+        _algo, salt_hex, _ = guardado.split("$")
+    except ValueError:
+        salt_hex = "00" * 16   # hash igual de caro aunque no haya contraseña: sin oráculo de timing
+    calculado = _hash_password(password, bytes.fromhex(salt_hex))
+    if not (u and u["activo"] and guardado and secrets.compare_digest(calculado, guardado)):
+        raise CredencialesInvalidas("Correo o contraseña incorrectos")
+    return u
 
 
 # ---------- magic links ----------

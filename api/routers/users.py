@@ -47,6 +47,7 @@ def _resolver_marcas(cx, marcas: list[MarcaRol]) -> list[tuple[int, str]]:
 def _vista(cx, uid: int) -> dict:
     u = users.por_id(cx, uid)
     u["marcas"] = users.marcas_de(cx, uid)
+    u.pop("password_hash", None)
     return u
 
 
@@ -57,7 +58,10 @@ def _mandar_link(cx, uid: int, email: str) -> None:
 
 @router.get("")
 def listar(cx=Depends(get_cx)) -> list[dict]:
-    return users.listar(cx)
+    filas = users.listar(cx)
+    for u in filas:
+        u.pop("password_hash", None)
+    return filas
 
 
 @router.post("/invite", status_code=201)

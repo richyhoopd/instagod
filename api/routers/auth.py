@@ -42,6 +42,30 @@ def pedir_magic_link(datos: PedirLink, request: Request, cx=Depends(get_cx)) -> 
     return {"ok": True}   # nunca revela si el email existe
 
 
+class LoginPassword(BaseModel):
+    email: EmailStr
+    password: str
+
+
+@router.post("/auth/login")
+def login_password(datos: LoginPassword, request: Request, response: Response,
+                   cx=Depends(get_cx)) -> dict:
+    email = datos.email.lower()
+    ip = request.client.host if request.client else "?"
+    limite_email = request.app.state.limite_email
+    limite_ip = request.app.state.limite_ip
+    if not (limite_email.permitir(email) and limite_ip.permitir(ip)):
+        raise ApiError(429, "demasiados_intentos", "Espera un rato antes de volver a intentar")
+    try:
+        u = users.verificar_password(cx, email, datos.password)
+    except users.CredencialesInvalidas:
+        raise ApiError(401, "credenciales_invalidas", "Correo o contraseña incorrectos")
+    ses = users.crear_sesion(cx, u["id"], dias=config.SESSION_DAYS,
+                             ua=request.headers.get("user-agent"))
+    _poner_cookie(response, ses)
+    return {"ok": True}
+
+
 _CALLBACK_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="robots" content="noindex"><title>Entrando a instagod…</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;min-height:100svh;align-items:center;

@@ -344,6 +344,7 @@ CREATE TABLE IF NOT EXISTS users (
     activo      INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     last_login  TEXT,
+    password_hash TEXT,          -- scrypt "scrypt$<salt_hex>$<hash_hex>"; NULL = solo magic link
     CHECK (is_admin IN (0,1)), CHECK (activo IN (0,1))
 );
 

@@ -87,7 +87,7 @@ TABLES: dict[str, set[str]] = {
     "venues": {"nombre", "ciudad", "ig_handle", "activa"},
     "venue_alias": {"venue_id", "alias_norm", "alias_visto", "origen"},
     # Portal de colaboradores (spec 2026-08-17)
-    "users": {"email", "nombre", "is_admin", "activo", "last_login"},
+    "users": {"email", "nombre", "is_admin", "activo", "last_login", "password_hash"},
     "brand_members": {"user_id", "account_id", "rol"},
     "magic_links": {"token_hash", "user_id", "expira", "usado_at"},
     "sessions": {"token_hash", "user_id", "expira", "ua"},
@@ -251,6 +251,11 @@ _MIGRATIONS = {
         "sitio_web": "TEXT",
         "hashtags_default": "TEXT",  # JSON: lista de hashtags fijos de la marca
         "prompts_json": "TEXT",      # JSON: caption_extra/por_formato/hashtags para el LLM
+    },
+    "users": {
+        # Login con contraseña (sin correo/dominio todavía): scrypt
+        # "scrypt$<salt_hex>$<hash_hex>"; NULL = solo magic link.
+        "password_hash": "TEXT",
     },
 }
 
