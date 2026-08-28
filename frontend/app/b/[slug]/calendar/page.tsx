@@ -16,7 +16,7 @@ import { CalendarToolbar, type Vista } from "./_components/calendar-toolbar";
 import { WeekView } from "./_components/week-view";
 import { MonthView } from "./_components/month-view";
 import { DayListMobile } from "./_components/day-list-mobile";
-import { QueueDrawer } from "./_components/queue-drawer";
+import { QueueDrawer } from "@/components/queue-drawer";
 import { QueueCard } from "./_components/queue-card";
 import { ApiError } from "@/lib/api";
 import { useEditarQueue, useQueue, useSlotsProximos, type QueueItem } from "@/hooks/use-queue";

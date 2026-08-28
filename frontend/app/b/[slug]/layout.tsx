@@ -3,7 +3,14 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
-import { CalendarDays, LayoutDashboard, Library, Settings, Sparkles } from "lucide-react";
+import {
+  CalendarDays,
+  ClipboardList,
+  LayoutDashboard,
+  Library,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BrandAvatar } from "@/components/brand-avatar";
 import { cn } from "@/lib/utils";
@@ -12,6 +19,7 @@ import { useBrand } from "@/hooks/use-brands";
 const NAV = [
   { segment: "", label: "Resumen", icon: LayoutDashboard, soloManager: false },
   { segment: "calendar", label: "Calendario", icon: CalendarDays, soloManager: false },
+  { segment: "plans", label: "Planes", icon: ClipboardList, soloManager: false },
   { segment: "create", label: "Crear", icon: Sparkles, soloManager: false },
   { segment: "library", label: "Biblioteca", icon: Library, soloManager: false },
   { segment: "settings", label: "Ajustes", icon: Settings, soloManager: true },

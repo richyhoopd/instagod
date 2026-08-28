@@ -14,8 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EstadoBadge } from "@/components/estado-badge";
-import { ImageCarousel } from "../../calendar/_components/image-carousel";
-import { SlideEditor, slidesDe } from "../../calendar/_components/slide-editor";
+import { ImageCarousel } from "@/components/image-carousel";
+import { SlideEditor, slidesDe } from "@/components/slide-editor";
 import { ApiError } from "@/lib/api";
 import { formatearFecha } from "@/lib/fecha";
 import { listaImagenes } from "@/lib/imagenes";

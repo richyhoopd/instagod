@@ -27,7 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstadoBadge } from "@/components/estado-badge";
-import { QueueDrawer } from "../calendar/_components/queue-drawer";
+import { QueueDrawer } from "@/components/queue-drawer";
 import { primeraImagen, contarImagenes } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
 import { ESTADOS, ESTADO_LABELS, esEstado, type Estado } from "@/lib/estados";
