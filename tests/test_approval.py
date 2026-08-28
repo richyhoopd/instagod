@@ -193,3 +193,36 @@ def test_parse_imagen_url():
     assert approval._urls_de_imagen(json.dumps(["a","b","c"])) == ["a","b","c"]
     assert approval._urls_de_imagen("http://x/y.jpg") == ["http://x/y.jpg"]
     assert approval._urls_de_imagen("") == []
+
+
+def test_aprobar_rechaza_pieza_descartada(tmp_path, monkeypatch) -> None:
+    """Replan (y quitar/eliminar) marcan la fila 'descartado', pero su tarjeta de
+    Telegram sigue viva en el chat: send_plan no guarda tg_message_id, así que no
+    hay forma de borrarla. Sin este guard, un ✅ tardío le asignaba slot y la
+    publicaba semanas después de haberla sacado del plan."""
+    import pytest
+
+    monkeypatch.setenv("SHEET_ID", "SHEET-TEST")
+    cx = _cx(tmp_path)
+    bid = db.insert(cx, "bands", nombre="Kabala")
+    pid = db.insert(cx, "photos", band_id=bid, path="x.jpg")
+    qid = approval.encolar_pendiente(cx, tipo="meme", band_id=bid, photo_id=pid,
+                                     caption="x", imagen_url="u")
+    db.update(cx, "content_queue", qid, status=db.QUEUE_DESCARTADO)
+
+    with pytest.raises(approval.PiezaDescartada):
+        approval.aprobar(cx, qid, ahora=datetime(2026, 6, 10, 10, 0),
+                         _escribir_sheet=lambda **k: 99,
+                         _slot_meme=lambda ahora, sheet_id, slots: datetime(2026, 6, 11, 19, 0))
+
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["status"] == db.QUEUE_DESCARTADO and fila["aprobacion"] == "pendiente"
+    assert db.get(cx, "photos", pid)["usada"] == 0  # no consumió la foto
+
+
+def test_aprobar_pieza_inexistente_no_revienta_con_typeerror(tmp_path) -> None:
+    import pytest
+
+    cx = _cx(tmp_path)
+    with pytest.raises(approval.PiezaDescartada):
+        approval.aprobar(cx, 999999)

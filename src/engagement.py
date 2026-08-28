@@ -17,6 +17,22 @@ from typing import Any
 import config
 from src import db
 
+# La Graph API devuelve `2026-08-24T21:22:15+0000`: un offset SIN dos puntos que
+# SQLite no sabe parsear → julianday() daba NULL en las 154 filas de prod, así que
+# `dias_desde_ultimo` era SIEMPRE None y la penalización anti-repetición de
+# `_clave_banda` nunca se aplicó. Normalizamos `±HHMM` a `±HH:MM` antes de medir,
+# con fallback a la parte naive por si algún día llega otro formato.
+_JULIANDAY_TS = """
+        COALESCE(
+          julianday(CASE
+            WHEN timestamp GLOB '*[+-][0-9][0-9][0-9][0-9]'
+              THEN substr(timestamp, 1, length(timestamp) - 2) || ':' || substr(timestamp, -2)
+            ELSE timestamp
+          END),
+          julianday(substr(timestamp, 1, 19))
+        )
+"""
+
 
 def score_formatos(posts: list[dict[str, Any]], *, min_posts: int) -> dict[str, float]:
     """Peso por patrón de formato. Mezcla reglas (cold-start) con desempeño real.
@@ -72,6 +88,52 @@ def rerank_cola(items: list[dict[str, Any]], *, pesos_formato: dict[str, float])
     return [{**it, "scheduled": slot} for it, slot in zip(rank, slots)]
 
 
+def score_plan(bandas: list[dict[str, Any]], *,
+               peso_engagement: float | None = None,
+               peso_recencia: float | None = None,
+               techo_dias: int | None = None,
+               techo_coldstart: float | None = None) -> dict[int, float]:
+    """{band_id: score 0..1} para planear un mes entero. PURO.
+
+    Mezcla los dos ejes que importan al armar un mes: cómo le fue a la banda EN
+    NUESTRA CUENTA (ER + shares, igual que `_clave_banda`) y cuánto llevamos sin
+    publicarla.
+
+    Difiere de `score_bandas` —que ordena para el motor de segmentos— en dos
+    cosas deliberadas:
+
+    - Normaliza AMBOS ejes a 0..1 antes de mezclarlos. En `_clave_banda` la
+      penalización de recencia llega a 1.0 mientras el ER de la cuenta vive
+      entre 0.016 y 0.188, así que la recencia aplastaba al engagement.
+    - Una banda que NUNCA hemos publicado no es "hace mucho que no la
+      publicamos": no hay historial que premiar. Entra con recencia neutra (0.5)
+      y con el eje de engagement topado a `techo_coldstart`, para que no
+      desplace a una que ya demostró funcionar.
+    """
+    peso_engagement = config.PLAN_PESO_ENGAGEMENT if peso_engagement is None else peso_engagement
+    peso_recencia = config.PLAN_PESO_RECENCIA if peso_recencia is None else peso_recencia
+    techo_dias = config.PLAN_RECENCIA_TECHO_DIAS if techo_dias is None else techo_dias
+    techo_coldstart = config.PLAN_COLDSTART_TECHO if techo_coldstart is None else techo_coldstart
+
+    # Eje ENGAGEMENT: misma señal que _clave_banda (ER + shares ponderados).
+    inter = {b["band_id"]: b["er"] + config.SHARES_PESO * 0.001 * (b.get("shares") or 0)
+             for b in bandas if b.get("er") is not None}
+    techo_inter = max(inter.values(), default=0.0) or 1.0
+    techo_fol = max((b.get("followers_ig") or 0) for b in bandas) if bandas else 0
+
+    out: dict[int, float] = {}
+    for b in bandas:
+        bid = b["band_id"]
+        if bid in inter:
+            eng = inter[bid] / techo_inter
+        else:  # cold-start: followers como proxy, topado para no ganarle al dato real
+            eng = techo_coldstart * ((b.get("followers_ig") or 0) / techo_fol) if techo_fol else 0.0
+        dd = b.get("dias_desde_ultimo")
+        rec = 0.5 if dd is None else min(max(dd, 0), techo_dias) / techo_dias
+        out[bid] = peso_engagement * eng + peso_recencia * rec
+    return out
+
+
 # ---------- Capa IO (queries; separada del núcleo PURO de arriba) ----------
 
 def _cargar_bandas(cx, account_id: int) -> list[dict[str, Any]]:
@@ -86,10 +148,10 @@ def _cargar_bandas(cx, account_id: int) -> list[dict[str, Any]]:
 
     stats = {s["band_id"]: s for s in ig_insights.band_stats(cx)}
     # shares + última fecha de publicación por banda (vía ig_posts del bot).
-    extra = {r["band_id"]: r for r in db.rows(cx, """
+    extra = {r["band_id"]: r for r in db.rows(cx, f"""
         SELECT band_id,
                SUM(COALESCE(shares, 0))            AS shares,
-               julianday('now') - julianday(MAX(timestamp)) AS dias_desde_ultimo
+               julianday('now') - MAX({_JULIANDAY_TS}) AS dias_desde_ultimo
           FROM ig_posts
          WHERE band_id IS NOT NULL
          GROUP BY band_id

@@ -143,7 +143,12 @@ async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     accion, qid = approval.parsear_callback(query.data)
 
     if accion == "aprobar":
-        resultado = await asyncio.to_thread(_aprobar_sync, qid)
+        try:
+            resultado = await asyncio.to_thread(_aprobar_sync, qid)
+        except approval.PiezaDescartada:
+            # Tarjeta vieja de un mes replaneado: se avisa y no se publica nada.
+            await _resolver_msg(query, "⚠️ Esta pieza ya salió del plan — no se publica.")
+            return
         slot = resultado["slot"]
         if resultado["inmediato"]:
             texto = "✅ Aprobado — publicando ahora"

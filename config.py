@@ -218,6 +218,15 @@ FORMATO_PATRONES = [
 ENGAGEMENT_MIN_POSTS = 2          # < esto por banda → cold-start (prioridad+followers)
 SHARES_PESO = 3.0                 # shares = crecimiento (reshare regala audiencia)
 ANTIREPEAT_DIAS = 14             # penaliza bandas publicadas en los últimos N días
+
+# Planificador mensual con criterio de engagement (planner --criterio engagement).
+# Los dos ejes se normalizan a 0..1 antes de mezclarse, porque el ER real de la
+# cuenta vive entre 0.016 y 0.188 y una penalización cruda de recencia (hasta
+# 1.0, como en engagement._clave_banda) lo aplastaría por completo.
+PLAN_PESO_ENGAGEMENT = 0.5        # cuánto pesa "le fue bien en nuestra cuenta"
+PLAN_PESO_RECENCIA = 0.5          # cuánto pesa "llevamos tiempo sin publicarla"
+PLAN_RECENCIA_TECHO_DIAS = 120    # a partir de aquí, "hace mucho" ya no crece
+PLAN_COLDSTART_TECHO = 0.35       # tope del eje engagement sin historial propio
 # Pesos cold-start del eje FORMATO (reglas ya probadas por Ricardo).
 FORMATO_PESOS_COLDSTART = {
     "absurdo_domestico": 1.5, "declaracion_personaje": 1.2,

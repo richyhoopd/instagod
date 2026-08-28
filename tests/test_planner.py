@@ -219,3 +219,68 @@ def test_plan_month_mes_futuro_sigue_completo(tmp_path, monkeypatch) -> None:
             "WHERE status='borrador' AND substr(scheduled_datetime,1,7)='2026-08'")]
     cx.close()
     assert any(f[8:10] == "01" for f in fechas)          # agosto arranca el día 1
+
+
+# ---------- criterio="engagement": desempeño propio + tiempo sin publicar ----------
+
+def _post_nuestro(cx, band_id, *, dias, media_id, likes, reach, shares=0):
+    """Un post NUESTRO sobre esa banda, con el formato de fecha de la Graph API."""
+    from datetime import datetime, timedelta, timezone
+    ts = (datetime.now(timezone.utc) - timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%S") + "+0000"
+    return db.insert(cx, "ig_posts", media_id=media_id, band_id=band_id, timestamp=ts,
+                     likes=likes, comments=0, saved=0, reach=reach, shares=shares)
+
+
+def _cx_planner(tmp_path):
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    return cx
+
+
+def test_criterio_engagement_cambia_el_orden_contra_impacto(tmp_path) -> None:
+    """Misma DB, dos criterios, dos órdenes distintos.
+
+    `quemada` es P1 con 100k followers pero la publicamos ayer y le fue mal.
+    `probada` es P3 con 100 followers, la publicamos hace 90 días y le fue muy bien.
+    Con "impacto" (prioridad+followers) gana `quemada`; con "engagement" gana `probada`.
+    """
+    cx = _cx_planner(tmp_path)
+    quemada = _seed(cx, "Quemada", 1, 100_000, 3)
+    probada = _seed(cx, "Probada", 3, 100, 3)
+    _post_nuestro(cx, quemada, dias=1, media_id="q1", likes=5, reach=1000)
+    _post_nuestro(cx, quemada, dias=2, media_id="q2", likes=5, reach=1000)
+    _post_nuestro(cx, probada, dias=90, media_id="p1", likes=200, reach=800, shares=40)
+    _post_nuestro(cx, probada, dias=91, media_id="p2", likes=200, reach=800, shares=40)
+
+    por_impacto = seleccionar(cx, max_posts=2, criterio="impacto")
+    por_engagement = seleccionar(cx, max_posts=2, criterio="engagement")
+
+    assert por_impacto[0]["band_id"] == quemada
+    assert por_engagement[0]["band_id"] == probada
+    cx.close()
+
+
+def test_criterio_por_defecto_sigue_siendo_impacto(tmp_path) -> None:
+    """El criterio nuevo es opt-in: no cambia lo que ya hacían web/app.py ni el cron."""
+    cx = _cx_planner(tmp_path)
+    alta = _seed(cx, "Alta", 1, 10, 2)
+    baja = _seed(cx, "Baja", 3, 999_999, 2)
+    assert seleccionar(cx, max_posts=2)[0]["band_id"] == alta
+    assert seleccionar(cx, max_posts=2)[0]["band_id"] == \
+        seleccionar(cx, max_posts=2, criterio="impacto")[0]["band_id"]
+    assert baja is not None
+    cx.close()
+
+
+def test_criterio_engagement_respeta_topes_y_round_robin(tmp_path) -> None:
+    """El criterio solo cambia el ORDEN de las bandas: topes y reparto siguen igual."""
+    cx = _cx_planner(tmp_path)
+    p1 = _seed(cx, "P1band", 1, 1000, 10)
+    p2 = _seed(cx, "P2band", 2, 1000, 10)
+    p3 = _seed(cx, "P3band", 3, 1000, 10)
+    sel = seleccionar(cx, max_posts=1000, criterio="engagement")
+    cuenta = {p1: 0, p2: 0, p3: 0}
+    for f in sel:
+        cuenta[f["band_id"]] += 1
+    assert cuenta[p1] == 5 and cuenta[p2] == 2 and cuenta[p3] == 1
+    cx.close()

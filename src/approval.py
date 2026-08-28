@@ -35,6 +35,14 @@ def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
                      evento_ids=evento_ids)
 
 
+class PiezaDescartada(ValueError):
+    """Se intentó aprobar una fila que ya salió del plan (status='descartado').
+
+    Excepción propia (no ValueError pelón) para que el daemon la distinga de un
+    fallo real y le conteste a Ricardo en el chat en vez de morir en silencio.
+    """
+
+
 def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
             ventana_trafico: str = "meme", audiencia: list[dict[str, Any]] | None = None,
             user_id: int | None = None,
@@ -58,6 +66,14 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
         import config
         ahora = datetime.now(pytz.timezone(config.TIMEZONE))
     fila = db.get(cx, "content_queue", queue_id)
+    if fila is None:
+        raise PiezaDescartada(f"queue {queue_id} ya no existe")
+    # Una tarjeta de Telegram sigue viva en el chat aunque su fila haya salido del
+    # plan (replan, quitar y eliminar la marcan 'descartado'). Sin este guard un ✅
+    # tardío le asignaba slot y la publicaba, semanas después de haberla quitado.
+    if fila.get("status") == db.QUEUE_DESCARTADO:
+        raise PiezaDescartada(
+            f"queue {queue_id} está descartado: salió del plan, no se aprueba")
     from src import marcas as marcas_mod
     marca = marcas_mod.cargar_por_id(cx, fila.get("account_id") or 1)
     creds = _creds_de(marca.slug)

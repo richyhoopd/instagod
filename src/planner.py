@@ -84,10 +84,29 @@ def personas_recientes(cx, dias: int, ahora: "datetime | None" = None) -> set[in
     return {f["persona_id"] for f in filas}
 
 
-def seleccionar(cx, max_posts: int, ahora: "datetime | None" = None) -> list[dict[str, Any]]:
-    """Elige (banda, foto) hasta `max_posts`, por impacto y con topes. Función testeable.
+def scores_engagement(cx, account_id: int = 1) -> dict[int, float]:
+    """{band_id: score} de engagement.score_plan con los datos de la cuenta.
 
-    Devuelve filas en orden de publicación (round-robin por impacto).
+    Capa IO delgada: el scoring vive en `engagement.score_plan` (PURO) y la
+    lectura en `engagement._cargar_bandas`. Aquí solo se conectan.
+    """
+    from src import engagement
+
+    return engagement.score_plan(engagement._cargar_bandas(cx, account_id))
+
+
+def seleccionar(cx, max_posts: int, ahora: "datetime | None" = None,
+                criterio: str = "impacto") -> list[dict[str, Any]]:
+    """Elige (banda, foto) hasta `max_posts`, con topes. Función testeable.
+
+    `criterio`:
+      - "impacto" (default, comportamiento histórico): prioridad manual y luego
+        followers_ig. No mira nada de lo que pasó en nuestra cuenta.
+      - "engagement": ordena por `engagement.score_plan` — cómo le fue a la
+        banda EN NUESTRA CUENTA (ER + shares) mezclado con cuánto llevamos sin
+        publicarla. `prioridad` queda solo como desempate.
+
+    Devuelve filas en orden de publicación (round-robin por el criterio elegido).
     """
     fotos = db.rows(cx, """
         SELECT p.id AS photo_id, p.band_id, p.nitidez, p.caption_original, p.persona_id,
@@ -124,10 +143,17 @@ def seleccionar(cx, max_posts: int, ahora: "datetime | None" = None) -> list[dic
         if len(bucket) < cupo:
             bucket.append(f)
 
-    # Ranking de bandas por impacto: prioridad asc (1 primero), followers desc.
-    bandas = sorted(por_banda.keys(),
-                    key=lambda bid: (meta[bid]["prioridad"] or 3,
-                                     -(meta[bid]["followers_ig"] or 0)))
+    # Ranking de bandas según el criterio pedido.
+    if criterio == "engagement":
+        scores = scores_engagement(cx)
+        bandas = sorted(por_banda.keys(),
+                        key=lambda bid: (-scores.get(bid, 0.0),
+                                         meta[bid]["prioridad"] or 3))
+    else:
+        # Impacto: prioridad asc (1 primero), followers desc.
+        bandas = sorted(por_banda.keys(),
+                        key=lambda bid: (meta[bid]["prioridad"] or 3,
+                                         -(meta[bid]["followers_ig"] or 0)))
     # Round-robin: una foto por banda por ronda, en orden de impacto.
     seleccion: list[dict] = []
     while len(seleccion) < max_posts:
@@ -325,8 +351,12 @@ def reagendar_publicados(year: int, month: int, desde: date | None = None) -> di
         cx.close()
 
 
-def plan_month(year: int, month: int, *, replan: bool = False) -> dict[str, int]:
-    """Materializa el plan del mes en content_queue. Devuelve conteos."""
+def plan_month(year: int, month: int, *, replan: bool = False,
+               criterio: str = "impacto") -> dict[str, int]:
+    """Materializa el plan del mes en content_queue. Devuelve conteos.
+
+    `criterio` se pasa tal cual a `seleccionar` (ver ahí).
+    """
     cx = db.connect()
     try:
         db.init_db(cx)
@@ -363,7 +393,7 @@ def plan_month(year: int, month: int, *, replan: bool = False) -> dict[str, int]
             print(f"No quedan slots futuros en {ini} (el mes ya transcurrió).")
             return {"posts": 0, "bandas": 0, "slots": 0}
 
-        seleccion = seleccionar(cx, len(slots), ahora=ahora)
+        seleccion = seleccionar(cx, len(slots), ahora=ahora, criterio=criterio)
         if not seleccion:
             print("No hay fotos usables sin usar. Corre el pipeline / cura fotos.")
             return {"posts": 0}
@@ -387,12 +417,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Planificador mensual de contenido")
     parser.add_argument("--mes", help="YYYY-MM (default: próximo mes)")
     parser.add_argument("--replan", action="store_true", help="rehacer el borrador del mes")
+    parser.add_argument("--criterio", choices=("impacto", "engagement"), default="impacto",
+                        help="impacto: prioridad+followers (default). "
+                             "engagement: desempeño en nuestra cuenta + tiempo sin publicar")
     args = parser.parse_args()
     if args.mes:
         y, m = map(int, args.mes.split("-"))
     else:
         y, m = proximo_mes()
     try:
-        plan_month(y, m, replan=args.replan)
+        plan_month(y, m, replan=args.replan, criterio=args.criterio)
     except KeyboardInterrupt:
         sys.exit("\nPlaneación interrumpida.")
