@@ -444,3 +444,43 @@ CREATE TABLE IF NOT EXISTS topic_suggestions (
 );
 CREATE INDEX IF NOT EXISTS idx_topics_account ON topic_suggestions(account_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_topics_url ON topic_suggestions(account_id, url);
+
+-- -----------------------------------------------------------------------------
+-- Planes de contenido masivo (spec 2026-08-28): un plan agrupa N temas curables
+-- y las piezas de content_queue generadas a partir de ellos. Estados del plan
+-- movidos SOLO por jobs/endpoints (src/planes.py documenta las transiciones).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS content_plans (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    tipo_periodo TEXT NOT NULL,
+    periodo      TEXT NOT NULL,           -- '2026-W36' | '2026-09'
+    objetivo     TEXT NOT NULL,
+    config_json  TEXT,                    -- {n_piezas, n_slides, aspect, estilo, formatos, fuentes_imagen, fuentes_info}
+    estado       TEXT NOT NULL DEFAULT 'proponiendo',
+    error        TEXT,
+    creado_por   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (tipo_periodo IN ('semana','mes')),
+    CHECK (estado IN ('proponiendo','temas','generando','curacion','aprobado','error'))
+);
+CREATE INDEX IF NOT EXISTS idx_plans_account ON content_plans(account_id);
+
+CREATE TABLE IF NOT EXISTS plan_topics (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id     INTEGER NOT NULL REFERENCES content_plans(id) ON DELETE CASCADE,
+    orden       INTEGER NOT NULL DEFAULT 0,
+    titulo      TEXT NOT NULL,
+    formato     TEXT,                     -- clave de config.SLIDESHOW_FORMATOS
+    hook        TEXT,                     -- ángulo/gancho sugerido, editable
+    fuente      TEXT NOT NULL DEFAULT 'prompt',
+    url         TEXT,
+    topic_suggestion_id INTEGER,          -- FK suave a topic_suggestions
+    estado      TEXT NOT NULL DEFAULT 'propuesto',
+    error       TEXT,
+    queue_id    INTEGER,                  -- content_queue.id una vez generado
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (fuente IN ('prompt','noticia','manual')),
+    CHECK (estado IN ('propuesto','aprobado','descartado','generado','error'))
+);
+CREATE INDEX IF NOT EXISTS idx_plan_topics_plan ON plan_topics(plan_id);

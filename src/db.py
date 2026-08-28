@@ -70,6 +70,8 @@ TABLES: dict[str, set[str]] = {
         "origen", "tg_chat_id", "tg_message_id",
         # Fix round 1 (revisión Task 6): límite de reintentos del publisher DB.
         "intentos",
+        # Planes de contenido masivo (spec 2026-08-28).
+        "plan_id",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -106,6 +108,15 @@ TABLES: dict[str, set[str]] = {
     "topic_suggestions": {
         "account_id", "titulo", "resumen", "url", "fuente", "publicado_en",
         "usado_en_queue_id", "descartado",
+    },
+    # Planes de contenido masivo (spec 2026-08-28)
+    "content_plans": {
+        "account_id", "tipo_periodo", "periodo", "objetivo", "config_json",
+        "estado", "error", "creado_por",
+    },
+    "plan_topics": {
+        "plan_id", "orden", "titulo", "formato", "hook", "fuente", "url",
+        "topic_suggestion_id", "estado", "error", "queue_id",
     },
 }
 
@@ -217,6 +228,8 @@ _MIGRATIONS = {
         # Fix round 1 (revisión Task 6): reintentos fallidos de publicación;
         # filas_due excluye intentos >= MAX_INTENTOS (src/publisher.py).
         "intentos": "INTEGER NOT NULL DEFAULT 0",
+        # Planes de contenido masivo (spec 2026-08-28): agrupación de piezas.
+        "plan_id": "INTEGER",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
@@ -300,6 +313,7 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         tg_chat_id         TEXT,
         tg_message_id      TEXT,
         intentos           INTEGER NOT NULL DEFAULT 0,
+        plan_id            INTEGER,
         CHECK (tipo   IN ('meme','anuncio','slideshow')),
         CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
@@ -311,7 +325,7 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "formato_patron", "aprobacion", "caption", "imagen_url", "evento_ids",
     "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
     "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
-    "intentos",
+    "intentos", "plan_id",
 )
 
 
