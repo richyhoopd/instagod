@@ -228,3 +228,39 @@ resto del body ya existente (`tema` deja de ser obligatorio cuando se manda `top
   lo pasa a `generate_slideshow.generar(..., topic_id=...)`, que marca
   `topic_suggestions.usado_en_queue_id` al encolar el slideshow (tolerante si el topic ya no
   existe para entonces).
+
+## Planes de contenido masivo (spec 2026-08-28)
+
+Un plan agrupa N temas curables (`plan_topics`) y las piezas de `content_queue` que se
+generan a partir de ellos (`content_queue.plan_id`). Dos fases para no quemar imágenes ni
+renders en contenido que se iba a descartar: **primero los temas** (una llamada LLM,
+barata), **después la generación** del lote aprobado.
+
+Estados de `content_plans.estado`: `proponiendo` → `temas` → `generando` → `curacion` →
+`aprobado`, más `error`. Los mueven solo los jobs y estos endpoints (ver `src/planes.py`).
+
+- `POST /brands/{slug}/plans` (editor+, 202) — crea el plan y encola `plan.proponer_temas`.
+  Body: `tipo_periodo` (`semana`|`mes`), `periodo` (`2026-W36`|`2026-09`), `objetivo`,
+  `n_piezas` (1–30), `n_slides` (1–10), `aspect`, `estilo`, `formatos`, `fuentes_imagen`,
+  `fuentes_info` (`prompt`|`noticias`). Devuelve `{plan_id, job_id}`.
+- `GET /brands/{slug}/plans` — lista con conteos (`topics_total`, `topics_aprobados`,
+  `piezas`, `piezas_pendientes`).
+- `GET /brands/{slug}/plans/{pid}` — plan + `topics` + `piezas` + `job_id` del trabajo vivo.
+- `POST /brands/{slug}/plans/{pid}/topics` (201) — tema manual (nace `aprobado`).
+- `PATCH /brands/{slug}/plans/{pid}/topics/{tid}` — edita `titulo`/`formato`/`hook` o pone
+  `estado` en `aprobado`/`descartado`. Un tema ya generado da 422 (su pieza se cura en la cola).
+- `POST /brands/{slug}/plans/{pid}/generar` (202) — encola `plan.generar`; 422 si el plan no
+  está en `temas` o no hay temas aprobados, 409 si ya hay un job del plan vivo.
+- `POST /brands/{slug}/plans/{pid}/aprobar` — **aprobación en lote server-side**: recorre las
+  piezas pendientes del plan (o solo `queue_ids` si se manda) llamando `approval.aprobar`, que
+  asigna a cada una el siguiente slot libre. Devuelve `{aprobadas:[{queue_id, slot}], fallidas,
+  plan_estado}`; el plan pasa a `aprobado` cuando no quedan pendientes. Evita el bucle de N
+  requests del cliente que hace hoy la biblioteca.
+
+**Curación de las piezas**: se usan los endpoints de cola ya existentes
+(`PATCH /queue/{qid}`, `PUT /queue/{qid}/slides`, `/rechazar`, `/regenerar`). Al regenerar una
+pieza de un plan, la fila nueva hereda `plan_id` y el topic apunta a ella
+(`src/jobs/handlers.py::regenerar_slideshow`).
+
+**Telegram**: las piezas de un plan se encolan con `notificar_telegram=False` — la curación
+del lote vive en el portal, no en el chat.

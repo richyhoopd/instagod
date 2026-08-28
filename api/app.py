@@ -17,6 +17,7 @@ from api.routers import (
     cola,
     fuentes_api,
     perfil,
+    planes,
     pruebas,
     secrets,
     system,
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(cola.router)
     app.include_router(trabajos.router)
     app.include_router(fuentes_api.router)
+    app.include_router(planes.router)
     return app
 
 
