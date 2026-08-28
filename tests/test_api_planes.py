@@ -155,3 +155,22 @@ def test_aprobar_subset(api_cliente, monkeypatch):
                        json={"queue_ids": [q1]}).json()
     assert [a["queue_id"] for a in body["aprobadas"]] == [q1]
     assert q2 not in [a["queue_id"] for a in body["aprobadas"]]
+
+
+def test_generar_permite_reintentar_tras_error(api_cliente):
+    """Un plan en 'error' con temas aprobados se puede reintentar (la UI lo promete)."""
+    client, cx, uid = _login_editor(api_cliente)
+    pid = planes.crear(cx, 1, tipo_periodo="mes", periodo="2026-09",
+                       objetivo="obj", config={}, creado_por=uid)
+    db.update(cx, "content_plans", pid, estado="error", error="se cayó el LLM")
+    db.insert(cx, "plan_topics", plan_id=pid, orden=0, titulo="t", estado="aprobado")
+    r = client.post(f"/brands/gdlscene/plans/{pid}/generar")
+    assert r.status_code == 202, r.text
+
+
+def test_generar_error_sin_temas_aprobados_sigue_422(api_cliente):
+    client, cx, uid = _login_editor(api_cliente)
+    pid = planes.crear(cx, 1, tipo_periodo="mes", periodo="2026-09",
+                       objetivo="obj", config={}, creado_por=uid)
+    db.update(cx, "content_plans", pid, estado="error")
+    assert client.post(f"/brands/gdlscene/plans/{pid}/generar").status_code == 422

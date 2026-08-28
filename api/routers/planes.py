@@ -163,7 +163,9 @@ def generar_plan(slug: str, pid: int, user: dict = Depends(usuario_actual),
                  cx=Depends(get_cx)) -> dict:
     fila, _ = marca_para(slug, cx, user)
     plan = _plan_de_marca(cx, fila["id"], pid)
-    if plan["estado"] != "temas":
+    # 'error' se acepta para poder reintentar un lote caído sin recrear el plan
+    # (los temas ya generados no se repiten, ver plan_generar).
+    if plan["estado"] not in ("temas", "error"):
         raise ApiError(422, "validacion",
                        "El plan no está en curación de temas", "estado")
     if plan["topics_aprobados"] == 0:

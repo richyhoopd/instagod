@@ -179,3 +179,43 @@ def test_regenerar_preserva_plan_id(cx, monkeypatch):
     handlers.regenerar_slideshow(cx, fila)
     assert db.get(cx, "content_queue", nuevo["valor"])["plan_id"] == pid
     assert db.get(cx, "plan_topics", tid)["queue_id"] == nuevo["valor"]
+
+
+def test_plan_generar_reintenta_desde_error(cx, monkeypatch):
+    """Un lote que falló entero debe poder reintentarse: el plan queda en
+    'error' pero sus temas aprobados siguen ahí."""
+    pid = _plan(cx)
+    db.update(cx, "content_plans", pid, estado="error", error="ninguna pieza se generó")
+    db.insert(cx, "plan_topics", plan_id=pid, orden=0, titulo="x",
+              formato="listicle", estado="aprobado")
+    monkeypatch.setattr(
+        handlers.generate_slideshow, "generar",
+        lambda cx_, tema, **k: db.insert(cx_, "content_queue", tipo="slideshow",
+                                         account_id=1, caption="c", imagen_url="[]",
+                                         aprobacion="pendiente"))
+    res = handlers.plan_generar(cx, _job(cx, "plan.generar", pid))
+    assert res["generadas"] == 1
+    assert db.get(cx, "content_plans", pid)["estado"] == "curacion"
+
+
+def test_plan_generar_reintenta_solo_temas_no_generados(cx, monkeypatch):
+    """Al reintentar, un tema que YA generó su pieza no se vuelve a generar."""
+    pid = _plan(cx)
+    db.update(cx, "content_plans", pid, estado="error")
+    qid = db.insert(cx, "content_queue", tipo="slideshow", account_id=1,
+                    caption="ya estaba", imagen_url="[]", plan_id=pid,
+                    aprobacion="pendiente")
+    db.insert(cx, "plan_topics", plan_id=pid, orden=0, titulo="ya generado",
+              formato="listicle", estado="generado", queue_id=qid)
+    db.insert(cx, "plan_topics", plan_id=pid, orden=1, titulo="pendiente",
+              formato="listicle", estado="aprobado")
+    temas_generados = []
+
+    def _generar_fake(cx_, tema, **k):
+        temas_generados.append(tema)
+        return db.insert(cx_, "content_queue", tipo="slideshow", account_id=1,
+                         caption="c", imagen_url="[]", aprobacion="pendiente")
+
+    monkeypatch.setattr(handlers.generate_slideshow, "generar", _generar_fake)
+    handlers.plan_generar(cx, _job(cx, "plan.generar", pid))
+    assert temas_generados == ["pendiente"]

@@ -27,6 +27,14 @@ export default function PlanPage() {
 
   const estado = ESTADOS_PLAN[plan.estado] ?? { label: plan.estado, clase: "" };
   const trabajando = plan.estado === "proponiendo" || plan.estado === "generando";
+  // Un plan en 'error' se puede reintentar: si ya hay piezas se curan, y si no,
+  // se vuelve a la lista de temas (el backend acepta generar desde 'error').
+  const verTemas =
+    plan.estado === "temas" || (plan.estado === "error" && plan.piezas.length === 0);
+  const verPiezas =
+    plan.estado === "curacion" ||
+    plan.estado === "aprobado" ||
+    (plan.estado === "error" && plan.piezas.length > 0);
 
   return (
     <div className="space-y-4">
@@ -53,7 +61,7 @@ export default function PlanPage() {
         <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
           El plan falló: {plan.error ?? "error desconocido"}.
           {plan.topics_aprobados > 0
-            ? " Puedes intentar generar de nuevo desde los temas."
+            ? " Los temas siguen aquí: puedes generar de nuevo."
             : " Crea un plan nuevo para intentarlo otra vez."}
         </div>
       )}
@@ -74,11 +82,9 @@ export default function PlanPage() {
         </div>
       )}
 
-      {plan.estado === "temas" && <CuradorTemas slug={slug} plan={plan} />}
+      {verTemas && <CuradorTemas slug={slug} plan={plan} />}
 
-      {(plan.estado === "curacion" || plan.estado === "aprobado") && (
-        <CuradorPiezas slug={slug} plan={plan} />
-      )}
+      {verPiezas && <CuradorPiezas slug={slug} plan={plan} />}
     </div>
   );
 }

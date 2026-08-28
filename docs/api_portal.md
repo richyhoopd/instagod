@@ -250,7 +250,9 @@ Estados de `content_plans.estado`: `proponiendo` → `temas` → `generando` →
 - `PATCH /brands/{slug}/plans/{pid}/topics/{tid}` — edita `titulo`/`formato`/`hook` o pone
   `estado` en `aprobado`/`descartado`. Un tema ya generado da 422 (su pieza se cura en la cola).
 - `POST /brands/{slug}/plans/{pid}/generar` (202) — encola `plan.generar`; 422 si el plan no
-  está en `temas` o no hay temas aprobados, 409 si ya hay un job del plan vivo.
+  está en `temas` (o `error`, para reintentar un lote caído sin recrear el plan) o no hay temas
+  aprobados, 409 si ya hay un job del plan vivo. Al reintentar, los temas ya `generado` no se
+  repiten: solo se toman los `aprobado`.
 - `POST /brands/{slug}/plans/{pid}/aprobar` — **aprobación en lote server-side**: recorre las
   piezas pendientes del plan (o solo `queue_ids` si se manda) llamando `approval.aprobar`, que
   asigna a cada una el siguiente slot libre. Devuelve `{aprobadas:[{queue_id, slot}], fallidas,
