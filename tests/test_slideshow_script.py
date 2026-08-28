@@ -125,9 +125,9 @@ def test_validar_tolera_un_slide_de_menos() -> None:
     assert ss.validar_guion(_guion_n(5), n_slides=6) == []
 
 
-def test_validar_rechaza_dos_de_mas() -> None:
-    errores = ss.validar_guion(_guion_n(8), n_slides=6)
-    assert any("±1" in e for e in errores)
+def test_validar_rechaza_dos_de_menos() -> None:
+    errores = ss.validar_guion(_guion_n(4), n_slides=6)
+    assert any("faltan" in e for e in errores)
 
 
 def test_recortar_slide_extra_quita_un_punto_no_el_cta() -> None:
@@ -154,3 +154,34 @@ def test_generar_guion_acepta_uno_de_menos(monkeypatch) -> None:
     monkeypatch.setattr(ss, "_llamar_llm", lambda *a, **k: json.dumps(_guion_n(5)))
     guion = ss.generar_guion("tema", n_slides=6)
     assert len(guion["slides"]) == 5
+
+
+def test_validar_acepta_varios_de_mas_porque_se_recortan() -> None:
+    """Sobran slides = recortable, no es error (caso real: un título que dice
+    '6 señales' hace que el LLM mande 6 puntos + hook + cta = 8 slides)."""
+    assert ss.validar_guion(_guion_n(8), n_slides=6) == []
+
+
+def test_validar_sigue_rechazando_contenido_insuficiente() -> None:
+    errores = ss.validar_guion(_guion_n(3), n_slides=6)
+    assert any("faltan" in e for e in errores)
+
+
+def test_recortar_a_deja_exactamente_n() -> None:
+    recortados = ss.recortar_a(_slides_n(9), 6)
+    assert len(recortados) == 6
+    assert recortados[0]["rol"] == "hook"
+    assert recortados[-1]["rol"] == "cta"
+
+
+def test_recortar_a_no_toca_si_ya_cabe() -> None:
+    slides = _slides_n(5)
+    assert ss.recortar_a(slides, 6) == slides
+
+
+def test_generar_guion_recorta_ocho_a_seis(monkeypatch) -> None:
+    monkeypatch.setattr(ss, "_llamar_llm", lambda *a, **k: json.dumps(_guion_n(8)))
+    guion = ss.generar_guion("6 señales de que ya eres asiduo", n_slides=6)
+    assert len(guion["slides"]) == 6
+    assert guion["slides"][0]["rol"] == "hook"
+    assert guion["slides"][-1]["rol"] == "cta"

@@ -64,10 +64,12 @@ def validar_guion(data: dict[str, Any], *, n_slides: int) -> list[str]:
     if not isinstance(slides, list) or not 1 <= len(slides) <= 20:
         errores.append(f"slides: deben ser 1-20, hay {len(slides)}")
         return errores
-    # Tolerancia ±1 (bug de prod 2026-08-28: el LLM insiste en n+1 y quemaba
-    # los 3 intentos). Con n+1 el caller recorta un 'punto'; con n−1 se acepta.
-    if abs(len(slides) - n_slides) > 1:
-        errores.append(f"slides: se pidieron {n_slides} (±1), llegaron {len(slides)}")
+    # Sobrar slides NO es error: el caller recorta 'punto's hasta n (bug de prod
+    # 2026-08-28: un tema que dice "6 señales" hace que el LLM mande 6 puntos +
+    # hook + cta = 8 slides, y reintentar tres veces solo quema llamadas).
+    # Faltar sí lo es a partir de 2: el guion vendría corto de contenido.
+    if len(slides) < n_slides - 1:
+        errores.append(f"slides: faltan, se pidieron {n_slides} y llegaron {len(slides)}")
     for i, sl in enumerate(slides):
         if not isinstance(sl, dict):
             errores.append(f"slide {i}: no es objeto")
@@ -95,6 +97,21 @@ def recortar_slide_extra(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for i in range(len(slides) - 1, -1, -1):
         if slides[i].get("rol") == "punto":
             return slides[:i] + slides[i + 1:]
+    return slides
+
+
+def recortar_a(slides: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+    """Recorta 'punto's hasta dejar n slides (o los que queden si ya no hay). PURO.
+
+    Se detiene si `recortar_slide_extra` deja de quitar: un guion de solo
+    hook+cta más largo que n no se puede reducir sin romper la estructura,
+    y el tope duro de 10 lo siguen imponiendo approval/instagram al truncar.
+    """
+    while len(slides) > n:
+        recortados = recortar_slide_extra(slides)
+        if len(recortados) == len(slides):
+            break
+        slides = recortados
     return slides
 
 
@@ -192,8 +209,7 @@ def generar_guion(tema: str, *, formato: str = "listicle", n_slides: int = 6,
             continue
         errores = validar_guion(data, n_slides=n_slides)
         if not errores:
-            if len(data["slides"]) == n_slides + 1:
-                data["slides"] = recortar_slide_extra(data["slides"])
+            data["slides"] = recortar_a(data["slides"], n_slides)
             return data
     raise RuntimeError(f"El LLM no produjo un guion válido en 3 intentos: {errores}")
 
