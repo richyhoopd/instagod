@@ -23,6 +23,8 @@ from src import (
     ingest_ig,
     jobs,
     marcas,
+    plan_temas,
+    planes,
     slideshow_compile,
     slideshow_model,
     topics,
@@ -112,6 +114,13 @@ def regenerar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str
         notificar_telegram=brief.get("notificar_telegram", True),
     )
     db.update(cx, "jobs", job["id"], queue_id=nuevo_qid)
+    # Piezas de un plan: la fila nueva hereda el plan y el topic apunta a ella
+    # (si no, el plan "pierde" la pieza al regenerarla desde el portal).
+    if fila.get("plan_id"):
+        db.update(cx, "content_queue", nuevo_qid, plan_id=fila["plan_id"])
+        for t in db.rows(cx, "SELECT id FROM plan_topics WHERE queue_id = ?",
+                         (queue_id,)):
+            db.update(cx, "plan_topics", t["id"], queue_id=nuevo_qid)
     return {"queue_id": nuevo_qid}
 
 
@@ -305,6 +314,142 @@ def preset_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
     return {"path": str(dest)}
 
 
+def _redactar(slug: str, msg: str, tope: int = 300) -> str:
+    """Mensaje de error sin secretos de la marca, truncado (patrón _error_seguro)."""
+    for val in config.account_creds(slug).values():
+        if val:
+            msg = msg.replace(str(val), "***")
+    return msg[:tope]
+
+
+def _refrescar_fuentes_info(cx: sqlite3.Connection, account_id: int, slug: str) -> None:
+    """Fetch inline y best-effort de las fuentes de info de la marca.
+
+    Corre DENTRO de plan.proponer_temas (encolar jobs sourcing.* aquí sería un
+    deadlock suave: el aislamiento por cuenta no los correría hasta terminar
+    este job). Una fuente rota jamás tumba la propuesta: se sella su error y
+    se sigue — el plan puede proponer con lo que ya haya en topic_suggestions.
+    """
+    for fuente in fuentes_mod.listar(cx, account_id, kind="info"):
+        if not fuente.get("activa"):
+            continue
+        cfg = fuente["config"]
+        error: str | None = None
+        try:
+            if fuente["provider"] == "rss":
+                for url in cfg.get("urls", []):
+                    try:
+                        topics.guardar(cx, account_id, topics.fetch_rss(url), "rss")
+                    except Exception as exc:  # noqa: BLE001 — una URL rota no tumba las demás
+                        error = _redactar(slug, str(exc))
+            elif fuente["provider"] == "newsapi":
+                key = config.account_creds(slug).get("NEWSAPI_KEY")
+                if not key:
+                    error = "Falta NEWSAPI_KEY"
+                else:
+                    items = topics.fetch_newsapi(cfg["query"], key,
+                                                 idioma=cfg.get("idioma", "es"),
+                                                 pais=cfg.get("pais"), estricto=True)
+                    topics.guardar(cx, account_id, items, "newsapi")
+        except Exception as exc:  # noqa: BLE001 — best-effort total
+            error = _redactar(slug, str(exc))
+        _sellar_ultimo_run(cx, fuente["id"], error)
+
+
+def _plan_de(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Plan del payload, validando que pertenece a la cuenta del job."""
+    payload = json.loads(job["payload_json"] or "{}")
+    plan = db.get(cx, "content_plans", payload["plan_id"])
+    if plan is None or plan["account_id"] != job["account_id"]:
+        raise ValueError(f"No existe el plan {payload.get('plan_id')} en la cuenta del job")
+    return plan
+
+
+def plan_proponer_temas(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {plan_id}. Objetivo (+noticias) → N temas curables en plan_topics."""
+    plan = _plan_de(cx, job)
+    slug = _marca_de(cx, job["account_id"])
+    m = marcas.cargar_por_id(cx, job["account_id"])
+    cfg = planes.config_de(plan)
+    try:
+        noticias: list[dict[str, Any]] = []
+        if "noticias" in (cfg.get("fuentes_info") or []):
+            jobs.progresar(cx, job["id"], 15, "refrescando fuentes de noticias")
+            _refrescar_fuentes_info(cx, job["account_id"], slug)
+            noticias = topics.listar(cx, job["account_id"])[:20]
+        jobs.progresar(cx, job["id"], 40, "proponiendo temas")
+        temas = plan_temas.proponer(
+            plan["objetivo"], n=cfg.get("n_piezas", 10),
+            formatos=cfg.get("formatos") or m.formatos or ["listicle"],
+            contexto=m.voz or None, noticias=noticias)
+    except Exception as exc:
+        db.update(cx, "content_plans", plan["id"], estado="error",
+                  error=_redactar(slug, str(exc)))
+        raise
+    por_url = {t["url"]: t["id"] for t in noticias if t.get("url")}
+    for i, t in enumerate(temas):
+        db.insert(cx, "plan_topics", plan_id=plan["id"], orden=i,
+                  titulo=t["titulo"], formato=t["formato"], hook=t["hook"],
+                  fuente=t["fuente"], url=t["url"],
+                  topic_suggestion_id=por_url.get(t["url"]))
+    db.update(cx, "content_plans", plan["id"], estado="temas", error=None)
+    jobs.progresar(cx, job["id"], 100, f"{len(temas)} temas propuestos")
+    return {"temas": len(temas)}
+
+
+def plan_generar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {plan_id}. UN job secuencial: genera una pieza por topic aprobado.
+
+    Tolerante a fallos por pieza (un tema caído no tumba el lote); revienta
+    solo si NINGUNA pieza salió. `progresar` por pieza mantiene el heartbeat
+    fresco (< 30 min entre latidos → rescatar_huerfanos no lo toca).
+    """
+    plan = _plan_de(cx, job)
+    if plan["estado"] != "temas":
+        raise ValueError(f"El plan {plan['id']} no está en 'temas' (está {plan['estado']!r})")
+    slug = _marca_de(cx, job["account_id"])
+    cfg = planes.config_de(plan)
+    aprobados = db.rows(
+        cx, "SELECT * FROM plan_topics WHERE plan_id = ? AND estado = 'aprobado' "
+            "ORDER BY orden, id", (plan["id"],))
+    if not aprobados:
+        raise ValueError(f"El plan {plan['id']} no tiene temas aprobados")
+    db.update(cx, "content_plans", plan["id"], estado="generando", error=None)
+
+    generadas = 0
+    for i, t in enumerate(aprobados):
+        jobs.progresar(cx, job["id"], int(5 + 90 * i / len(aprobados)),
+                       f"pieza {i + 1}/{len(aprobados)}: {t['titulo'][:40]}")
+        contexto = f"Objetivo del plan: {plan['objetivo']}"
+        if t.get("hook"):
+            contexto += f"\nÁngulo/gancho sugerido para el hook: {t['hook']}"
+        fuentes_img = cfg.get("fuentes_imagen")
+        try:
+            qid = generate_slideshow.generar(
+                cx, t["titulo"], marca=slug, formato=t.get("formato") or None,
+                estilo=cfg.get("estilo"),
+                fuentes=tuple(fuentes_img) if fuentes_img else None,
+                n_slides=cfg.get("n_slides", 6), aspect=cfg.get("aspect", "4:5"),
+                contexto=contexto, creado_por=plan.get("creado_por"),
+                topic_id=t.get("topic_suggestion_id"), notificar_telegram=False)
+            db.update(cx, "content_queue", qid, plan_id=plan["id"])
+            db.update(cx, "plan_topics", t["id"], estado="generado",
+                      queue_id=qid, error=None)
+            generadas += 1
+        except Exception as exc:  # noqa: BLE001 — una pieza caída no tumba el lote
+            db.update(cx, "plan_topics", t["id"], estado="error",
+                      error=_redactar(slug, str(exc)))
+
+    fallidas = len(aprobados) - generadas
+    if generadas == 0:
+        db.update(cx, "content_plans", plan["id"], estado="error",
+                  error="ninguna pieza se generó")
+        raise RuntimeError(f"plan {plan['id']}: las {fallidas} piezas fallaron")
+    db.update(cx, "content_plans", plan["id"], estado="curacion")
+    jobs.progresar(cx, job["id"], 100, f"{generadas} piezas generadas, {fallidas} fallidas")
+    return {"generadas": generadas, "fallidas": fallidas}
+
+
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
@@ -313,4 +458,6 @@ HANDLERS = {
     "sourcing.newsapi_fetch": sourcing_newsapi_fetch,
     "sourcing.ig_scrape": sourcing_ig_scrape,
     "preset.preview": preset_preview,
+    "plan.proponer_temas": plan_proponer_temas,
+    "plan.generar": plan_generar,
 }
