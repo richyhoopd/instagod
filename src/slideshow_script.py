@@ -120,14 +120,18 @@ def _build_user_prompt(tema: str, formato: str, n_slides: int,
     return "\n\n".join(partes)
 
 
-def _llamar_llm(user_prompt: str) -> str:
-    """IO: una llamada al proveedor configurado. Monkeypatch-eable en tests."""
+def _llamar_llm(user_prompt: str, *, system_prompt: str = SYSTEM_PROMPT) -> str:
+    """IO: una llamada al proveedor configurado. Monkeypatch-eable en tests.
+
+    `system_prompt` permite reusar el mismo cliente para otros guiones
+    (p. ej. src/plan_temas.py) sin duplicar el manejo de proveedores.
+    """
     if config.LLM_PROVIDER == "claude":
-        return _via_anthropic(user_prompt)
-    return _via_deepseek(user_prompt)
+        return _via_anthropic(user_prompt, system_prompt)
+    return _via_deepseek(user_prompt, system_prompt)
 
 
-def _via_deepseek(user_prompt: str) -> str:
+def _via_deepseek(user_prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
     from openai import OpenAI
 
     if not config.DEEPSEEK_API_KEY:
@@ -135,7 +139,7 @@ def _via_deepseek(user_prompt: str) -> str:
     client = OpenAI(api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL)
     resp = client.chat.completions.create(
         model=config.DEEPSEEK_MODEL,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT},
+        messages=[{"role": "system", "content": system_prompt},
                   {"role": "user", "content": user_prompt}],
         temperature=config.SLIDESHOW_TEMPERATURE,
         max_tokens=2000,
@@ -144,7 +148,7 @@ def _via_deepseek(user_prompt: str) -> str:
     return resp.choices[0].message.content or ""
 
 
-def _via_anthropic(user_prompt: str) -> str:
+def _via_anthropic(user_prompt: str, system_prompt: str = SYSTEM_PROMPT) -> str:
     import anthropic
 
     if not config.ANTHROPIC_API_KEY:
@@ -154,7 +158,7 @@ def _via_anthropic(user_prompt: str) -> str:
         model=config.ANTHROPIC_MODEL,
         max_tokens=2000,
         temperature=min(config.SLIDESHOW_TEMPERATURE, 1.0),
-        system=SYSTEM_PROMPT,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
     )
     return "".join(b.text for b in resp.content if b.type == "text")
