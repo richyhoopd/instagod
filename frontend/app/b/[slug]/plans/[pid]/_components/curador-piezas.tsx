@@ -20,7 +20,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { QueueDrawer } from "@/components/queue-drawer";
 import { formatearFecha } from "@/lib/fecha";
 import { contarImagenes, primeraImagen } from "@/lib/imagenes";
-import { useAprobarPlan, type PiezaPlan, type PlanDetail } from "@/hooks/use-plans";
+import {
+  useAprobarPlan,
+  useEditarTopic,
+  useGenerarPlan,
+  type PiezaPlan,
+  type PlanDetail,
+  type PlanTopic,
+} from "@/hooks/use-plans";
 
 function etiqueta(pieza: PiezaPlan): { texto: string; clase: string } {
   if (pieza.error) return { texto: "error", clase: "bg-red-100 text-red-800" };
@@ -34,6 +41,52 @@ function etiqueta(pieza: PiezaPlan): { texto: string; clase: string } {
       clase: "bg-blue-100 text-blue-800",
     };
   return { texto: pieza.status, clase: "" };
+}
+
+/** Aviso de temas que no se pudieron generar, con reintento en un clic. */
+function TemasFallidos({
+  slug,
+  pid,
+  temas,
+}: {
+  slug: string;
+  pid: number;
+  temas: PlanTopic[];
+}) {
+  const editar = useEditarTopic(slug, pid);
+  const generar = useGenerarPlan(slug, pid);
+  const [reintentando, setReintentando] = useState(false);
+
+  const reintentar = async () => {
+    setReintentando(true);
+    try {
+      // Reaprobar cada tema caído y disparar un lote solo con ellos: lo que ya
+      // se generó queda en 'generado' y el backend no lo repite.
+      for (const t of temas) {
+        await editar.mutateAsync({ tid: t.id, estado: "aprobado" });
+      }
+      await generar.mutateAsync();
+      toast.success(`Reintentando ${temas.length}…`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo reintentar");
+    } finally {
+      setReintentando(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      <span>
+        {temas.length === 1
+          ? "Un tema no se pudo generar"
+          : `${temas.length} temas no se pudieron generar`}
+        : {temas.map((t) => t.titulo).join(" · ")}
+      </span>
+      <Button size="sm" variant="outline" disabled={reintentando} onClick={reintentar}>
+        {reintentando ? "Reintentando…" : "Reintentar"}
+      </Button>
+    </div>
+  );
 }
 
 export function CuradorPiezas({ slug, plan }: { slug: string; plan: PlanDetail }) {
@@ -102,10 +155,7 @@ export function CuradorPiezas({ slug, plan }: { slug: string; plan: PlanDetail }
       </div>
 
       {conError.length > 0 && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          {conError.length} {conError.length === 1 ? "tema no se pudo" : "temas no se pudieron"}{" "}
-          generar: {conError.map((t) => t.titulo).join(" · ")}
-        </div>
+        <TemasFallidos slug={slug} pid={plan.id} temas={conError} />
       )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">

@@ -219,3 +219,27 @@ def test_plan_generar_reintenta_solo_temas_no_generados(cx, monkeypatch):
     monkeypatch.setattr(handlers.generate_slideshow, "generar", _generar_fake)
     handlers.plan_generar(cx, _job(cx, "plan.generar", pid))
     assert temas_generados == ["pendiente"]
+
+
+def test_plan_generar_desde_curacion_solo_los_pendientes(cx, monkeypatch):
+    """Regenerar un tema caído desde curación no vuelve a generar los que ya salieron."""
+    pid = _plan(cx)
+    db.update(cx, "content_plans", pid, estado="curacion")
+    qid = db.insert(cx, "content_queue", tipo="slideshow", account_id=1,
+                    caption="ya estaba", imagen_url="[]", plan_id=pid,
+                    aprobacion="pendiente")
+    db.insert(cx, "plan_topics", plan_id=pid, orden=0, titulo="ya generado",
+              formato="listicle", estado="generado", queue_id=qid)
+    db.insert(cx, "plan_topics", plan_id=pid, orden=1, titulo="reintentado",
+              formato="listicle", estado="aprobado")
+    generados = []
+
+    def _generar_fake(cx_, tema, **k):
+        generados.append(tema)
+        return db.insert(cx_, "content_queue", tipo="slideshow", account_id=1,
+                         caption="c", imagen_url="[]", aprobacion="pendiente")
+
+    monkeypatch.setattr(handlers.generate_slideshow, "generar", _generar_fake)
+    handlers.plan_generar(cx, _job(cx, "plan.generar", pid))
+    assert generados == ["reintentado"]
+    assert db.get(cx, "content_plans", pid)["estado"] == "curacion"

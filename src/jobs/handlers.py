@@ -405,11 +405,13 @@ def plan_generar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     fresco (< 30 min entre latidos → rescatar_huerfanos no lo toca).
     """
     plan = _plan_de(cx, job)
-    # 'error' también arranca: un lote que se cayó entero (LLM/proveedor de
-    # imágenes abajo) debe poder reintentarse sin recrear el plan. Los topics
-    # ya generados no se repiten — el filtro de abajo solo toma 'aprobado'.
-    if plan["estado"] not in ("temas", "error"):
-        raise ValueError(f"El plan {plan['id']} no está en 'temas' (está {plan['estado']!r})")
+    # Además de 'temas', arranca desde 'error' (lote caído entero) y desde
+    # 'curacion' (un tema suelto que falló y se reaprobó). Nunca se repite lo
+    # ya hecho: el filtro de abajo solo toma 'aprobado', y un topic generado
+    # queda en 'generado'. Al terminar vuelve al estado de curación.
+    if plan["estado"] not in ("temas", "error", "curacion"):
+        raise ValueError(f"El plan {plan['id']} no acepta generar "
+                         f"(está en {plan['estado']!r})")
     slug = _marca_de(cx, job["account_id"])
     cfg = planes.config_de(plan)
     aprobados = db.rows(

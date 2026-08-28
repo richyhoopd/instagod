@@ -174,3 +174,38 @@ def test_generar_error_sin_temas_aprobados_sigue_422(api_cliente):
                        objetivo="obj", config={}, creado_por=uid)
     db.update(cx, "content_plans", pid, estado="error")
     assert client.post(f"/brands/gdlscene/plans/{pid}/generar").status_code == 422
+
+
+def test_generar_permite_reintentar_temas_caidos_en_curacion(api_cliente):
+    """Un tema que falló durante el lote se reaprueba y se vuelve a generar sin
+    salir de la curación (antes había que tocar la DB a mano)."""
+    client, cx, uid = _login_editor(api_cliente)
+    pid = planes.crear(cx, 1, tipo_periodo="mes", periodo="2026-09",
+                       objetivo="obj", config={}, creado_por=uid)
+    db.update(cx, "content_plans", pid, estado="curacion")
+    qid = db.insert(cx, "content_queue", tipo="slideshow", account_id=1, caption="ok",
+                    imagen_url="[]", plan_id=pid, aprobacion="pendiente")
+    db.insert(cx, "plan_topics", plan_id=pid, orden=0, titulo="la que salió",
+              estado="generado", queue_id=qid)
+    tid = db.insert(cx, "plan_topics", plan_id=pid, orden=1, titulo="la que falló",
+                    estado="error", error="el LLM se cayó")
+    # el tema fallido se puede reaprobar
+    r = client.patch(f"/brands/gdlscene/plans/{pid}/topics/{tid}",
+                     json={"estado": "aprobado"})
+    assert r.status_code == 200, r.text
+    # y regenerarse sin salir de curación
+    r = client.post(f"/brands/gdlscene/plans/{pid}/generar")
+    assert r.status_code == 202, r.text
+
+
+def test_generar_en_curacion_sin_temas_pendientes_es_422(api_cliente):
+    """Todo generado: no hay nada que regenerar (evita lotes duplicados)."""
+    client, cx, uid = _login_editor(api_cliente)
+    pid = planes.crear(cx, 1, tipo_periodo="mes", periodo="2026-09",
+                       objetivo="obj", config={}, creado_por=uid)
+    db.update(cx, "content_plans", pid, estado="curacion")
+    qid = db.insert(cx, "content_queue", tipo="slideshow", account_id=1, caption="ok",
+                    imagen_url="[]", plan_id=pid, aprobacion="pendiente")
+    db.insert(cx, "plan_topics", plan_id=pid, orden=0, titulo="t",
+              estado="generado", queue_id=qid)
+    assert client.post(f"/brands/gdlscene/plans/{pid}/generar").status_code == 422

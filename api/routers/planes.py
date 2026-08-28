@@ -163,13 +163,14 @@ def generar_plan(slug: str, pid: int, user: dict = Depends(usuario_actual),
                  cx=Depends(get_cx)) -> dict:
     fila, _ = marca_para(slug, cx, user)
     plan = _plan_de_marca(cx, fila["id"], pid)
-    # 'error' se acepta para poder reintentar un lote caído sin recrear el plan
-    # (los temas ya generados no se repiten, ver plan_generar).
-    if plan["estado"] not in ("temas", "error"):
+    # 'error' y 'curacion' se aceptan para reintentar un lote caído o un tema
+    # suelto que falló, sin recrear el plan (lo ya generado no se repite, ver
+    # plan_generar). `topics_aprobados` solo cuenta los que faltan por generar.
+    if plan["estado"] not in ("temas", "error", "curacion"):
         raise ApiError(422, "validacion",
                        "El plan no está en curación de temas", "estado")
     if plan["topics_aprobados"] == 0:
-        raise ApiError(422, "validacion", "No hay temas aprobados que generar")
+        raise ApiError(422, "validacion", "No hay temas pendientes que generar")
     if _job_vivo_de(cx, pid):
         raise conflicto("Este plan ya tiene un trabajo en curso")
     job_id = jobs.crear(cx, "plan.generar", fila["id"], {"plan_id": pid},
