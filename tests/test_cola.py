@@ -471,6 +471,7 @@ def test_editar_slides_valor_actual_pasa_sin_validar(tmp_path):
 
 def test_editar_slides_foto_del_banco_se_traduce_a_ruta_local(tmp_path, monkeypatch):
     import json
+
     from src import image_sources
     cx = _cx(tmp_path)
     db.insert(cx, "accounts", slug="pmas", ig_handle="@p", nombre="P", ciudad="X")

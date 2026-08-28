@@ -51,6 +51,7 @@ def test_marcar_anunciados(tmp_path) -> None:
 
 def test_fusionar_duplicados_por_shortcode() -> None:
     import json
+
     from src.generate_agenda import _fusionar_duplicados
     evs = [
         {"id": 1, "band_id": 10, "source_post_id": "S1", "creditos": None,
@@ -67,9 +68,11 @@ def test_fusionar_duplicados_por_shortcode() -> None:
 
 def test_fusionar_duplicados_por_phash(tmp_path, monkeypatch) -> None:
     import json
-    import config
+
     import cv2
     import numpy as np
+
+    import config
     from src.generate_agenda import _fusionar_duplicados
     monkeypatch.setattr(config, "BASE_DIR", tmp_path)
     img = np.random.default_rng(3).integers(0, 255, (64, 64, 3), dtype=np.uint8)
@@ -99,6 +102,7 @@ def test_caption_releases_con_creditos() -> None:
 
 def test_handles_creditos_resuelve_band_ids(tmp_path) -> None:
     import json
+
     from src import db
     from src.generate_agenda import _handles_creditos
     cx = db.connect(tmp_path / "t.db")

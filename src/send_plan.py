@@ -22,7 +22,6 @@ import sys
 import time as time_mod
 from typing import Any
 
-import config
 from src import approval, db, host
 from src import caption as caption_mod
 from src import compose as compose_mod
