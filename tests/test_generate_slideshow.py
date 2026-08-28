@@ -239,3 +239,15 @@ def test_generar_topic_id_tolera_fila_inexistente(monkeypatch, tmp_path) -> None
     cx, _, _ = _preparar(monkeypatch, tmp_path)
     qid = gs.generar(cx, "café", topic_id=999999)
     assert qid is not None
+
+
+def test_notificar_telegram_false_no_envia(monkeypatch, tmp_path) -> None:
+    """Con notificar_telegram=False la pieza se encola pero NO va a Telegram,
+    y el brief persiste el flag para que regenerar lo respete."""
+    cx, _, enviados = _preparar(monkeypatch, tmp_path)
+    qid = gs.generar(cx, "café", notificar_telegram=False, creado_por=1)
+    assert enviados == []
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["aprobacion"] == "pendiente" and fila["origen"] == "api"
+    brief = json.loads(fila["slideshow_json"])["brief"]
+    assert brief["notificar_telegram"] is False

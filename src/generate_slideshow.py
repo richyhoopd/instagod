@@ -32,7 +32,8 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
             estilo: str | None = None, fuentes: tuple[str, ...] | None = None,
             n_slides: int = 6, aspect: str = "4:5", contexto: str | None = None,
             dry_run: bool = False, progreso=None, creado_por: int | None = None,
-            topic_id: int | None = None) -> int | None:
+            topic_id: int | None = None,
+            notificar_telegram: bool = True) -> int | None:
     """Genera el set con el PERFIL de la marca; queue_id o None en dry-run.
 
     `progreso`: callback opcional `(pct: int, msg: str) -> None` (p. ej.
@@ -78,7 +79,8 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
               "(fondo sólido)")
     brief = {"tema": tema, "formato": formato, "estilo": estilo,
              "fuentes": list(fuentes), "n_slides": n_slides,
-             "contexto": contexto, "aspect": aspect, "marca": m.slug}
+             "contexto": contexto, "aspect": aspect, "marca": m.slug,
+             "notificar_telegram": notificar_telegram}
     show = slideshow_compile.compilar(guion, estilo=estilo, imagenes=imagenes,
                                       aspect_ratio=aspect, brief=brief,
                                       formato=formato, account_slug=m.slug,
@@ -122,9 +124,13 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
             db.update(cx, "topic_suggestions", topic_id, usado_en_queue_id=qid)
         except ValueError:
             pass
-    approval.enviar_a_telegram(show.caption, json.dumps(urls), qid,
-                               account_slug=m.slug, cx=cx)
-    print(f"[slideshow] q{qid} ({m.slug}) enviado a Telegram ({len(urls)} slides)")
+    if notificar_telegram:
+        approval.enviar_a_telegram(show.caption, json.dumps(urls), qid,
+                                   account_slug=m.slug, cx=cx)
+        print(f"[slideshow] q{qid} ({m.slug}) enviado a Telegram ({len(urls)} slides)")
+    else:
+        # Piezas de un plan (spec 2026-08-28): la curación vive en el portal.
+        print(f"[slideshow] q{qid} ({m.slug}) encolado sin Telegram ({len(urls)} slides)")
     _reportar(100, "listo")
     return qid
 

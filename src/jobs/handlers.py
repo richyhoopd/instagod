@@ -109,6 +109,7 @@ def regenerar_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str
         contexto=brief.get("contexto"),
         progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg),
         creado_por=job.get("creado_por"),
+        notificar_telegram=brief.get("notificar_telegram", True),
     )
     db.update(cx, "jobs", job["id"], queue_id=nuevo_qid)
     return {"queue_id": nuevo_qid}
