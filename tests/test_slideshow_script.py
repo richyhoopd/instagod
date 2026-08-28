@@ -98,3 +98,59 @@ def test_generar_guion_n_slides_cero_no_llama_llm(monkeypatch) -> None:
                         lambda prompt: (_ for _ in ()).throw(AssertionError("no debió llamarse")))
     with pytest.raises(ValueError):
         ss.generar_guion("x", n_slides=0)
+
+
+# --- Tolerancia n±1 (fix del bug de prod 2026-08-28) ---
+
+
+def _slides_n(n):
+    """n slides válidos: hook + puntos + cta."""
+    mids = [{"text": f"punto {i}", "rol": "punto", "image_hint": "gig photo"}
+            for i in range(n - 2)]
+    return ([{"text": "el hook", "rol": "hook", "image_hint": "band stage"}]
+            + mids
+            + [{"text": "sígueme", "rol": "cta", "image_hint": "crowd"}])
+
+
+def _guion_n(n):
+    return {"tema": "t", "hook": "h", "caption": "c", "cta": "x",
+            "slides": _slides_n(n)}
+
+
+def test_validar_tolera_un_slide_de_mas() -> None:
+    assert ss.validar_guion(_guion_n(7), n_slides=6) == []
+
+
+def test_validar_tolera_un_slide_de_menos() -> None:
+    assert ss.validar_guion(_guion_n(5), n_slides=6) == []
+
+
+def test_validar_rechaza_dos_de_mas() -> None:
+    errores = ss.validar_guion(_guion_n(8), n_slides=6)
+    assert any("±1" in e for e in errores)
+
+
+def test_recortar_slide_extra_quita_un_punto_no_el_cta() -> None:
+    recortados = ss.recortar_slide_extra(_slides_n(7))
+    assert len(recortados) == 6
+    assert recortados[0]["rol"] == "hook"
+    assert recortados[-1]["rol"] == "cta"
+
+
+def test_recortar_sin_puntos_no_rompe() -> None:
+    slides = [{"text": "h", "rol": "hook", "image_hint": "x"},
+              {"text": "c", "rol": "cta", "image_hint": "x"}]
+    assert ss.recortar_slide_extra(slides) == slides
+
+
+def test_generar_guion_recorta_cuando_llegan_de_mas(monkeypatch) -> None:
+    monkeypatch.setattr(ss, "_llamar_llm", lambda *a, **k: json.dumps(_guion_n(7)))
+    guion = ss.generar_guion("tema", n_slides=6)
+    assert len(guion["slides"]) == 6
+    assert guion["slides"][-1]["rol"] == "cta"
+
+
+def test_generar_guion_acepta_uno_de_menos(monkeypatch) -> None:
+    monkeypatch.setattr(ss, "_llamar_llm", lambda *a, **k: json.dumps(_guion_n(5)))
+    guion = ss.generar_guion("tema", n_slides=6)
+    assert len(guion["slides"]) == 5

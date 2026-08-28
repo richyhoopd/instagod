@@ -64,8 +64,10 @@ def validar_guion(data: dict[str, Any], *, n_slides: int) -> list[str]:
     if not isinstance(slides, list) or not 1 <= len(slides) <= 20:
         errores.append(f"slides: deben ser 1-20, hay {len(slides)}")
         return errores
-    if len(slides) != n_slides:
-        errores.append(f"slides: se pidieron {n_slides}, llegaron {len(slides)}")
+    # Tolerancia ±1 (bug de prod 2026-08-28: el LLM insiste en n+1 y quemaba
+    # los 3 intentos). Con n+1 el caller recorta un 'punto'; con n−1 se acepta.
+    if abs(len(slides) - n_slides) > 1:
+        errores.append(f"slides: se pidieron {n_slides} (±1), llegaron {len(slides)}")
     for i, sl in enumerate(slides):
         if not isinstance(sl, dict):
             errores.append(f"slide {i}: no es objeto")
@@ -81,6 +83,19 @@ def validar_guion(data: dict[str, Any], *, n_slides: int) -> list[str]:
     if len(slides) >= 2 and slides[-1].get("rol") != "cta":
         errores.append("el último slide debe tener rol 'cta'")
     return errores
+
+
+def recortar_slide_extra(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Quita el ÚLTIMO slide con rol 'punto' (jamás el hook ni el cta). PURO.
+
+    Si no hay ningún 'punto' que quitar (guion degenerado hook+cta+extra),
+    devuelve la lista intacta: validar_guion ya aceptó n±1 y el tope duro de
+    10 lo siguen imponiendo approval/instagram al truncar.
+    """
+    for i in range(len(slides) - 1, -1, -1):
+        if slides[i].get("rol") == "punto":
+            return slides[:i] + slides[i + 1:]
+    return slides
 
 
 def _build_user_prompt(tema: str, formato: str, n_slides: int,
@@ -173,6 +188,8 @@ def generar_guion(tema: str, *, formato: str = "listicle", n_slides: int = 6,
             continue
         errores = validar_guion(data, n_slides=n_slides)
         if not errores:
+            if len(data["slides"]) == n_slides + 1:
+                data["slides"] = recortar_slide_extra(data["slides"])
             return data
     raise RuntimeError(f"El LLM no produjo un guion válido en 3 intentos: {errores}")
 
