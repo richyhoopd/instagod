@@ -289,15 +289,29 @@ Las estadísticas por plantilla **no requieren columnas nuevas**: `ig_posts.queu
 a `content_queue` y `content_queue.template` ya existe y se escribe en `src/send_plan.py:71-73`
 y `src/approval.py:251`.
 
-⚠️ **La cobertura histórica está en duda.** En una copia local de la DB (desfasada: 112
-`ig_posts` ligados contra los 130 que reporta el Decisions-Log del 2026-08-29), las 37 filas
-publicadas tienen `template` NULL, porque provienen del camino legacy del Sheet y nunca
-pasaron por `send_plan`. No se verificó la cobertura real en `/opt/instagod/data/gdlscene.db`.
+✅ **Cobertura histórica medida el 2026-08-30** (Task 10 de H1, contra
+`data/gdlscene.db` con mtime del mismo día, 132 de 132 `ig_posts` ligados):
 
-Consecuencia para el diseño: la vista se construye igual, pero **H5 empieza midiendo la
-cobertura real en prod** y la UI declara explícitamente desde qué fecha hay dato confiable en
-vez de graficar un promedio sobre una muestra sesgada. Hacia adelante el dato es completo
-porque `post.generar` escribe `template_id` y `template_version` siempre.
+| | |
+|---|---|
+| Piezas con `status='publicado'` | 132 |
+| Con `template` registrado | 89 (67%) |
+| Desglose | `clasica` 58 · `onion` 18 · `verde` 13 · sin dato 43 |
+| Primera con dato | 2026-06-12 |
+
+Una medición anterior de esta misma sesión dio 0% de cobertura; fue contra una
+copia previa al refresco de ese día y queda descartada.
+
+Consecuencias para el diseño:
+- La vista arranca **con histórico usable desde 2026-06-12**, no en cero.
+- Las 43 piezas sin plantilla vienen del camino legacy del Sheet. La UI las
+  agrupa como "sin dato" en vez de excluirlas en silencio: un promedio sobre
+  las 89 presentado como si fuera sobre las 132 mentiría.
+- La muestra está desbalanceada (`clasica` es el 65% de lo registrado). La vista
+  muestra el **n de cada plantilla junto a su ER**; comparar promedios crudos
+  entre una plantilla con 58 posts y otra con 13 es ruido, no señal.
+- Hacia adelante el dato es completo: `post.generar` escribe `template_id` y
+  `template_version` siempre.
 
 Todas las vistas aceptan `?dias=` y `?orden=` y se ordenan en el servidor.
 
@@ -419,9 +433,9 @@ veces, para que una rama estancada nunca deje la DB a medias.
    prueban contra una copia de `/opt/instagod/data/gdlscene.db` antes de tocar la real, y se
    deja backup con fecha como en el precedente de `gdlscene.db.bak-20260829-0831`.
 5. **HTML del LLM sin sandbox.** Decisión 11. El interruptor queda implementado y apagado.
-6. **Histórico de plantillas incompleto.** Ver la advertencia en la sección de
-   estadísticas: el grueso de lo publicado por gdlscene salió del camino legacy del Sheet sin
-   registrar plantilla. Se mide antes de prometer la vista.
+6. **Muestra desbalanceada de plantillas.** Medido: 89 de 132 piezas publicadas
+   registran plantilla, y `clasica` es el 65% de esas. Comparar ER promedio entre
+   plantillas con n muy distinto induce a error; la vista muestra el n al lado.
 7. **Cuotas de LLM.** "Clientes externos pronto" implica que el diseñador de plantillas es un
    vector de gasto por marca. No se implementan cuotas en esta rama; queda anotado como lo
    primero a agregar antes de dar de alta una marca de un tercero.
