@@ -11,6 +11,8 @@ from typing import Any
 import jinja2
 from jinja2 import meta as jinja_meta
 
+from . import filtros
+
 # Toda plantilla los recibe siempre: ninguna puede quedarse sin logo o handle.
 CAMPOS_BASE: tuple[str, ...] = ("titular", "imagen", "handle", "logo", "color_marca")
 # Los inyecta el motor de render, no el contrato ni el LLM.
@@ -82,8 +84,15 @@ def variables_declaradas(contrato: dict[str, Any]) -> set[str]:
 
 def validar_html(html: str, contrato: dict[str, Any]) -> None:
     """Toda {{ variable }} del HTML debe estar declarada o ser de sistema."""
+    env = filtros.entorno()
     try:
-        ast = jinja2.Environment().parse(html)
+        ast = env.parse(html)
+        # `Environment.parse()` no detecta filtros desconocidos (arma el AST
+        # igual); solo se descubren al compilar. `compile()` los valida sin
+        # necesitar contexto de render, y por eso vive en el mismo try: un
+        # filtro inventado (por ejemplo por un LLM en H3) debe volverse
+        # ContratoInvalido, no una TemplateAssertionError sin capturar.
+        env.compile(html)
     except jinja2.TemplateSyntaxError as exc:
         raise ContratoInvalido(f"HTML inválido para Jinja: {exc.message}") from exc
 
