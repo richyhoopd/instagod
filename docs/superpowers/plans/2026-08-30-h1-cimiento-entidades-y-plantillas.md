@@ -17,6 +17,15 @@
 - Toda tabla nueva debe registrarse en el dict `TABLES` de `src/db.py:23` con el conjunto de sus columnas escribibles, o `db.insert` y `db.update` fallan con `KeyError: Tabla desconocida`.
 - `src/db.py:449` `insert(cx, table, **fields) -> int` y `src/db.py:459` `update(cx, table, row_id, **fields) -> None` son los únicos escritores; no escribir SQL de INSERT/UPDATE a mano en los módulos nuevos.
 - Línea máxima 100 caracteres (`ruff`, `pyproject.toml`). `E501` está ignorado, pero se respeta igual en código nuevo.
+- **Antes de correr nada, el worktree necesita dos symlinks al repo principal.** Un worktree de git NO hereda los archivos no versionados, y sin ellos la suite miente:
+
+```bash
+ln -s ~/Work/personal/instagod/.venv .venv
+ln -s ~/Work/personal/instagod/.env  .env
+```
+
+Es la convención que ya siguen `portal-fase4` y `portal-fase5`. Sin `.env`, cuatro tests que dependen de credenciales (`test_scraped_mark` x3, `test_ig_insights::test_sync_posts_sheet_caido_no_es_fatal`) fallan por entorno y se confunden con regresiones reales. `.env` está en `.gitignore`, así que el symlink no ensucia el árbol.
+- **Baseline real de `master` (68827b1) con el entorno completo: `1270 tests, 3 failures, 1267 passed`.** Las 3 son `test_planner::test_plan_month_salta_slots_pasados`, `test_replan::test_replan_no_repite_las_mismas_fotos` y `test_segmentos_web::test_segmentos_lista_catalogo_y_preview`. Ninguna es de este hito. Las dos primeras huelen a dependencia de la fecha del sistema. ⚠️ No se investigaron.
 - La suite corre con `.venv/bin/python -m pytest`. El umbral de cobertura global es 50% (`fail_under = 50`); código nuevo sin test baja el número y rompe CI.
 - Comentarios y docstrings en español, como todo el repo.
 - **Nada toca `/opt/instagod/data/gdlscene.db` ni la VM en este hito.** Todo corre contra `tmp_path` en tests y contra copias locales.
@@ -1793,8 +1802,11 @@ Expected: termina con `🟢 H1 íntegro`. Si la copia local no existe, usar el b
 
 - [ ] **Step 3: Correr la suite completa**
 
-Run: `.venv/bin/python -m pytest`
-Expected: PASS. **Ningún test preexistente debe cambiar de resultado**: H1 solo agrega tablas y columnas, no toca ningún camino de código vivo. Si algo de `tests/test_db_migracion_tipo_queue.py`, `tests/test_motor_migraciones.py`, `tests/test_planes_schema.py` o `tests/test_portal_schema.py` se pone rojo, es una regresión real del rebuild de `content_queue`, no un test que "hay que actualizar".
+Run: `.venv/bin/python -m pytest -p no:cacheprovider --junit-xml=/tmp/h1.xml` y parsea el XML.
+
+El `pytest -q` de este repo NO imprime su línea final de resumen (anomalía preexistente del entorno), así que los conteos se leen del XML, no de la salida de texto.
+
+Expected: `3 failures`, las mismas tres del baseline, y `passed` por encima de 1267. **Ningún test preexistente debe cambiar de resultado**: H1 solo agrega tablas y columnas, no toca ningún camino de código vivo. Si algo de `tests/test_db_migracion_tipo_queue.py`, `tests/test_motor_migraciones.py`, `tests/test_planes_schema.py` o `tests/test_portal_schema.py` se pone rojo, es una regresión real del rebuild de `content_queue`, no un test que "hay que actualizar".
 
 - [ ] **Step 4: Correr ruff sobre todo lo nuevo**
 
