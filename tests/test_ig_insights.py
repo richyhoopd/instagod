@@ -110,6 +110,123 @@ def test_link_bands_no_pisa_asignacion_manual(cx) -> None:
     assert db.get(cx, "ig_posts", pid)["band_id"] == b2
 
 
+# ---------- vinculación SIN Sheet: por ig_media_id y por slot ----------
+
+def test_link_por_media_id_es_exacto(cx) -> None:
+    """El publisher DB guarda el ig_media_id que le devuelve la Graph API, así que
+    la vinculación no necesita ni el Sheet ni comparar horas."""
+    bid = db.insert(cx, "bands", nombre="Noisy Room")
+    qid = db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_PUBLICADO,
+                    ig_media_id="M1", account_id=1)
+    pid = ig_insights.upsert_post(cx, _media_item("M1"))
+
+    assert ig_insights.link_por_media_id(cx) == 1
+    row = db.get(cx, "ig_posts", pid)
+    assert row["band_id"] == bid and row["queue_id"] == qid
+
+
+def test_link_por_media_id_no_pisa_asignacion_manual(cx) -> None:
+    b1 = db.insert(cx, "bands", nombre="Lefnes")
+    b2 = db.insert(cx, "bands", nombre="Kabala")
+    db.insert(cx, "content_queue", band_id=b1, status=db.QUEUE_PUBLICADO,
+              ig_media_id="M1", account_id=1)
+    pid = ig_insights.upsert_post(cx, _media_item("M1"))
+    db.update(cx, "ig_posts", pid, band_id=b2)  # el usuario la asignó a mano
+
+    assert ig_insights.link_por_media_id(cx) == 0
+    assert db.get(cx, "ig_posts", pid)["band_id"] == b2
+
+
+def test_link_por_slot_liga_el_residuo_legacy(cx) -> None:
+    """Las filas que publicó el Sheet nunca guardaron ig_media_id. Sin el Sheet ya
+    no hay con qué cruzarlas, salvo la hora: el post sale ~1 min tras su slot."""
+    bid = db.insert(cx, "bands", nombre="Degoiiado")
+    qid = db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_EN_SHEET,
+                    account_id=1, scheduled_datetime="2026-06-01T13:00:00-06:00")
+    pid = ig_insights.upsert_post(cx, _media_item("M1"))  # 2026-06-01T19:00:00+0000
+
+    assert ig_insights.link_por_slot(cx) == 1
+    row = db.get(cx, "ig_posts", pid)
+    assert row["band_id"] == bid and row["queue_id"] == qid
+
+
+def test_link_por_slot_respeta_la_tolerancia(cx) -> None:
+    """Un post a 6 horas de cualquier slot no es de esa fila: mejor hueco que
+    banda equivocada, porque un band_id malo envenena band_stats en silencio."""
+    bid = db.insert(cx, "bands", nombre="Degoiiado")
+    db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_EN_SHEET,
+              account_id=1, scheduled_datetime="2026-06-01T13:00:00+0000")
+    pid = ig_insights.upsert_post(cx, _media_item("M1"))  # 6 h después
+
+    assert ig_insights.link_por_slot(cx) == 0
+    assert db.get(cx, "ig_posts", pid)["band_id"] is None
+
+
+def test_link_por_slot_es_uno_a_uno(cx) -> None:
+    """Dos posts el mismo día no pueden colgarse de la misma fila, y cada uno debe
+    quedarse con la suya (la más cercana), no con la primera que encuentre."""
+    b1 = db.insert(cx, "bands", nombre="Banda Once")
+    b2 = db.insert(cx, "bands", nombre="Banda Quince")
+    q1 = db.insert(cx, "content_queue", band_id=b1, status=db.QUEUE_PUBLICADO,
+                   account_id=1, scheduled_datetime="2026-06-01T11:00:00-06:00")
+    q2 = db.insert(cx, "content_queue", band_id=b2, status=db.QUEUE_PUBLICADO,
+                   account_id=1, scheduled_datetime="2026-06-01T15:00:00-06:00")
+    # 17:01Z = 11:01 CDMX (slot de q1); 21:01Z = 15:01 CDMX (slot de q2)
+    p1 = ig_insights.upsert_post(cx, _media_item("M1", timestamp="2026-06-01T17:01:00+0000"))
+    p2 = ig_insights.upsert_post(cx, _media_item("M2", timestamp="2026-06-01T21:01:00+0000"))
+
+    assert ig_insights.link_por_slot(cx) == 2
+    assert db.get(cx, "ig_posts", p1)["queue_id"] == q1
+    assert db.get(cx, "ig_posts", p2)["queue_id"] == q2
+
+
+def test_link_por_slot_ignora_borradores_y_descartados(cx) -> None:
+    """Un borrador nunca salió a Instagram: no puede ser el dueño de un post real."""
+    bid = db.insert(cx, "bands", nombre="Degoiiado")
+    db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_BORRADOR,
+              account_id=1, scheduled_datetime="2026-06-01T13:00:00-06:00")
+    db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_DESCARTADO,
+              account_id=1, scheduled_datetime="2026-06-01T13:00:00-06:00")
+    pid = ig_insights.upsert_post(cx, _media_item("M1"))
+
+    assert ig_insights.link_por_slot(cx) == 0
+    assert db.get(cx, "ig_posts", pid)["band_id"] is None
+
+
+def test_link_por_slot_no_reusa_una_fila_ya_ligada(cx) -> None:
+    bid = db.insert(cx, "bands", nombre="Degoiiado")
+    qid = db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_PUBLICADO,
+                    account_id=1, scheduled_datetime="2026-06-01T13:00:00-06:00")
+    ya = ig_insights.upsert_post(cx, _media_item("M0"))
+    db.update(cx, "ig_posts", ya, band_id=bid, queue_id=qid)
+    huerfano = ig_insights.upsert_post(cx, _media_item("M1"))
+
+    assert ig_insights.link_por_slot(cx) == 0
+    assert db.get(cx, "ig_posts", huerfano)["queue_id"] is None
+
+
+def test_link_por_slot_no_cruza_marcas(cx) -> None:
+    """El slot de otra marca puede coincidir a la misma hora; ligar cruzado
+    colgaría el post de gdlscene de una banda ajena."""
+    bid = db.insert(cx, "bands", nombre="Otra Marca")
+    db.insert(cx, "content_queue", band_id=bid, status=db.QUEUE_PUBLICADO,
+              account_id=4, scheduled_datetime="2026-06-01T13:00:00-06:00")
+    pid = ig_insights.upsert_post(cx, _media_item("M1"))
+
+    assert ig_insights.link_por_slot(cx, account_id=1) == 0
+    assert db.get(cx, "ig_posts", pid)["band_id"] is None
+
+
+def test_utc_tolera_el_offset_de_la_graph_api() -> None:
+    from datetime import datetime, timezone
+    esperado = datetime(2026, 6, 1, 19, 0, tzinfo=timezone.utc)
+    assert ig_insights._utc("2026-06-01T19:00:00+0000") == esperado
+    assert ig_insights._utc("2026-06-01T19:00:00+00:00") == esperado
+    assert ig_insights._utc("2026-06-01T19:00:00") == esperado
+    assert ig_insights._utc("2026-06-01T13:00:00-06:00") == esperado
+    assert ig_insights._utc(None) is None
+    assert ig_insights._utc("no es fecha") is None
+
 # ---------- resumen por banda + sugerencia de prioridad ----------
 
 def _post_con_metricas(cx, band_id: int, media_id: str, *, likes: int, comments: int = 0,

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +141,117 @@ def snapshot(cx, post_id: int, fecha: str | None = None) -> None:
             saved = excluded.saved, shares = excluded.shares
     """, (fecha, post_id))
     cx.commit()
+
+
+# Tolerancia al ligar por slot. El publisher DB publica ~1 min después del slot;
+# el camino legacy del Sheet (GitHub Actions cada hora) llegaba a ~25 min tarde.
+_TOLERANCIA_SLOT = timedelta(minutes=90)
+
+# Estados de content_queue que representan contenido que salió o va a salir. Un
+# 'borrador' o un 'descartado' NO puede corresponder a un post real de la cuenta.
+_ESTADOS_PUBLICABLES = ("publicado", "programado", "en_sheet")
+
+
+def _utc(iso: str | None) -> datetime | None:
+    """ISO → datetime UTC, tolerando el `+0000` de la Graph API.
+
+    La Graph API devuelve el offset SIN dos puntos (`+0000`), que ni SQLite ni
+    `fromisoformat` de Python < 3.11 parsean. Contraparte en SQL de este helper:
+    `engagement._JULIANDAY_TS`.
+    """
+    if not iso:
+        return None
+    txt = iso.strip()
+    if len(txt) >= 5 and txt[-5] in "+-" and txt[-4:].isdigit():
+        txt = txt[:-5] + txt[-5:-2] + ":" + txt[-2:]
+    try:
+        d = datetime.fromisoformat(txt)
+    except ValueError:
+        return None
+    return d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
+
+
+def link_por_media_id(cx) -> int:
+    """Liga por `ig_media_id`: exacto, sin heurística. Devuelve cuántos ligó.
+
+    Es el camino BUENO desde que publica el publisher DB, que guarda el
+    `ig_media_id` que le devuelve la Graph API al crear el post. No depende del
+    Sheet ni de comparar horas: el id o coincide o no.
+
+    Solo toca posts con `band_id` NULL (jamás pisa una asignación manual).
+    """
+    cur = cx.execute("""
+        UPDATE ig_posts SET
+            band_id  = (SELECT q.band_id FROM content_queue q
+                         WHERE q.ig_media_id = ig_posts.media_id
+                           AND q.band_id IS NOT NULL LIMIT 1),
+            queue_id = (SELECT q.id FROM content_queue q
+                         WHERE q.ig_media_id = ig_posts.media_id
+                           AND q.band_id IS NOT NULL LIMIT 1)
+         WHERE band_id IS NULL
+           AND EXISTS (SELECT 1 FROM content_queue q
+                        WHERE q.ig_media_id = ig_posts.media_id
+                          AND q.band_id IS NOT NULL)
+    """)
+    cx.commit()
+    return cur.rowcount
+
+
+def link_por_slot(cx, *, account_id: int = 1,
+                  tolerancia: timedelta = _TOLERANCIA_SLOT) -> int:
+    """Liga por cercanía de hora lo que no trae `ig_media_id`. Devuelve cuántos ligó.
+
+    Existe para el residuo del camino legacy: las filas que publicó el Sheet +
+    GitHub Actions nunca guardaron `ig_media_id`, y desde que se quitó
+    `SHEET_ID` tampoco se pueden cruzar contra el Sheet. Sin esto, cada post que
+    quede fuera de `link_por_media_id` se pierde para siempre y `band_stats`
+    mide con huecos.
+
+    Empareja UNO A UNO (greedy por menor distancia) contra las filas de la cuenta
+    que representan contenido publicable, usando `publicado_en` cuando existe y
+    `scheduled_datetime` si no. Nunca reusa una fila ya ligada a otro post.
+    """
+    libres = [p for p in db.rows(cx, """
+        SELECT id, media_id, timestamp FROM ig_posts
+         WHERE band_id IS NULL AND queue_id IS NULL AND timestamp IS NOT NULL
+    """) if _utc(p["timestamp"])]
+    if not libres:
+        return 0
+
+    placeholders = ", ".join("?" * len(_ESTADOS_PUBLICABLES))
+    candidatos = [f for f in db.rows(cx, f"""
+        SELECT q.id, q.band_id, COALESCE(q.publicado_en, q.scheduled_datetime) AS cuando
+          FROM content_queue q
+         WHERE q.account_id = ? AND q.band_id IS NOT NULL
+           AND q.status IN ({placeholders})
+           AND COALESCE(q.publicado_en, q.scheduled_datetime) IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM ig_posts ip WHERE ip.queue_id = q.id)
+    """, (account_id, *_ESTADOS_PUBLICABLES)) if _utc(f["cuando"])]  # noqa: S608
+    if not candidatos:
+        return 0
+
+    # Greedy global por menor distancia: evita que un post temprano se quede con
+    # la fila que le tocaba a otro solo por venir antes en la lista.
+    pares = sorted(
+        ((abs(_utc(p["timestamp"]) - _utc(f["cuando"])), p, f)
+         for p in libres for f in candidatos),
+        key=lambda t: t[0])
+
+    posts_usados: set[int] = set()
+    filas_usadas: set[int] = set()
+    n = 0
+    for dist, post, fila in pares:
+        if dist > tolerancia:
+            break  # la lista está ordenada: de aquí en adelante todo sobra
+        if post["id"] in posts_usados or fila["id"] in filas_usadas:
+            continue
+        cx.execute("UPDATE ig_posts SET band_id = ?, queue_id = ? WHERE id = ?",
+                   (fila["band_id"], fila["id"], post["id"]))
+        posts_usados.add(post["id"])
+        filas_usadas.add(fila["id"])
+        n += 1
+    cx.commit()
+    return n
 
 
 def link_bands(cx, sheet_rows: list[dict[str, Any]]) -> int:
@@ -269,11 +380,18 @@ def sync_posts(cx) -> dict[str, Any]:
             time.sleep(_BATCH_PAUSE)
 
     warning = None
-    vinculados = 0
-    try:
-        vinculados = link_bands(cx, _sheet_rows())
-    except Exception as exc:  # noqa: BLE001 — sin credenciales / Sheet caído
-        warning = f"Sheet no disponible, vinculación omitida: {exc}"
+    # Orden deliberado: primero lo exacto (ig_media_id), luego la heurística de
+    # slot para el residuo legacy, y el Sheet SOLO si la marca todavía lo usa.
+    # Antes el Sheet era el único camino, así que al quitarle `SHEET_ID` a
+    # gdlscene el sync diario reportaba `vinculados=0` y band_stats se degradaba
+    # con cada post nuevo.
+    vinculados = link_por_media_id(cx)
+    vinculados += link_por_slot(cx)
+    if config.account_creds("gdlscene").get("SHEET_ID"):
+        try:
+            vinculados += link_bands(cx, _sheet_rows())
+        except Exception as exc:  # noqa: BLE001 — sin credenciales / Sheet caído
+            warning = f"Sheet no disponible, vinculación por Sheet omitida: {exc}"
 
     # Eje formato del cerebro: etiquetar formato_patron de lo recién vinculado.
     etiquetados = 0
