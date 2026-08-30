@@ -22,10 +22,14 @@ from src import db
 # tumbar también el comentario -- 'meme' | 'anuncio' | 'slideshow' — sqlite
 # guarda el DDL verbatim en sqlite_master.sql, comentario incluido, y el
 # guard de _migrar_check_tipo_queue busca el literal 'slideshow' en ESE texto.
+# OJO (H1, 2026-08-30): este fixture se DERIVA de schema.sql por coincidencia
+# EXACTA de dos cadenas. Cada vez que se ensanche el CHECK(tipo) hay que
+# actualizar los dos .replace() de abajo, o el assert de módulo revienta en
+# tiempo de colección y la suite entera se cae. Ya pasó al agregar 'post'.
 _OLD_SCHEMA = (
     db.SCHEMA_PATH.read_text(encoding="utf-8")
-    .replace("-- 'meme' | 'anuncio' | 'slideshow'", "-- 'meme' | 'anuncio'")
-    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow')),",
+    .replace("-- 'meme' | 'anuncio' | 'slideshow' | 'post'", "-- 'meme' | 'anuncio'")
+    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow','post')),",
              "CHECK (tipo   IN ('meme','anuncio')),")
 )
 assert "slideshow" not in _OLD_SCHEMA, (

@@ -43,6 +43,7 @@ TABLES: dict[str, set[str]] = {
         "band_id", "member_id", "path", "source_post_id", "fecha",
         "faces_count", "es_grupal", "nitidez", "usable_meme", "descartada",
         "caption_original", "usada", "evento_analizado", "persona_id",
+        "entity_id",
     },
     "personas": {"band_id", "member_id", "etiqueta_auto", "centroide"},
     "face_signatures": {"photo_id", "persona_id", "bbox", "det_score", "embedding"},
@@ -72,6 +73,8 @@ TABLES: dict[str, set[str]] = {
         "intentos",
         # Planes de contenido masivo (spec 2026-08-28).
         "plan_id",
+        # H1 (spec 2026-08-29): plantilla de DB, entidad y contrato de campos.
+        "template_id", "template_version", "entity_id", "campos_json", "aspecto",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -112,12 +115,26 @@ TABLES: dict[str, set[str]] = {
     # Planes de contenido masivo (spec 2026-08-28)
     "content_plans": {
         "account_id", "tipo_periodo", "periodo", "objetivo", "config_json",
-        "estado", "error", "creado_por",
+        "estado", "error", "creado_por", "estrategia", "criterio_json",
     },
     "plan_topics": {
         "plan_id", "orden", "titulo", "formato", "hook", "fuente", "url",
-        "topic_suggestion_id", "estado", "error", "queue_id",
+        "topic_suggestion_id", "estado", "error", "queue_id", "entity_id",
     },
+    "brand_entities": {
+        "account_id", "tipo", "nombre", "slug", "prioridad", "activa",
+        "atributos_json", "band_id",
+    },
+    "brand_templates": {
+        "account_id", "slug", "nombre", "descripcion", "aspecto",
+        "contrato_json", "html", "estado", "version_actual", "origen",
+        "creado_por", "actualizado_en",
+    },
+    "template_versions": {
+        "template_id", "version", "mensaje_usuario", "html",
+        "contrato_json", "preview_path", "llm_meta",
+    },
+    "brand_fonts": {"account_id", "familia", "archivo"},
 }
 
 # Estados de content_queue (espejo del CHECK en schema.sql).
@@ -230,6 +247,14 @@ _MIGRATIONS = {
         "intentos": "INTEGER NOT NULL DEFAULT 0",
         # Planes de contenido masivo (spec 2026-08-28): agrupación de piezas.
         "plan_id": "INTEGER",
+        # H1 (spec 2026-08-29): la pieza apunta a una plantilla de DB y guarda
+        # los valores de su contrato, para poder re-renderizar sin volver a
+        # llamar al LLM. `template` (TEXT) se conserva y se llena en paralelo.
+        "template_id": "INTEGER",
+        "template_version": "INTEGER",
+        "entity_id": "INTEGER",
+        "campos_json": "TEXT",
+        "aspecto": "TEXT",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
@@ -242,6 +267,8 @@ _MIGRATIONS = {
         "evento_analizado": "INTEGER NOT NULL DEFAULT 0",
         # Banco por persona: cara dominante de la foto (NULL = sin cara o sin agrupar).
         "persona_id": "INTEGER",
+        # H1 (spec 2026-08-29): puente hacia brand_entities.
+        "entity_id": "INTEGER",
     },
     "personas": {
         # Vector medio (128 float32, mismo formato que face_signatures.embedding)
@@ -269,6 +296,15 @@ _MIGRATIONS = {
         # Login con contraseña (sin correo/dominio todavía): scrypt
         # "scrypt$<salt_hex>$<hash_hex>"; NULL = solo magic link.
         "password_hash": "TEXT",
+    },
+    "content_plans": {
+        # H1: un lote es un content_plan con otra estrategia de propuesta.
+        # 'llm' es el comportamiento actual y por eso es el default.
+        "estrategia": "TEXT NOT NULL DEFAULT 'llm'",
+        "criterio_json": "TEXT",
+    },
+    "plan_topics": {
+        "entity_id": "INTEGER",
     },
 }
 
@@ -314,7 +350,12 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         tg_message_id      TEXT,
         intentos           INTEGER NOT NULL DEFAULT 0,
         plan_id            INTEGER,
-        CHECK (tipo   IN ('meme','anuncio','slideshow')),
+        template_id        INTEGER,
+        template_version   INTEGER,
+        entity_id          INTEGER,
+        campos_json        TEXT,
+        aspecto            TEXT,
+        CHECK (tipo   IN ('meme','anuncio','slideshow','post')),
         CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
 """
@@ -325,7 +366,8 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "formato_patron", "aprobacion", "caption", "imagen_url", "evento_ids",
     "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
     "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
-    "intentos", "plan_id",
+    "intentos", "plan_id", "template_id", "template_version", "entity_id",
+    "campos_json", "aspecto",
 )
 
 
@@ -335,9 +377,9 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     SQLite no soporta ALTER de un CHECK ya creado: hay que reconstruir la
     tabla (procedimiento oficial de sqlite.org "Making Other Kinds Of Table
     Schema Changes", incluye el PRAGMA foreign_key_check antes del commit).
-    Idempotente: solo corre si el CHECK viejo (sin 'slideshow' o sin
-    'programado') sigue en sqlite_master; en DBs nuevas ya sale de schema.sql
-    con el CHECK correcto y esto es un no-op.
+    Idempotente: solo corre si el CHECK viejo (sin 'slideshow', sin
+    'programado' o sin 'post') sigue en sqlite_master; en DBs nuevas ya sale
+    de schema.sql con el CHECK correcto y esto es un no-op.
     """
     row = cx.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_queue'"
@@ -346,7 +388,8 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     # slideshow_json (agregada arriba vía ALTER TABLE ADD COLUMN) ya deja esa
     # subcadena en el sql guardado aunque el CHECK siga viejo. Hay que buscar
     # el literal exacto de cada CHECK IN (...).
-    if row is None or ("'slideshow'" in row[0] and "'programado'" in row[0]):
+    if row is None or ("'slideshow'" in row[0] and "'programado'" in row[0]
+                       and "'post'" in row[0]):
         return
 
     # Columnas de la tabla VIEJA (ya con todo lo que _MIGRATIONS le haya

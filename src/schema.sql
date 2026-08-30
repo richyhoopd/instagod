@@ -135,7 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_events_status_fecha ON events(status, fecha_event
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS content_queue (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    tipo               TEXT    NOT NULL DEFAULT 'meme', -- 'meme' | 'anuncio' | 'slideshow'
+    tipo               TEXT    NOT NULL DEFAULT 'meme', -- 'meme' | 'anuncio' | 'slideshow' | 'post'
     band_id            INTEGER REFERENCES bands(id)  ON DELETE CASCADE,
     member_id          INTEGER REFERENCES members(id) ON DELETE SET NULL,
     photo_id           INTEGER REFERENCES photos(id)  ON DELETE SET NULL,
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS content_queue (
     sheet_row_id       TEXT,                            -- id de la fila en el Sheet (para rastrear)
     created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    CHECK (tipo   IN ('meme','anuncio','slideshow')),
+    CHECK (tipo   IN ('meme','anuncio','slideshow','post')),
     CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
 );
 CREATE INDEX IF NOT EXISTS idx_queue_status        ON content_queue(status);
@@ -484,3 +484,78 @@ CREATE TABLE IF NOT EXISTS plan_topics (
     CHECK (estado IN ('propuesto','aprobado','descartado','generado','error'))
 );
 CREATE INDEX IF NOT EXISTS idx_plan_topics_plan ON plan_topics(plan_id);
+
+-- ---------------------------------------------------------------------------
+-- H1 (spec 2026-08-29): el sujeto del contenido, genérico por marca.
+-- gdlscene lo usa para bandas; una inmobiliaria para propiedades. `band_id`
+-- es el puente al dominio musical viejo, que NO se toca.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS brand_entities (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    tipo           TEXT    NOT NULL,
+    nombre         TEXT    NOT NULL,
+    slug           TEXT    NOT NULL,
+    prioridad      INTEGER NOT NULL DEFAULT 3,
+    activa         INTEGER NOT NULL DEFAULT 1,
+    atributos_json TEXT,
+    band_id        INTEGER REFERENCES bands(id) ON DELETE SET NULL,
+    creado_en      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, slug),
+    CHECK (activa IN (0,1)),
+    CHECK (prioridad BETWEEN 1 AND 5)
+);
+CREATE INDEX IF NOT EXISTS idx_entities_cuenta ON brand_entities(account_id, activa);
+CREATE INDEX IF NOT EXISTS idx_entities_band   ON brand_entities(band_id);
+
+-- ---------------------------------------------------------------------------
+-- H1: el look. HTML+CSS Jinja2 en DB con contrato de variables, versionado.
+-- Sustituye al dict TEMPLATES hardcodeado de src/compose.py (que se retira
+-- hasta H5, cuando estas filas estén verificadas contra piezas reales).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS brand_templates (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    slug           TEXT    NOT NULL,
+    nombre         TEXT    NOT NULL,
+    descripcion    TEXT,
+    aspecto        TEXT    NOT NULL DEFAULT '4:5',
+    contrato_json  TEXT    NOT NULL,
+    html           TEXT    NOT NULL,
+    estado         TEXT    NOT NULL DEFAULT 'borrador',
+    version_actual INTEGER NOT NULL DEFAULT 1,
+    origen         TEXT    NOT NULL DEFAULT 'manual',
+    creado_por     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    creado_en      TEXT    NOT NULL DEFAULT (datetime('now')),
+    actualizado_en TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, slug),
+    CHECK (aspecto IN ('4:5','9:16')),
+    CHECK (estado  IN ('borrador','activa','archivada')),
+    CHECK (origen  IN ('seed','llm','manual'))
+);
+CREATE INDEX IF NOT EXISTS idx_templates_cuenta ON brand_templates(account_id, estado);
+
+-- Es a la vez el historial de versiones y el log del chat de diseño: cada
+-- mensaje del usuario produce exactamente una fila.
+CREATE TABLE IF NOT EXISTS template_versions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id     INTEGER NOT NULL REFERENCES brand_templates(id) ON DELETE CASCADE,
+    version         INTEGER NOT NULL,
+    mensaje_usuario TEXT,
+    html            TEXT    NOT NULL,
+    contrato_json   TEXT    NOT NULL,
+    preview_path    TEXT,
+    llm_meta        TEXT,
+    creado_en       TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (template_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_tversions_tpl ON template_versions(template_id);
+
+CREATE TABLE IF NOT EXISTS brand_fonts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    familia    TEXT    NOT NULL,
+    archivo    TEXT    NOT NULL,
+    creado_en  TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, familia)
+);

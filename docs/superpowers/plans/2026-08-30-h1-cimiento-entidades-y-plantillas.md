@@ -531,15 +531,32 @@ por:
 
 Y actualizar el docstring de la función para mencionar `'post'` junto a `'slideshow'` y `'programado'`.
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [ ] **Step 6: Actualizar el fixture derivado de `tests/test_db_migracion_tipo_queue.py`**
+
+Ese test **no es un test normal**: construye su DB "vieja" haciendo `.replace()` de dos cadenas literales de `schema.sql`, y luego afirma a nivel de módulo que ya no queda ninguna mención a `'slideshow'`. Al ensanchar el CHECK, esas dos cadenas dejan de existir, el reemplazo no aplica y el `assert` revienta **en tiempo de colección**, tumbando la suite entera.
+
+Actualizar los dos reemplazos para que incluyan `'post'`:
+
+```python
+_OLD_SCHEMA = (
+    db.SCHEMA_PATH.read_text(encoding="utf-8")
+    .replace("-- 'meme' | 'anuncio' | 'slideshow' | 'post'", "-- 'meme' | 'anuncio'")
+    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow','post')),",
+             "CHECK (tipo   IN ('meme','anuncio')),")
+)
+```
+
+Esto es mantenimiento del fixture, no debilitar el test: el fixture se **deriva** del schema vivo por coincidencia exacta, así que ensanchar el CHECK obliga a moverlo. Es la única excepción a la regla de "no toques tests preexistentes" en todo H1.
+
+- [ ] **Step 7: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_h1_schema.py tests/test_db_migracion_tipo_queue.py -v`
-Expected: PASS. Los tests preexistentes de `test_db_migracion_tipo_queue.py` deben seguir en verde: si alguno falla, la guarda de columnas huérfanas está diciendo que falta una columna en `_CONTENT_QUEUE_REBUILD_COLS`.
+Expected: PASS. Si `test_db_migracion_tipo_queue.py` falla con `RuntimeError` sobre columnas huérfanas (y no con el `AssertionError` del fixture), entonces sí falta una columna en `_CONTENT_QUEUE_REBUILD_COLS`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/db.py src/schema.sql tests/test_h1_schema.py
+git add src/db.py src/schema.sql tests/test_h1_schema.py tests/test_db_migracion_tipo_queue.py
 git commit -m "feat(h1): tipo 'post' en content_queue, con el rebuild al día"
 ```
 
