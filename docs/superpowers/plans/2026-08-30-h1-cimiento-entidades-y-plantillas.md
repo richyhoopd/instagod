@@ -341,8 +341,10 @@ def test_columnas_nuevas_en_planes(tmp_path) -> None:
 def test_estrategia_por_defecto_es_llm(tmp_path) -> None:
     # Los planes que ya existen en prod no deben cambiar de comportamiento.
     cx = _cx(tmp_path)
+    # `objetivo` es NOT NULL sin default en content_plans: hay que pasarlo
+    # aunque el test no lo verifique, o el insert revienta.
     pid = db.insert(cx, "content_plans", account_id=1, tipo_periodo="mes",
-                    periodo="2026-09")
+                    periodo="2026-09", objetivo="x")
     assert db.get(cx, "content_plans", pid)["estrategia"] == "llm"
 
 
@@ -1796,8 +1798,10 @@ Expected: PASS. **Ningún test preexistente debe cambiar de resultado**: H1 solo
 
 - [ ] **Step 4: Correr ruff sobre todo lo nuevo**
 
-Run: `.venv/bin/python -m ruff check src/ tests/ scripts/`
+Run: `.venv/bin/python -m ruff check src/ tests/ scripts/verificar_h1.py`
 Expected: `All checks passed!`
+
+No se lintea `scripts/` completo: `scripts/portal_magic_link.py` arrastra un `F401` (`os` importado sin usar) desde antes de este hito. Arreglarlo mete ruido ajeno en el diff de H1.
 
 - [ ] **Step 5: Verificar la cobertura**
 
