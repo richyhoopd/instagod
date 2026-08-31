@@ -65,3 +65,17 @@ export function useCrearSlideshow(slug: string) {
       post<{ job_id: number }>(`/brands/${slug}/slideshows`, datos),
   });
 }
+
+export interface NuevoPost {
+  template_id: number;
+  tema: string;
+  entidad_id?: number;
+  campos?: Record<string, unknown>;
+  imagen?: string;
+}
+
+export function useCrearPost(slug: string) {
+  return useMutation({
+    mutationFn: (datos: NuevoPost) => post<{ job_id: number }>(`/brands/${slug}/posts`, datos),
+  });
+}
