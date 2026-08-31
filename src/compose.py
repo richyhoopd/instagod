@@ -178,11 +178,16 @@ def _screenshot_card(html: str, *, out_path: str | Path | None = None,
                 )
             page = contexto.new_page()
             page.goto(Path(html_tmp).as_uri(), wait_until="networkidle")
-            # Espera a que el script de auto-ajuste del titular termine.
-            try:
-                page.wait_for_function("window.__captionFitted === true", timeout=5000)
-            except Exception:
-                pass  # si falla el fit, igual renderiza con el tamaño base
+            # El auto-fit es de las plantillas de gdlscene: un script que al
+            # terminar pone window.__captionFitted = true. Una plantilla nueva
+            # no tiene por qué traerlo, y esperarlo costaría 5s de timeout por
+            # render. Si el HTML no lo menciona, no hay nada que esperar.
+            if "__captionFitted" in html:
+                try:
+                    page.wait_for_function("window.__captionFitted === true",
+                                           timeout=5000)
+                except Exception:
+                    pass  # si falla el fit, igual renderiza con el tamaño base
             card = page.locator(".card")
             card.screenshot(path=str(out_path))
             browser.close()

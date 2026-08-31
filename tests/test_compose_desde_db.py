@@ -44,3 +44,28 @@ def test_compose_clasico_sigue_intacto(tmp_path) -> None:
                           foto_url=None, template="clasica",
                           out_path=tmp_path / "viejo.png")
     assert Image.open(png).size == (compose.WIDTH, compose.HEIGHT)
+
+
+def test_no_espera_el_autofit_si_el_html_no_lo_declara(tmp_path) -> None:
+    """Sin este atajo, cada plantilla del LLM pagaría 5s de timeout."""
+    import time
+
+    html = """<!doctype html><html><head><style>
+      .card { width:1080px; height:1350px; background:#222; }
+    </style></head><body><div class="card"></div></body></html>"""
+    t0 = time.monotonic()
+    png = compose.render_html(html, aspecto="4:5", out_path=tmp_path / "sin.png")
+    tardo = time.monotonic() - t0
+    assert png.exists()
+    assert tardo < 4.5, f"esperó el auto-fit sin necesidad: {tardo:.1f}s"
+
+
+def test_sigue_esperando_el_autofit_cuando_si_lo_declara(tmp_path) -> None:
+    """El camino viejo no cambia: si la plantilla lo declara, se espera."""
+    html = """<!doctype html><html><head><style>
+      .card { width:1080px; height:1350px; background:#222; }
+    </style></head><body><div class="card"></div>
+    <script>setTimeout(function(){ window.__captionFitted = true; }, 300);</script>
+    </body></html>"""
+    png = compose.render_html(html, aspecto="4:5", out_path=tmp_path / "con.png")
+    assert png.exists() and png.stat().st_size > 5_000

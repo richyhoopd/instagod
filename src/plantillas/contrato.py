@@ -7,6 +7,7 @@ de verdad — si la plantilla declara tres bullets, el generador pide tres.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import jinja2
@@ -21,6 +22,101 @@ CAMPOS_SISTEMA: tuple[str, ...] = ("fonts_dir",)
 TIPOS: tuple[str, ...] = ("texto", "texto_largo", "lista", "numero",
                           "imagen", "booleano")
 ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (1080, 1350), "9:16": (1080, 1920)}
+
+# Un LLM descarrilado puede devolver cientos de kilobytes. Las cuatro
+# plantillas de gdlscene rondan los 3 KB, así que 60 KB es holgado y ataja
+# lo absurdo antes de guardarlo en la DB y mandarlo a Chromium.
+MAX_HTML = 60_000
+
+# No son tipografías que haya que tener instaladas.
+_GENERICAS = {"sans-serif", "serif", "monospace", "cursive", "fantasy",
+              "system-ui", "inherit", "initial", "unset"}
+
+_FONT_FAMILY = re.compile(r"font-family\s*:\s*([^;}\n]+)", re.I)
+
+
+_FONT_FACE = re.compile(r"@font-face\s*\{([^}]*)\}", re.I)
+_JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
+
+
+def _sin_jinja(html: str) -> str:
+    r"""Sustituye las expresiones Jinja por un token sin llaves.
+
+    Sin esto, cualquier regex de bloque CSS (`\{[^}]*\}`) se corta en el
+    `}}` de un `{{ fonts_dir }}` y parsea la plantilla a medias.
+    """
+    return _JINJA.sub("JINJAVAR", html or "")
+_FF_FAMILY = re.compile(r"font-family\s*:\s*([^;}\n]+)", re.I)
+_FF_URL = re.compile(r"url\(\s*['\"]?([^'\")]+)", re.I)
+
+
+def _familias_autodeclaradas(html: str) -> set[str]:
+    """Familias que la propia plantilla define con @font-face."""
+    nombres: set[str] = set()
+    for bloque in _FONT_FACE.findall(_sin_jinja(html)):
+        for decl in _FF_FAMILY.findall(bloque):
+            nombres.add(decl.strip().strip("'\""))
+    return nombres
+
+
+def validar_fuentes(html: str, familias: set[str],
+                    *, archivos: set[str] | None = None) -> list[str]:
+    """Que el HTML no dependa de tipografías que la marca no tiene.
+
+    OJO: hay DOS espacios de nombres distintos y confundirlos rechaza las
+    plantillas que ya se publican. Las claves del catálogo son nombres de
+    archivo (`Tinos-Regular`, `Poppins-SemiBold`), mientras que las plantillas
+    de gdlscene declaran su propio `@font-face` con familias CSS cortas
+    (`Tinos`, `Poppins`, `Anton`) apuntando a esos archivos. Una plantilla
+    PUEDE declarar la familia que quiera; lo que no puede es apuntar a un
+    archivo que no existe o, peor, a la red.
+
+    Por eso se valida en dos ejes:
+    - toda familia USADA está en el catálogo, autodeclarada, o es genérica;
+    - todo `src:url()` de un `@font-face` apunta a un archivo del catálogo,
+      nunca a http(s). Un webfont externo hace que el render dependa del DNS:
+      el día que falle, se publica un post con la tipografía equivocada, y ya
+      publicado no se arregla.
+    """
+    errores: list[str] = []
+    limpio = _sin_jinja(html)
+    autodeclaradas = _familias_autodeclaradas(html)
+    permitidas = familias | autodeclaradas | _GENERICAS
+
+    for bloque in _FONT_FACE.findall(limpio):
+        for url in _FF_URL.findall(bloque):
+            limpia = url.strip()
+            if limpia.startswith(("http://", "https://", "//")):
+                errores.append(
+                    f"la tipografía se carga de la red ({limpia[:60]}): "
+                    "solo se permiten las del catálogo de la marca")
+                continue
+            if archivos is not None:
+                nombre = limpia.rsplit("/", 1)[-1].split("?")[0].replace("JINJAVAR", "")
+                if nombre and nombre not in archivos:
+                    errores.append(
+                        f"el archivo de tipografía '{nombre}' no está en el "
+                        "catálogo de la marca")
+
+    sin_font_faces = _FONT_FACE.sub("", limpio)
+    # Solo se exige la PRIMERA familia de cada pila. Así funcionan las pilas
+    # CSS: la primera es la intención y las siguientes son degradación
+    # elegante. Las plantillas de gdlscene escriben
+    # `font-family:'Tinos','Times New Roman',serif` — pedir que 'Times New
+    # Roman' esté en el catálogo rechazaría los diseños que ya se publican.
+    for declaracion in _FONT_FAMILY.findall(sin_font_faces):
+        piezas = [b.strip().strip("'\"") for b in declaracion.split(",")]
+        piezas = [x for x in piezas if x]
+        if not piezas:
+            continue
+        principal = piezas[0]
+        if principal.lower() in _GENERICAS:
+            continue
+        if principal not in permitidas:
+            errores.append(
+                f"la tipografía '{principal}' no está disponible para esta marca")
+    return errores
+
 
 
 class ContratoInvalido(ValueError):
@@ -85,6 +181,10 @@ def variables_declaradas(contrato: dict[str, Any]) -> set[str]:
 
 def validar_html(html: str, contrato: dict[str, Any]) -> None:
     """Toda {{ variable }} del HTML debe estar declarada o ser de sistema."""
+    if len(html or "") > MAX_HTML:
+        raise ContratoInvalido(
+            f"el HTML es demasiado grande ({len(html)} caracteres, tope {MAX_HTML})")
+
     env = filtros.entorno()
     try:
         ast = env.parse(html)

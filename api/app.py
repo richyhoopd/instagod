@@ -18,6 +18,7 @@ from api.routers import (
     fuentes_api,
     perfil,
     planes,
+    plantillas,
     posts,
     pruebas,
     secrets,
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(cola.router)
     app.include_router(trabajos.router)
     app.include_router(posts.router)
+    app.include_router(plantillas.router)
     app.include_router(fuentes_api.router)
     app.include_router(planes.router)
     return app

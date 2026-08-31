@@ -262,6 +262,7 @@ SLIDESHOW_FUENTES = {
     "Poppins-SemiBold": "Poppins-SemiBold.ttf",
     "Tinos-Bold": "Tinos-Bold.ttf",
     "Tinos-Regular": "Tinos-Regular.ttf",
+    "Tinos-Italic": "Tinos-Italic.ttf",
     "Erode-Semibold": "erode-600.woff2",
     "Erode-Bold": "erode-700.woff2",
     "Marcellus": "Marcellus-latin.woff2",

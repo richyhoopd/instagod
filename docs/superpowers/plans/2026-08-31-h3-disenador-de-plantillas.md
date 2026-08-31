@@ -93,7 +93,15 @@ git commit -m "refactor(h3): router propio para diseños, sin cambiar la API"
   - `catalogo(cx, account_id: int) -> list[dict]` — `[{"familia": str, "archivo": str, "propia": bool}]`, las globales de `config.SLIDESHOW_FUENTES` más las de `brand_fonts` de esa marca. Las propias pisan a las globales con el mismo nombre.
   - `familias(cx, account_id: int) -> set[str]`
   - `css_font_faces(cx, account_id: int, fonts_dir: str) -> str` — los `@font-face` listos para inyectar
-  - En `contrato.py`: `validar_fuentes(html: str, familias: set[str]) -> list[str]` y `MAX_HTML = 60_000`
+  - En `contrato.py`: `validar_fuentes(html: str, familias: set[str], *, archivos: set[str] | None = None) -> list[str]` y `MAX_HTML = 60_000`
+
+⚠️ **La validación tipográfica tiene tres sutilezas, y saltarse cualquiera rechaza las plantillas que gdlscene ya publica.** Un primer intento las rechazó las cuatro.
+
+1. **Hay dos espacios de nombres.** Las claves del catálogo son nombres de archivo (`Tinos-Regular`, `Poppins-SemiBold`); las plantillas declaran su propio `@font-face` con familias CSS cortas (`Tinos`, `Poppins`, `Anton`). Una familia autodeclarada en el mismo HTML es legítima. Lo que se valida es el `src:url()`: debe apuntar a un archivo del catálogo y **nunca** a `http(s)://` ni a `//`. Ese es el riesgo real — un webfont externo hace que el render dependa del DNS, y el día que falle se publica un post con la tipografía equivocada.
+2. **Solo se exige la PRIMERA familia de cada pila.** Así funcionan las pilas CSS: la primera es la intención y el resto es degradación elegante. gdlscene escribe `font-family:'Tinos','Times New Roman',serif`; pedir que `Times New Roman` esté en el catálogo rechazaría sus diseños.
+3. **Hay que neutralizar las expresiones Jinja antes de tocar el CSS.** El regex de bloque `@font-face\s*\{([^}]*)\}` se corta en el `}}` de un `{{ fonts_dir }}` y parsea la plantilla a medias.
+
+El test que cierra el círculo es `test_las_cuatro_de_gdlscene_pasan_su_propia_validacion`: si el validador rechaza los diseños que ya se publican, el validador está mal, no los diseños.
 
 **Por qué el tope de tamaño:** un LLM que se descarrila puede devolver cientos de kilobytes de HTML. Se guarda en la DB, se renderiza en Chromium y se manda al navegador. 60 KB es holgado para una plantilla real (las cuatro de gdlscene rondan los 3 KB) y ataja lo absurdo.
 
