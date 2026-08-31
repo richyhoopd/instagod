@@ -39,7 +39,18 @@ def resaltar(texto: str) -> Markup:
     return Markup(" ".join(out))
 
 
-FILTROS: dict[str, Callable] = {"resaltar": resaltar}
+def etiqueta(handle: str | None) -> str:
+    """'@gdlscene' -> 'GDLSCENE'. Reproduce el tag_text del camino viejo.
+
+    La plantilla onion muestra el handle sin arroba y en mayúsculas. Al
+    migrarla a la DB se mapeó {{ tag_text }} a {{ handle }} y se perdió esa
+    transformación: el diseño pasó a decir "@gdlscene" en vez de "GDLSCENE".
+    Verificado comparando el PNG contra el que produce templates/meme_onion.html.
+    """
+    return (handle or "").lstrip("@").upper()
+
+
+FILTROS: dict[str, Callable] = {"resaltar": resaltar, "etiqueta": etiqueta}
 
 
 def entorno() -> jinja2.Environment:

@@ -6,6 +6,7 @@ de verdad — si la plantilla declara tres bullets, el generador pide tres.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import jinja2
@@ -102,3 +103,75 @@ def validar_html(html: str, contrato: dict[str, Any]) -> None:
     if sobrantes:
         raise ContratoInvalido(
             f"el HTML usa variables no declaradas en el contrato: {sobrantes}")
+
+
+# Los inyecta el motor de render desde la marca, no el generador de contenido.
+_INYECTADOS: tuple[str, ...] = ("imagen", "handle", "logo", "color_marca")
+
+
+def _error_tipo(eid: str, valor: Any, tipo: str, extra: dict[str, Any]) -> str | None:
+    if tipo in ("texto", "texto_largo", "imagen"):
+        if not isinstance(valor, str) or not valor.strip():
+            return f"{eid}: se esperaba texto no vacío"
+    elif tipo == "numero":
+        # bool es subclase de int en Python: hay que excluirlo a mano.
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            return f"{eid}: se esperaba un número, no texto"
+    elif tipo == "booleano":
+        if not isinstance(valor, bool):
+            return f"{eid}: se esperaba true o false"
+    elif tipo == "lista":
+        if not isinstance(valor, list):
+            return f"{eid}: se esperaba una lista"
+        if any(not isinstance(x, str) or not x.strip() for x in valor):
+            return f"{eid}: todos los elementos deben ser texto no vacío"
+        minimo, maximo = extra.get("min", 1), extra.get("max", 10)
+        if not minimo <= len(valor) <= maximo:
+            return f"{eid}: se esperaban entre {minimo} y {maximo} elementos, llegaron {len(valor)}"
+    return None
+
+
+def validar_campos(campos: dict[str, Any], contrato: dict[str, Any]) -> list[str]:
+    """Valida VALORES contra el contrato. Devuelve errores; [] = válido.
+
+    No lanza a propósito: la lista se le devuelve al LLM para que se
+    autocorrija en el siguiente intento, igual que slideshow_script.
+    """
+    errores: list[str] = []
+    extras = {e["id"]: e for e in contrato.get("extras", []) or [] if "id" in e}
+
+    titular = campos.get("titular")
+    if not isinstance(titular, str) or not titular.strip():
+        errores.append("titular: es obligatorio y no puede ir vacío")
+
+    for eid, extra in extras.items():
+        if eid not in campos or campos[eid] is None:
+            if not extra.get("opcional"):
+                errores.append(f"{eid}: falta y no es opcional")
+            continue
+        err = _error_tipo(eid, campos[eid], extra.get("tipo", "texto"), extra)
+        if err:
+            errores.append(err)
+
+    conocidos = set(extras) | {"titular"} | set(_INYECTADOS)
+    for clave in campos:
+        if clave not in conocidos:
+            errores.append(f"{clave}: campo desconocido, no está en el contrato")
+
+    return errores
+
+
+def contrato_de_json(crudo: str | None) -> dict[str, Any]:
+    """`json.loads` tolerante: `{}` si el string es None, está roto o no es un objeto.
+
+    Gemelo de `plantillas.contrato_de` (que recibe una FILA de DB); este recibe
+    directamente el string de `contrato_json`, para no repetir el try/except
+    en cada módulo que necesita el contrato ya parseado (p. ej. `render.py`).
+    """
+    if not crudo:
+        return {}
+    try:
+        valor = json.loads(crudo)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return valor if isinstance(valor, dict) else {}

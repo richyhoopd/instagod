@@ -415,9 +415,9 @@ git commit -m "feat(h2): validación de valores contra el contrato de plantilla"
 | Campo | De dónde sale |
 |---|---|
 | `titular` y extras | `campos` |
-| `imagen` | `campos["imagen"]`, pasado por `compose._to_src` (local → `file://`, URL/data intactas) |
+| `imagen` | `campos["imagen"]` por `compose._to_src`. **Cuando no hay imagen va `""`, NUNCA `None`**: Jinja escribe el `None` de Python como el texto `"None"` dentro del CSS, y la plantilla queda con `background-image:url('None')` |
 | `handle` | `marca.ig_handle`, con `@` al frente |
-| `logo` | `marca.logo_path` por `_to_src`; `None` si la marca no tiene logo |
+| `logo` | `marca.logo_path` por `_to_src`; `""` si la marca no tiene logo, por la misma razón |
 | `color_marca` | `marca.color_marca` |
 | `fonts_dir` | el global de `compose.FONTS_DIR`, como URI `file://` |
 
@@ -557,11 +557,13 @@ def contexto(marca, campos: dict[str, Any], *,
              fonts_dir: str | None = None) -> dict[str, Any]:
     """Campos del contrato + el núcleo base inyectado desde la marca."""
     ctx = dict(campos)
-    imagen = campos.get("imagen")
-    ctx["imagen"] = compose._to_src(imagen) if imagen else None
+    # OJO: lo vacío va como "" y nunca como None. _to_src(None) devuelve "",
+    # y Jinja escribiría el None de Python como el texto "None" dentro del CSS.
+    # Verificado comparando el PNG contra el del camino viejo.
+    ctx["imagen"] = compose._to_src(campos.get("imagen"))
     handle = (marca.ig_handle or "").lstrip("@")
     ctx["handle"] = f"@{handle}" if handle else ""
-    ctx["logo"] = compose._to_src(marca.logo_path) if marca.logo_path else None
+    ctx["logo"] = compose._to_src(marca.logo_path)
     ctx["color_marca"] = marca.color_marca
     ctx["fonts_dir"] = fonts_dir or compose.FONTS_DIR.as_uri()
     return ctx
@@ -588,8 +590,10 @@ def render(cx, marca, plantilla: dict[str, Any], campos: dict[str, Any], *,
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv/bin/python -m pytest tests/test_plantillas_render.py -v`
-Expected: PASS (6 tests). El último tarda: levanta Chromium de verdad.
+Run: `.venv/bin/python -m pytest tests/test_plantillas_render.py tests/test_equivalencia_plantillas.py -v`
+Expected: PASS. Los de equivalencia son el criterio de aceptación de la migración: comparan el PNG **byte a byte** contra el que produce el archivo de `templates/`. Si alguno se pone rojo, las piezas de gdlscene cambiaron de aspecto sin que nadie lo pidiera.
+
+⚠️ **El badge no es opcional en la práctica.** `compose()` hace `badge_text or _default_badge()`, así que toda pieza del camino viejo lleva un badge aunque nadie lo pase. Hoy `_default_badge()` devuelve `"Our Annual Year <año>"` — hardcodeado y en inglés. H2 no lo cambia, pero el generador de campos debe poder producir un `badge`, y la plantilla `clasica`/`verde`/`anuncio` lo declara como extra opcional. Si el equipo quiere otro texto, es una edición de plantilla o un campo con default por marca, y eso es H3.
 
 - [ ] **Step 5: Commit**
 

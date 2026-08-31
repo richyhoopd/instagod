@@ -19,12 +19,16 @@ from ..plantillas import contrato as c
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 
 # Del vocabulario del código viejo al canónico del contrato.
+# OJO: `tag_text` NO es `handle`. El camino viejo lo calculaba como
+# handle.lstrip("@").upper() (src/compose.py:115), así que mapearlo directo a
+# {{ handle }} cambiaba el diseño de "GDLSCENE" a "@gdlscene". Va por el filtro
+# `etiqueta`, que reproduce esa transformación.
 _RENOMBRES: tuple[tuple[str, str], ...] = (
     ("caption_html", "titular | resaltar"),   # antes que `caption`, es prefijo
     ("foto_inset_url", "inset"),              # antes que `foto_url`
     ("foto_url", "imagen"),
     ("badge_text", "badge"),
-    ("tag_text", "handle"),
+    ("tag_text", "handle | etiqueta"),
     ("caption", "titular"),
 )
 
