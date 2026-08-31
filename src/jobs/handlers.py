@@ -25,6 +25,7 @@ from src import (
     marcas,
     plan_temas,
     planes,
+    posts,
     slideshow_compile,
     slideshow_model,
     topics,
@@ -148,6 +149,37 @@ def rerender_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
             for i, p in enumerate(pngs)]
 
     db.update(cx, "content_queue", queue_id, imagen_url=json.dumps(urls))
+    db.update(cx, "jobs", job["id"], queue_id=queue_id)
+    return {"queue_id": queue_id}
+
+
+def generar_post(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Genera una pieza de una sola imagen desde una plantilla de la marca."""
+    payload = json.loads(job["payload_json"] or "{}")
+    marca = marcas.cargar(cx, _marca_de(cx, job["account_id"]))
+    jobs.progresar(cx, job["id"], 15, "redactando")
+    qid = posts.crear_post(
+        cx, marca,
+        template_id=payload["template_id"],
+        tema=payload.get("tema") or "",
+        entidad_id=payload.get("entidad_id"),
+        campos_manuales=payload.get("campos"),
+        imagen_manual=payload.get("imagen"),
+        creado_por=job.get("creado_por"),
+    )
+    jobs.progresar(cx, job["id"], 90, "listo")
+    db.update(cx, "jobs", job["id"], queue_id=qid)
+    return {"queue_id": qid}
+
+
+def rerender_post(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Vuelve a dibujar una pieza con sus campos actuales. Sin LLM."""
+    payload = json.loads(job["payload_json"] or "{}")
+    marca = marcas.cargar(cx, _marca_de(cx, job["account_id"]))
+    queue_id = payload["queue_id"]
+    jobs.progresar(cx, job["id"], 30, "dibujando")
+    posts.rerender(cx, marca, queue_id)
+    jobs.progresar(cx, job["id"], 90, "listo")
     db.update(cx, "jobs", job["id"], queue_id=queue_id)
     return {"queue_id": queue_id}
 
@@ -465,4 +497,6 @@ HANDLERS = {
     "preset.preview": preset_preview,
     "plan.proponer_temas": plan_proponer_temas,
     "plan.generar": plan_generar,
+    "post.generar": generar_post,
+    "post.rerender": rerender_post,
 }

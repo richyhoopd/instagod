@@ -1138,7 +1138,17 @@ git commit -m "feat(h2): orquestación del post simple"
 - Consumes: `posts.crear_post`, `posts.rerender`, `jobs.progresar`, `_marca_de`.
 - Produces: `generar_post(cx, job) -> dict`, `rerender_post(cx, job) -> dict`, y sus entradas en `HANDLERS`.
 
-**Molde:** `rerender_slideshow` (`src/jobs/handlers.py:127-152`). Firma fija `(cx, job) -> dict`. Resuelve la marca con `_marca_de(cx, job["account_id"])` — **nunca** un default. Reporta con `jobs.progresar` en los puntos caros (antes del LLM, antes del render, antes de subir). Enlaza el resultado con `db.update(cx, "jobs", job["id"], queue_id=qid)`. Deja propagar los errores: el worker los captura y marca el job en `'error'`.
+**Molde:** `rerender_slideshow` (`src/jobs/handlers.py:127-152`). Firma fija `(cx, job) -> dict`.
+
+⚠️ **`_marca_de(cx, account_id)` devuelve el SLUG (`str`), no un objeto `Marca`.** Está anotado así en su firma (`src/jobs/handlers.py:36`) y todos los handlers viejos lo usan como slug. Pero `posts.crear_post` y `posts.rerender` esperan el objeto y hacen `marca.id`, así que el handler tiene que envolverlo:
+
+```python
+marca = marcas.cargar(cx, _marca_de(cx, job["account_id"]))
+```
+
+Pasar el slug crudo revienta con `AttributeError: 'str' object has no attribute 'id'` **en producción y no en CI**, porque los tests del handler mockean `crear_post` y nunca ejercitan el tipo real. Por eso la Task incluye un test de costura que corre el handler contra la orquestación de verdad, mockeando solo lo que sale de la máquina (LLM, Chromium, subida). Se verificó que ese test falla si se reintroduce el bug.
+
+Nunca uses un default para la marca: un `account_id` viejo debe hacer tronar el job, no generar contenido bajo la marca equivocada. Reporta con `jobs.progresar` en los puntos caros (antes del LLM, antes del render, antes de subir). Enlaza el resultado con `db.update(cx, "jobs", job["id"], queue_id=qid)`. Deja propagar los errores: el worker los captura y marca el job en `'error'`.
 
 - [ ] **Step 1: Write the failing test**
 
