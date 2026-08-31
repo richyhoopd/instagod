@@ -459,23 +459,26 @@ def _ct(aspecto="4:5", extras=None) -> dict:
 
 def test_contexto_inyecta_el_nucleo(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     ctx = R.contexto(m, {"titular": "Hola"})
     assert ctx["titular"] == "Hola"
     assert ctx["handle"].startswith("@")
     assert "color_marca" in ctx and "logo" in ctx and "fonts_dir" in ctx
 
 
-def test_contexto_no_deja_pasar_none_como_imagen(tmp_path) -> None:
+def test_contexto_convierte_lo_vacio_en_cadena_vacia(tmp_path) -> None:
+    """NUNCA None: Jinja escribiría el None de Python como el texto "None"
+    dentro del CSS, y la plantilla quedaría con background-image:url('None')."""
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     ctx = R.contexto(m, {"titular": "Hola", "imagen": None})
-    assert ctx["imagen"] is None  # la plantilla decide con {% if imagen %}
+    assert ctx["imagen"] == ""
+    assert ctx["logo"] == "" or ctx["logo"]
 
 
 def test_render_produce_png(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = plantillas.crear(cx, m.id, "Prueba", _HTML.format(h=1350), _ct())
     p = plantillas.obtener(cx, tid)
     png = R.render(cx, m, p, {"titular": "HOLA"}, out_path=tmp_path / "a.png")
@@ -485,7 +488,7 @@ def test_render_produce_png(tmp_path) -> None:
 
 def test_render_respeta_el_aspecto_de_la_plantilla(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = plantillas.crear(cx, m.id, "Vertical", _HTML.format(h=1920),
                            _ct(aspecto="9:16"))
     p = plantillas.obtener(cx, tid)
@@ -495,7 +498,7 @@ def test_render_respeta_el_aspecto_de_la_plantilla(tmp_path) -> None:
 
 def test_render_rechaza_campos_invalidos(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = plantillas.crear(cx, m.id, "Prueba", _HTML.format(h=1350),
                            _ct(extras=[{"id": "pasos", "tipo": "lista",
                                         "min": 3, "max": 3}]))
@@ -510,7 +513,7 @@ def test_render_de_la_onion_sembrada_usa_el_filtro(tmp_path) -> None:
     """La plantilla real de gdlscene, con su filtro `resaltar`, renderiza."""
     from src.seeds import plantillas_gdlscene
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     plantillas_gdlscene.sembrar(cx, m.id)
     p = plantillas.por_slug(cx, m.id, "onion")
     png = R.render(cx, m, p, {"titular": "Banda local revienta el foro"},
@@ -518,7 +521,7 @@ def test_render_de_la_onion_sembrada_usa_el_filtro(tmp_path) -> None:
     assert png.exists() and png.stat().st_size > 10_000
 ```
 
-Si `marcas` no expone `por_slug`, usar la función real del módulo (`marcas.listar` + filtro, o la que exista) y ajustar los seis usos. Verificar con `grep -n "^def " src/marcas.py` antes de escribir el test.
+La función real de `src/marcas.py` es `cargar(cx, slug) -> Marca`. No existe `por_slug`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -826,7 +829,9 @@ def generar_campos(contrato: dict[str, Any], *, marca, tema: str,
         f"el LLM no produjo campos válidos en {intentos} intentos: {'; '.join(errores)}")
 ```
 
-`_pedir_al_llm` va al final del módulo, con la implementación real copiada del patrón de `slideshow_script`. Es la única superficie que los tests mockean, así que su firma tiene que ser exactamente `_pedir_al_llm(prompt: str, *, temperature: float | None = None) -> str`.
+`_pedir_al_llm` va al final del módulo y delega en `_via_deepseek`/`_via_anthropic` de `slideshow_script` en vez de duplicarlas. Es la única superficie que los tests mockean, así que su firma tiene que ser exactamente `_pedir_al_llm(prompt: str) -> str`.
+
+⚠️ **Sin parámetro `temperature`.** La de `slideshow_script` se lee de `config`, así que ajustarla por llamada obliga a pisar `config.SLIDESHOW_TEMPERATURE` y restaurarla en un `finally`. El worker corre hasta `WORKER_MAX_JOBS` jobs a la vez: ese estado global mutable es una carrera esperando a ocurrir, y nadie estaba pidiendo una temperatura distinta. Si algún día hace falta, el parámetro se agrega en `slideshow_script`, no un swap global.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -905,7 +910,7 @@ def _sin_render(monkeypatch, tmp_path):
 
 def test_crear_post_inserta_fila_completa(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = _plantilla(cx, m.id)
     _sin_render(monkeypatch, tmp_path)
     monkeypatch.setattr(posts.generador, "generar_campos",
@@ -925,7 +930,7 @@ def test_crear_post_inserta_fila_completa(tmp_path, monkeypatch) -> None:
 
 def test_los_campos_manuales_ganan_al_llm(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = _plantilla(cx, m.id)
     _sin_render(monkeypatch, tmp_path)
 
@@ -941,7 +946,7 @@ def test_los_campos_manuales_ganan_al_llm(tmp_path, monkeypatch) -> None:
 def test_congela_la_version_de_la_plantilla(tmp_path, monkeypatch) -> None:
     """Editar la plantilla después no debe cambiar piezas ya generadas."""
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = _plantilla(cx, m.id)
     _sin_render(monkeypatch, tmp_path)
     monkeypatch.setattr(posts.generador, "generar_campos",
@@ -954,7 +959,7 @@ def test_congela_la_version_de_la_plantilla(tmp_path, monkeypatch) -> None:
 
 def test_imagen_manual_gana(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     monkeypatch.setattr(posts.image_sources, "resolver",
                         lambda *a, **k: [None])
     assert posts.resolver_imagen(cx, m, manual="/tmp/mia.jpg") == "/tmp/mia.jpg"
@@ -962,7 +967,7 @@ def test_imagen_manual_gana(tmp_path, monkeypatch) -> None:
 
 def test_usa_foto_de_la_entidad_antes_que_la_cascada(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     bid = db.insert(cx, "bands", nombre="Los Ejemplo", account_id=m.id)
     eid = entidades.crear(cx, m.id, "Los Ejemplo", "banda", band_id=bid)
     db.insert(cx, "photos", band_id=bid, entity_id=eid,
@@ -978,14 +983,14 @@ def test_usa_foto_de_la_entidad_antes_que_la_cascada(tmp_path, monkeypatch) -> N
 def test_sin_imagen_no_es_error(tmp_path, monkeypatch) -> None:
     """Una marca de puro texto es válida: la plantilla decide con {% if %}."""
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     monkeypatch.setattr(posts.image_sources, "resolver", lambda *a, **k: [None])
     assert posts.resolver_imagen(cx, m, hint="lo que sea") is None
 
 
 def test_rerender_usa_los_campos_guardados(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = _plantilla(cx, m.id)
     _sin_render(monkeypatch, tmp_path)
     monkeypatch.setattr(posts.generador, "generar_campos",
@@ -1164,7 +1169,7 @@ def test_registrados_en_handlers() -> None:
 
 def test_generar_post_crea_la_pieza_y_reporta_progreso(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     tid = plantillas.crear(cx, m.id, "Simple", _HTML, _ct())
     monkeypatch.setattr(handlers.posts, "crear_post", lambda *a, **k: 4242)
 
@@ -1185,7 +1190,7 @@ def test_generar_post_crea_la_pieza_y_reporta_progreso(tmp_path, monkeypatch) ->
 
 def test_generar_post_rechaza_plantilla_de_otra_marca(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     otra_id = db.insert(cx, "accounts", slug="otra", ig_handle="otra",
                         nombre="Otra", ciudad="CDMX")
     tid_ajena = plantillas.crear(cx, otra_id, "Ajena", _HTML, _ct())
@@ -1202,7 +1207,7 @@ def test_generar_post_rechaza_plantilla_de_otra_marca(tmp_path, monkeypatch) -> 
 
 def test_rerender_post_no_llama_al_llm(tmp_path, monkeypatch) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     qid = db.insert(cx, "content_queue", tipo="post", account_id=m.id,
                     campos_json=json.dumps({"titular": "x"}))
     monkeypatch.setattr(handlers.posts, "rerender", lambda *a, **k: "https://cdn/y.png")
@@ -1335,7 +1340,7 @@ def _pieza(cx, m, extras=None) -> tuple[int, int]:
 
 def test_editar_campos_guarda(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     _, qid = _pieza(cx, m)
     cola.editar_campos(cx, qid, {"titular": "corregido a mano"})
     guardado = json.loads(db.get(cx, "content_queue", qid)["campos_json"])
@@ -1344,7 +1349,7 @@ def test_editar_campos_guarda(tmp_path) -> None:
 
 def test_rechaza_campos_que_violan_el_contrato(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     _, qid = _pieza(cx, m, extras=[{"id": "pasos", "tipo": "lista",
                                     "min": 3, "max": 3}])
     with pytest.raises(ValueError, match="campos"):
@@ -1353,7 +1358,7 @@ def test_rechaza_campos_que_violan_el_contrato(tmp_path) -> None:
 
 def test_rechaza_si_no_es_post(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     qid = db.insert(cx, "content_queue", tipo="slideshow", account_id=m.id)
     with pytest.raises(ValueError, match="tipo"):
         cola.editar_campos(cx, qid, {"titular": "x"})
@@ -1361,7 +1366,7 @@ def test_rechaza_si_no_es_post(tmp_path) -> None:
 
 def test_rechaza_si_ya_se_publico(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     _, qid = _pieza(cx, m)
     db.update(cx, "content_queue", qid, status="publicado")
     with pytest.raises(ValueError, match="estado"):
@@ -1370,7 +1375,7 @@ def test_rechaza_si_ya_se_publico(tmp_path) -> None:
 
 def test_no_toca_el_titular_si_solo_cambia_un_extra(tmp_path) -> None:
     cx = _cx(tmp_path)
-    m = marcas.por_slug(cx, "gdlscene")
+    m = marcas.cargar(cx, "gdlscene")
     _, qid = _pieza(cx, m, extras=[{"id": "badge", "tipo": "texto",
                                     "opcional": True}])
     cola.editar_campos(cx, qid, {"titular": "original", "badge": "NUEVO"})
