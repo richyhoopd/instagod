@@ -1,10 +1,23 @@
 """Tests de la página /publicado: render, asignar banda y aplicar prioridad."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
 from src import db, ig_insights
+
+
+def _hace(dias: int) -> str:
+    """ISO con offset `+0000` (formato Graph API) para `dias` atrás desde ahora.
+
+    `band_stats` filtra por una ventana rodante de N días desde `datetime.now()`,
+    así que una fecha absoluta se sale de la ventana con el simple paso del
+    tiempo. Sembrar relativo a "ahora" evita que el test vuelva a envejecer.
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=dias)).strftime(
+        "%Y-%m-%dT%H:%M:%S+0000")
 
 
 @pytest.fixture()
@@ -19,13 +32,13 @@ def client(tmp_path, monkeypatch):
     pid = ig_insights.upsert_post(cx, {
         "id": "M1", "media_type": "IMAGE", "media_url": "https://cdn.example/m1.jpg",
         "permalink": "https://instagram.com/p/M1/", "caption": "hola",
-        "timestamp": "2026-06-01T19:00:00+0000", "like_count": 12, "comments_count": 3,
+        "timestamp": _hace(5), "like_count": 12, "comments_count": 3,
     })
     db.update(cx, "ig_posts", pid, band_id=bid)
     ig_insights.upsert_post(cx, {  # post manual sin banda
         "id": "M2", "media_type": "IMAGE", "media_url": "https://cdn.example/m2.jpg",
         "permalink": "https://instagram.com/p/M2/", "caption": "viejo",
-        "timestamp": "2026-05-01T19:00:00+0000", "like_count": 5, "comments_count": 0,
+        "timestamp": _hace(120), "like_count": 5, "comments_count": 0,
     })
     cx.close()
 

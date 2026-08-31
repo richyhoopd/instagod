@@ -146,9 +146,26 @@ def test_replan_no_repite_las_mismas_fotos(tmp_path, monkeypatch):
     nítida de cada banda; regenerar debe traer la OTRA (no repetir), porque el
     borrador previo queda DESCARTADO y seleccionar() lo excluye. Con el bug (DELETE
     + ranking determinista por nitidez) el 2º plan salía igual al 1º.
+
+    OJO: congela "ahora" a inicios de agosto-2026. plan_month descarta (a propósito,
+    FIX A en planner.py) los slots ya pasados del mes; sin congelar el reloj, este
+    test corría con la fecha REAL del sistema y, al ejecutarse a fin de mes, casi
+    no quedaban slots futuros en agosto → el plan salía con 1 post en vez de 3, sin
+    que eso tuviera nada que ver con el bug de fotos repetidas que el test valida.
     """
+    from datetime import datetime as _dt
+
     import config
+    from src import planner
     monkeypatch.setattr(config, "MONTHLY_CAP", {1: 5, 2: 2, 3: 1, 4: 1, 5: 1})
+
+    class _FakeDT(_dt):                  # ahora = 2026-08-01 09:00 CDMX (todo el mes disponible)
+        @classmethod
+        def now(cls, tz=None):
+            base = _dt(2026, 8, 1, 9, 0)
+            return tz.localize(base) if tz else base
+    monkeypatch.setattr(planner, "datetime", _FakeDT)
+
     db_path = tmp_path / "t.db"
     cx = db.connect(db_path)
     db.init_db(cx)

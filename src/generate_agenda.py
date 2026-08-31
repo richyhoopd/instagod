@@ -655,7 +655,7 @@ def generar_segmento_agenda(cx, account_id: int, *, periodo: str, modo: str) -> 
                 tema_semilla=f"shows {periodo} pt{parte['parte']}",
                 evento_ids=json.dumps(parte["evento_ids"]),
                 account_id=account_id)
-            approval.enviar_a_telegram(parte["caption"], imagen, qid)
+            approval.enviar_a_telegram(parte["caption"], imagen, qid, cx=cx)
             print(f"✅ shows {periodo} parte {parte['parte']}/{parte['partes']}: "
                   f"encolada (queue_id={qid}) y enviada a Telegram.")
         return
@@ -680,7 +680,7 @@ def generar_segmento_agenda(cx, account_id: int, *, periodo: str, modo: str) -> 
         cx, tipo="anuncio", caption=caption, imagen_url=imagen,
         tema_semilla=f"{modo} {periodo}", account_id=account_id,
         evento_ids=json.dumps(evento_ids) if evento_ids else None)
-    approval.enviar_a_telegram(caption, imagen, queue_id)
+    approval.enviar_a_telegram(caption, imagen, queue_id, cx=cx)
     print(f"✅ {modo} {periodo}: encolado (queue_id={queue_id}) y enviado a Telegram para aprobación.")
 
 

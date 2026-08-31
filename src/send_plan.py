@@ -71,7 +71,7 @@ def _componer_y_enviar(cx, fila: dict[str, Any]) -> int:
     db.update(cx, "content_queue", fila["qid"],
               caption=cap_final, imagen_url=url, template=template,
               aprobacion="pendiente")
-    approval.enviar_a_telegram(cap_final, url, fila["qid"], regenerable=True)
+    approval.enviar_a_telegram(cap_final, url, fila["qid"], regenerable=True, cx=cx)
     return fila["qid"]
 
 
