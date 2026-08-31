@@ -866,7 +866,14 @@ git commit -m "feat(h2): generador de campos por contrato con DeepSeek"
 3. La cascada global: `image_sources.resolver([hint], fuentes.orden_imagen(cx, marca), ...)`.
 4. `None`. La plantilla decide con `{% if imagen %}`; no es error que una marca de puro texto no tenga foto.
 
-`crear_post` inserta en `content_queue` con `tipo='post'`, `template_id`, `template_version` (la `version_actual` de la plantilla al momento — congelada, para que editar la plantilla después no cambie piezas ya generadas), `entity_id`, `campos_json`, `aspecto`, `imagen_url`, `caption` y `aprobacion=NULL`. `status` queda en `'borrador'`.
+`crear_post` inserta en `content_queue` con `tipo='post'`, `template_id`, `template_version` (la `version_actual` de la plantilla al momento — congelada, para que editar la plantilla después no cambie piezas ya generadas), `entity_id`, `campos_json`, `aspecto`, `imagen_url` y `caption`.
+
+**`origen='api'` y `aprobacion='pendiente'`, y ninguno de los dos es cosmético:**
+
+- `cola.estado_de` compara literalmente `origen == "api"` para distinguir el flujo del portal del legacy. Otro valor deja la pieza fuera de esa lógica de estados.
+- La fila se inserta **después** de renderizar, así que la pieza ya está lista y lo que falta es la revisión humana. Con `aprobacion=NULL`, `estado_de` la deriva como `"generando"` — que significa "el worker todavía la está armando" — y entonces **no se puede ni editar ni aprobar desde el portal**. Es el mismo contrato que usa el flujo de slideshows vía `approval.encolar_pendiente` (`src/approval.py:31`).
+
+`status` queda en `'borrador'`; no se usa `'listo'`, que es el marcador del flujo legacy del Sheet y haría que `sync_sheet` levantara la pieza.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -924,7 +931,7 @@ def test_crear_post_inserta_fila_completa(tmp_path, monkeypatch) -> None:
     assert fila["aspecto"] == "4:5"
     assert json.loads(fila["campos_json"])["titular"] == "Hola mundo"
     assert fila["status"] == "borrador"
-    assert fila["aprobacion"] is None
+    assert fila["aprobacion"] == "pendiente"   # ver la nota de arriba
     assert fila["account_id"] == m.id
 
 
@@ -1293,7 +1300,11 @@ git commit -m "feat(h2): handlers post.generar y post.rerender"
 - Consumes: `contrato.validar_campos`, `plantillas.obtener`, `cola.estado_de`, `cola._resolver_image_url`.
 - Produces: `cola.editar_campos(cx, queue_id: int, campos: dict) -> None`, y el endpoint que encola `post.rerender`.
 
-**Molde exacto:** `cola.editar_slides` (`src/cola.py:200-230`) y su router (`api/routers/cola.py:93-104`). Se copian sus tres validaciones y su mapa de errores:
+**Molde exacto:** `cola.editar_slides` (`src/cola.py:200-230`) y su router (`api/routers/cola.py:93-104`). Se copian sus tres validaciones y su mapa de errores.
+
+⚠️ **`_EDITABLES` no alcanza.** Vale `("pendiente","programado","error")`. Un post recién creado es editable, así que `editar_campos` usa `_EDITABLES_CAMPOS = _EDITABLES + ("borrador",)`, una constante nueva y aditiva: `_EDITABLES` y las tres funciones que la usan (`reprogramar`, `editar_caption`, `eliminar`) no se tocan.
+
+⚠️ **`_resolver_image_url` tiene cuatro parámetros**, `(cx, fila, valor, actual)`, no tres. El `actual` sale de `json.loads(fila["campos_json"]).get("imagen")`.
 
 | `ValueError` | Mensaje al usuario |
 |---|---|

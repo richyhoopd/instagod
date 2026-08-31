@@ -1,6 +1,8 @@
 """Cola de contenido del portal: listar, editar, aprobar/rechazar, regenerar, slots."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
@@ -39,6 +41,10 @@ class SlideEdit(BaseModel):
 
 class EditarSlides(BaseModel):
     slides: list[SlideEdit]
+
+
+class EditarCampos(BaseModel):
+    campos: dict[str, Any]
 
 
 @router.get("/queue")
@@ -102,6 +108,30 @@ def editar_slides(slug: str, qid: int, datos: EditarSlides,
         detalle_err = _ERRORES_SLIDES.get(str(e), "Slides inválidos")
         raise ApiError(422, "validacion", detalle_err, "slides") from None
     job_id = jobs.crear(cx, "slideshow.rerender", fila["id"], {"queue_id": qid},
+                        creado_por=user["id"])
+    return {"job_id": job_id}
+
+
+_ERRORES_CAMPOS = {
+    "estado": "Esta pieza ya no se puede editar",
+    "tipo": "Esta pieza no es un post simple",
+    "url": "La imagen no es válida",
+}
+
+
+@router.put("/queue/{qid}/campos", status_code=202)
+def editar_campos(slug: str, qid: int, datos: EditarCampos,
+                  user=Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
+    """Corrige a mano los campos de un post y encola el re-render (sin LLM)."""
+    fila, _ = marca_para(slug, cx, user)
+    _item_de_marca(cx, fila["id"], qid)
+    try:
+        cola.editar_campos(cx, qid, datos.campos)
+    except ValueError as e:
+        clave = str(e).split(":")[0]
+        detalle = _ERRORES_CAMPOS.get(clave, str(e).split(": ", 1)[-1])
+        raise ApiError(422, "validacion", detalle, "campos") from None
+    job_id = jobs.crear(cx, "post.rerender", fila["id"], {"queue_id": qid},
                         creado_por=user["id"])
     return {"job_id": job_id}
 
