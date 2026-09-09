@@ -212,7 +212,7 @@ def vacio(aspecto: str) -> dict[str, Any]:
              "radio": 0, "rot": 0, "opacidad": 1},
             {"id": "titular", "tipo": "texto",
              "x": 80, "y": int(alto * 0.6), "w": ancho - 160, "h": int(alto * 0.25),
-             "z": 2, "campo": "titular", "fuente": "Poppins", "tam": 64, "peso": 700,
+             "z": 2, "campo": "titular", "fuente": "Poppins-Bold", "tam": 64, "peso": 700,
              "color": "#ffffff", "alinear": "centro", "vertical": "centro",
              "interlinea": 1.15, "mayusculas": False, "auto": True, "resaltar": False,
              "rot": 0, "opacidad": 1},

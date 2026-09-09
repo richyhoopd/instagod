@@ -8,7 +8,7 @@ CONTRATO = {
     "base": list(contrato.CAMPOS_BASE),
     "extras": [{"id": "badge", "tipo": "texto", "etiqueta": "Etiqueta"}],
 }
-FAMILIAS = {"Poppins", "Tinos", "Anton"}
+FAMILIAS = {"Poppins-Bold", "Tinos", "Anton"}
 
 
 def _capa_texto(**extra):
@@ -125,3 +125,34 @@ def test_demasiadas_capas_se_rechazan():
 def test_sin_capas_se_rechaza():
     with pytest.raises(contrato.ContratoInvalido, match="vacío"):
         layout.validar({**_layout(), "capas": []}, CONTRATO, familias=FAMILIAS)
+
+
+def test_vacio_pasa_validacion_contra_el_catalogo_global():
+    """El diseño en blanco tiene que sobrevivir al catálogo real, no a uno de mentira."""
+    import config
+    familias = set(config.SLIDESHOW_FUENTES)
+    for aspecto in layout.LIENZO:
+        c = {**CONTRATO, "aspecto": aspecto}
+        layout.validar(layout.vacio(aspecto), c, familias=familias)
+
+
+def test_imagen_sin_campo_ni_archivo_se_rechaza():
+    """Imagen que no dice de dónde sale es inválida."""
+    capa = {"id": "foto", "tipo": "imagen", "x": 0, "y": 0, "w": 1080, "h": 880, "z": 1}
+    with pytest.raises(contrato.ContratoInvalido, match="de dónde"):
+        layout.validar(_layout(capa), CONTRATO, familias=FAMILIAS)
+
+
+def test_caja_valida():
+    """Una capa de caja con color válido pasa la validación."""
+    capa = {"id": "fondo_oscuro", "tipo": "caja", "x": 0, "y": 0, "w": 1080, "h": 400,
+            "z": 1, "color": "#2a2a2a", "radio": 0}
+    layout.validar(_layout(capa), CONTRATO, familias=FAMILIAS)
+
+
+def test_caja_con_color_invalido_se_rechaza():
+    """Una capa de caja con color inválido se rechaza."""
+    capa = {"id": "fondo_oscuro", "tipo": "caja", "x": 0, "y": 0, "w": 1080, "h": 400,
+            "z": 1, "color": "rojo", "radio": 0}
+    with pytest.raises(contrato.ContratoInvalido, match="color"):
+        layout.validar(_layout(capa), CONTRATO, familias=FAMILIAS)
