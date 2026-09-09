@@ -31,20 +31,36 @@ def _validado(html: str, contrato_dict: dict[str, Any]) -> str:
     return json.dumps(contrato_dict, ensure_ascii=False)
 
 
+def layout_de(fila: dict[str, Any]) -> dict[str, Any] | None:
+    """El diseño visual de una fila, o None si es legacy (HTML a mano)."""
+    crudo = fila.get("layout_json") if hasattr(fila, "get") else fila["layout_json"]
+    if not crudo:
+        return None
+    return json.loads(crudo)
+
+
+def es_editable(fila: dict[str, Any]) -> bool:
+    """Un diseño se abre en el editor solo si tiene capas. Los de antes, no."""
+    return layout_de(fila) is not None
+
+
 def crear(cx, account_id: int, nombre: str, html: str,
           contrato_dict: dict[str, Any], *, descripcion: str | None = None,
           origen: str = "manual", creado_por: int | None = None,
-          mensaje_usuario: str | None = None) -> int:
+          mensaje_usuario: str | None = None,
+          layout: dict[str, Any] | None = None) -> int:
     contrato_json = _validado(html, contrato_dict)
+    layout_json = json.dumps(layout, ensure_ascii=False) if layout else None
     tid = db.insert(
         cx, "brand_templates", account_id=account_id, nombre=nombre,
         slug=_slug_libre(cx, account_id, slugificar(nombre)),
         descripcion=descripcion, aspecto=contrato_dict["aspecto"],
-        contrato_json=contrato_json, html=html, origen=origen,
-        creado_por=creado_por, version_actual=1,
+        contrato_json=contrato_json, html=html, layout_json=layout_json,
+        origen=origen, creado_por=creado_por, version_actual=1,
     )
     db.insert(cx, "template_versions", template_id=tid, version=1, html=html,
-              contrato_json=contrato_json, mensaje_usuario=mensaje_usuario)
+              contrato_json=contrato_json, layout_json=layout_json,
+              mensaje_usuario=mensaje_usuario)
     cx.commit()
     return tid
 
@@ -52,19 +68,22 @@ def crear(cx, account_id: int, nombre: str, html: str,
 def nueva_version(cx, template_id: int, html: str,
                   contrato_dict: dict[str, Any], *,
                   mensaje_usuario: str | None = None,
-                  llm_meta: dict[str, Any] | None = None) -> int:
+                  llm_meta: dict[str, Any] | None = None,
+                  layout: dict[str, Any] | None = None) -> int:
     contrato_json = _validado(html, contrato_dict)
+    layout_json = json.dumps(layout, ensure_ascii=False) if layout else None
     fila = obtener(cx, template_id)
     if fila is None:
         raise ValueError(f"plantilla {template_id} no existe")
     numero = int(fila["version_actual"]) + 1
     db.insert(cx, "template_versions", template_id=template_id, version=numero,
-              html=html, contrato_json=contrato_json,
+              html=html, contrato_json=contrato_json, layout_json=layout_json,
               mensaje_usuario=mensaje_usuario,
               llm_meta=json.dumps(llm_meta, ensure_ascii=False) if llm_meta else None)
     db.update(cx, "brand_templates", template_id, html=html,
-              contrato_json=contrato_json, aspecto=contrato_dict["aspecto"],
-              version_actual=numero, actualizado_en=_ahora(cx))
+              contrato_json=contrato_json, layout_json=layout_json,
+              aspecto=contrato_dict["aspecto"], version_actual=numero,
+              actualizado_en=_ahora(cx))
     cx.commit()
     return numero
 
@@ -74,9 +93,11 @@ def revertir(cx, template_id: int, numero: int) -> int:
     vieja = version(cx, template_id, numero)
     if vieja is None:
         raise ValueError(f"la plantilla {template_id} no tiene versión {numero}")
+    layout = layout_de(vieja) if vieja.get("layout_json") else None
     return nueva_version(cx, template_id, vieja["html"],
                          json.loads(vieja["contrato_json"]),
-                         mensaje_usuario=f"volver a la versión {numero}")
+                         mensaje_usuario=f"volver a la versión {numero}",
+                         layout=layout)
 
 
 def obtener(cx, template_id: int) -> dict[str, Any] | None:

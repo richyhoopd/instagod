@@ -1,6 +1,8 @@
 """CRUD y versionado de plantillas de marca."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src import db, plantillas
@@ -90,3 +92,55 @@ def test_extras_del_contrato_se_pueden_usar_en_el_html(tmp_path) -> None:
     html = _HTML + "{% for p in pasos %}<li>{{ p }}</li>{% endfor %}"
     tid = plantillas.crear(cx, 1, "Tips", html, ct)
     assert plantillas.obtener(cx, tid) is not None
+
+
+def test_crear_guarda_layout_y_lo_devuelve(cx_tmp, HTML_MINIMO, CONTRATO_MINIMO):
+    layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
+                                                                  "iman": 8},
+              "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
+                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
+                         "tam": 48}]}
+    tid = plantillas.crear(cx_tmp, 1, "Con layout", HTML_MINIMO, CONTRATO_MINIMO,
+                           layout=layout)
+    fila = plantillas.obtener(cx_tmp, tid)
+    assert plantillas.layout_de(fila) == layout
+    assert plantillas.es_editable(fila) is True
+
+
+def test_plantilla_sin_layout_es_legacy(cx_tmp, HTML_MINIMO, CONTRATO_MINIMO):
+    tid = plantillas.crear(cx_tmp, 1, "Sin layout", HTML_MINIMO, CONTRATO_MINIMO)
+    fila = plantillas.obtener(cx_tmp, tid)
+    assert plantillas.layout_de(fila) is None
+    assert plantillas.es_editable(fila) is False
+
+
+def test_nueva_version_guarda_el_layout_en_la_version(cx_tmp, HTML_MINIMO,
+                                                       CONTRATO_MINIMO):
+    layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
+                                                                  "iman": 8},
+              "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
+                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
+                         "tam": 48}]}
+    tid = plantillas.crear(cx_tmp, 1, "Versionada", HTML_MINIMO, CONTRATO_MINIMO,
+                           layout=layout)
+    otro = {**layout, "lienzo": {"fondo": "#000000"}}
+    plantillas.nueva_version(cx_tmp, tid, HTML_MINIMO, CONTRATO_MINIMO, layout=otro)
+    v2 = plantillas.version(cx_tmp, tid, 2)
+    assert json.loads(v2["layout_json"])["lienzo"]["fondo"] == "#000000"
+    assert plantillas.layout_de(plantillas.obtener(cx_tmp, tid))["lienzo"][
+        "fondo"] == "#000000"
+
+
+def test_revertir_recupera_el_layout_viejo(cx_tmp, HTML_MINIMO, CONTRATO_MINIMO):
+    layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
+                                                                  "iman": 8},
+              "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
+                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
+                         "tam": 48}]}
+    tid = plantillas.crear(cx_tmp, 1, "Reversible", HTML_MINIMO, CONTRATO_MINIMO,
+                           layout=layout)
+    plantillas.nueva_version(cx_tmp, tid, HTML_MINIMO, CONTRATO_MINIMO,
+                             layout={**layout, "lienzo": {"fondo": "#000000"}})
+    plantillas.revertir(cx_tmp, tid, 1)
+    assert plantillas.layout_de(plantillas.obtener(cx_tmp, tid))["lienzo"][
+        "fondo"] == "#ffffff"

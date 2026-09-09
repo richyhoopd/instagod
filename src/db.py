@@ -127,12 +127,12 @@ TABLES: dict[str, set[str]] = {
     },
     "brand_templates": {
         "account_id", "slug", "nombre", "descripcion", "aspecto",
-        "contrato_json", "html", "estado", "version_actual", "origen",
-        "creado_por", "actualizado_en",
+        "contrato_json", "html", "layout_json", "estado", "version_actual",
+        "origen", "creado_por", "actualizado_en",
     },
     "template_versions": {
         "template_id", "version", "mensaje_usuario", "html",
-        "contrato_json", "preview_path", "llm_meta",
+        "contrato_json", "layout_json", "preview_path", "llm_meta",
     },
     "brand_fonts": {"account_id", "familia", "archivo"},
 }
@@ -306,6 +306,10 @@ _MIGRATIONS = {
     "plan_topics": {
         "entity_id": "INTEGER",
     },
+    # El diseño visual: lista de capas con posición absoluta. NULL = diseño
+    # legacy escrito a mano, que sigue renderizando por su `html`.
+    "brand_templates": {"layout_json": "TEXT"},
+    "template_versions": {"layout_json": "TEXT"},
 }
 
 

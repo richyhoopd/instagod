@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 
 import config
+from src import db
+from src.plantillas import contrato as c
 
 
 @pytest.fixture(autouse=True)
@@ -74,3 +76,23 @@ def api_cliente(tmp_path, monkeypatch):
     yield cli, cx, H
     cx.close()
     _restaurar_config()
+
+
+@pytest.fixture
+def cx_tmp(tmp_path):
+    """Conexión temporal a DB de tests para plantillas."""
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    return cx
+
+
+@pytest.fixture
+def HTML_MINIMO():
+    """HTML mínimo válido para un contrato base."""
+    return "<div><h1>{{ titular }}</h1></div>"
+
+
+@pytest.fixture
+def CONTRATO_MINIMO():
+    """Contrato mínimo válido."""
+    return {"aspecto": "4:5", "base": list(c.CAMPOS_BASE), "extras": []}
