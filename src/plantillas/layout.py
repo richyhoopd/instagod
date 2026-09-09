@@ -11,6 +11,7 @@ diseños ya publicados.
 """
 from __future__ import annotations
 
+import html as _html
 import re
 from typing import Any
 
@@ -218,3 +219,171 @@ def vacio(aspecto: str) -> dict[str, Any]:
              "rot": 0, "opacidad": 1},
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Compilador: capas -> HTML+CSS+Jinja
+# ---------------------------------------------------------------------------
+
+_JUSTIFY = {"izq": "flex-start", "centro": "center", "der": "flex-end"}
+_ALIGN = {"arriba": "flex-start", "centro": "center", "abajo": "flex-end"}
+_TEXTALIGN = {"izq": "left", "centro": "center", "der": "right"}
+
+# El auto-ajuste achica el texto hasta que cabe. `window.__captionFitted` NO es
+# decorativo: `src/compose.py:185` busca ese literal en el HTML para decidir si
+# espera al ajuste antes de la foto. Si cambias el nombre, Chromium dispara el
+# screenshot a media letra.
+_SCRIPT_AUTO = """<script>
+function ajustarTextos(){
+  for (const el of document.querySelectorAll('[data-fit]')) {
+    const caja = el.parentElement;
+    let tam = parseFloat(getComputedStyle(el).fontSize);
+    const minimo = Math.max(12, Math.round(tam * 0.4));
+    while ((el.scrollHeight > caja.clientHeight || el.scrollWidth > caja.clientWidth)
+           && tam > minimo) {
+      tam -= 1; el.style.fontSize = tam + 'px';
+    }
+  }
+  window.__captionFitted = true;
+}
+document.fonts.ready.then(() => requestAnimationFrame(
+  () => requestAnimationFrame(ajustarTextos)));
+</script>"""
+
+
+def _css_color(valor: Any) -> str:
+    """'marca' se resuelve en tiempo de render; el hex se queda literal."""
+    return "{{ color_marca }}" if valor == "marca" else str(valor)
+
+
+def _fuente_de(capa: dict[str, Any]) -> str:
+    return str(capa.get("fuente") or "")
+
+
+def _font_faces(diseno: dict[str, Any], fuentes: list[dict[str, Any]] | None) -> str:
+    """Solo las tipografías que el diseño usa de verdad.
+
+    Emitir el catálogo entero engorda el HTML y hace que Chromium cargue
+    archivos que nadie pide. `fonts_dir` lo inyecta el render, así que la ruta
+    sale como variable Jinja y el diseño no depende de dónde esté instalado.
+    """
+    if not fuentes:
+        return ""
+    usadas = {_fuente_de(c) for c in diseno["capas"] if c.get("tipo") == "texto"}
+    piezas = []
+    for f in sorted(fuentes, key=lambda x: x["familia"]):
+        if f["familia"] not in usadas:
+            continue
+        ruta = f["archivo"] if f.get("propia") else "{{ fonts_dir }}/" + f["archivo"]
+        piezas.append(
+            f"@font-face{{font-family:'{f['familia']}';src:url('{ruta}');"
+            "font-display:block;}")
+    return "\n  ".join(piezas)
+
+
+def _caja_css(capa: dict[str, Any]) -> str:
+    """El posicionamiento común a las tres clases de capa."""
+    partes = [
+        "position:absolute",
+        f"left:{capa['x']}px", f"top:{capa['y']}px",
+        f"width:{capa['w']}px", f"height:{capa['h']}px",
+        f"z-index:{capa.get('z', 0)}",
+    ]
+    rot = capa.get("rot", 0) or 0
+    if rot:
+        partes.append(f"transform:rotate({rot:g}deg)")
+    opac = capa.get("opacidad", 1)
+    if opac != 1:
+        partes.append(f"opacity:{opac:g}")
+    radio = capa.get("radio", 0) or 0
+    if radio:
+        partes.append(f"border-radius:{radio}px;overflow:hidden")
+    return ";".join(partes)
+
+
+def _capa_texto(capa: dict[str, Any]) -> str:
+    if capa.get("campo"):
+        contenido = ("{{ %s|resaltar }}" if capa.get("resaltar") else "{{ %s }}") % capa["campo"]
+    else:
+        contenido = _html.escape(capa["texto"], quote=False)
+
+    caja = [_caja_css(capa), "display:flex",
+            f"justify-content:{_JUSTIFY[capa.get('alinear', 'centro')]}",
+            f"align-items:{_ALIGN[capa.get('vertical', 'centro')]}",
+            "overflow:hidden"]
+    texto = [
+        f"font-family:'{capa['fuente']}',sans-serif",
+        f"font-size:{capa['tam']}px",
+        f"font-weight:{capa.get('peso', 400)}",
+        f"color:{_css_color(capa.get('color', '#000000'))}",
+        f"line-height:{capa.get('interlinea', 1.2):g}",
+        f"text-align:{_TEXTALIGN[capa.get('alinear', 'centro')]}",
+        "width:100%",
+    ]
+    if capa.get("mayusculas"):
+        texto.append("text-transform:uppercase")
+    fit = " data-fit" if capa.get("auto") else ""
+    return (f'<div id="capa-{capa["id"]}" class="capa" style="{";".join(caja)}">'
+            f'<div{fit} style="{";".join(texto)}">{contenido}</div></div>')
+
+
+def _capa_imagen(capa: dict[str, Any]) -> str:
+    if capa.get("campo"):
+        src = "{{ %s }}" % capa["campo"]
+    else:
+        src = "{{ fotos_dir }}/" + str(capa["archivo"])
+    css = [_caja_css(capa),
+           f"background-image:url('{src}')",
+           f"background-size:{capa.get('ajuste', 'cover')}",
+           f"background-position:{capa.get('anclaje', 'center')}",
+           "background-repeat:no-repeat"]
+    return f'<div id="capa-{capa["id"]}" class="capa" style="{";".join(css)}"></div>'
+
+
+def _capa_caja(capa: dict[str, Any]) -> str:
+    css = [_caja_css(capa), f"background:{_css_color(capa.get('color', '#000000'))}"]
+    return f'<div id="capa-{capa["id"]}" class="capa" style="{";".join(css)}"></div>'
+
+
+_PINTORES = {"texto": _capa_texto, "imagen": _capa_imagen, "caja": _capa_caja}
+
+
+def a_html(layout: dict[str, Any], contrato: dict[str, Any],
+           *, fuentes: list[dict[str, Any]] | None = None) -> str:
+    """Compila un diseño visual a HTML+CSS+Jinja. Determinista.
+
+    El resultado tiene que cumplir tres cosas que exigen otros módulos:
+    un único nodo `.card` (lo fotografía `compose._screenshot_card`), solo
+    variables declaradas en el contrato (lo valida `contrato.validar_html`) y
+    el literal `window.__captionFitted` cuando hay auto-ajuste (lo espera
+    `compose._screenshot_card`).
+    """
+    familias = {f["familia"] for f in fuentes} if fuentes else None
+    validar(layout, contrato, familias=familias)
+
+    ancho, alto = LIENZO[contrato["aspecto"]]
+    capas = sorted(layout["capas"], key=lambda c: (c.get("z", 0), c["id"]))
+    cuerpo = "\n    ".join(_PINTORES[c["tipo"]](c) for c in capas)
+    fondo = _css_color((layout.get("lienzo") or {}).get("fondo", "#ffffff"))
+    script = "\n  " + _SCRIPT_AUTO if any(
+        c.get("tipo") == "texto" and c.get("auto") for c in capas) else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  {_font_faces(layout, fuentes)}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body {{ width:{ancho}px; height:{alto}px; }}
+  .card {{ width:{ancho}px; height:{alto}px; background:{fondo};
+          position:relative; overflow:hidden; }}
+  .capa {{ position:absolute; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    {cuerpo}
+  </div>{script}
+</body>
+</html>"""

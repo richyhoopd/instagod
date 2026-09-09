@@ -9,9 +9,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import config
+
 from .. import compose, db
 from . import contrato as _contrato
 from . import filtros
+
+# Misma carpeta que sirve `api/routers/fuentes_api.py` (`BRANDS_DIR`) y a la
+# que escribe `src/jobs/handlers.py`: fotos y stickers subidos por la marca,
+# NO `config.PHOTOS_DIR` (esa es la de fotos scrapeadas de IG, otro concepto).
+BRANDS_DIR = config.BASE_DIR / "data" / "brands"
 
 
 class CamposInvalidos(ValueError):
@@ -24,7 +31,7 @@ def _fuentes_de_marca(cx, account_id: int) -> list[dict[str, Any]]:
 
 
 def contexto(marca, campos: dict[str, Any], *,
-             fonts_dir: str | None = None) -> dict[str, Any]:
+             fonts_dir: str | None = None, fotos_dir: str | None = None) -> dict[str, Any]:
     """Campos del contrato + el núcleo base inyectado desde la marca."""
     ctx = dict(campos)
     # OJO: lo vacío va como "" y nunca como None. _to_src(None) devuelve "",
@@ -36,6 +43,7 @@ def contexto(marca, campos: dict[str, Any], *,
     ctx["logo"] = compose._to_src(marca.logo_path)
     ctx["color_marca"] = marca.color_marca
     ctx["fonts_dir"] = fonts_dir or compose.FONTS_DIR.as_uri()
+    ctx["fotos_dir"] = fotos_dir or (BRANDS_DIR / marca.slug / "fotos").as_uri()
     return ctx
 
 
