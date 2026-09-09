@@ -93,7 +93,7 @@ def revertir(cx, template_id: int, numero: int) -> int:
     vieja = version(cx, template_id, numero)
     if vieja is None:
         raise ValueError(f"la plantilla {template_id} no tiene versión {numero}")
-    layout = layout_de(vieja) if vieja.get("layout_json") else None
+    layout = layout_de(vieja)
     return nueva_version(cx, template_id, vieja["html"],
                          json.loads(vieja["contrato_json"]),
                          mensaje_usuario=f"volver a la versión {numero}",

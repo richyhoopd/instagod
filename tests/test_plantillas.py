@@ -94,53 +94,53 @@ def test_extras_del_contrato_se_pueden_usar_en_el_html(tmp_path) -> None:
     assert plantillas.obtener(cx, tid) is not None
 
 
-def test_crear_guarda_layout_y_lo_devuelve(cx_tmp, HTML_MINIMO, CONTRATO_MINIMO):
+def test_crear_guarda_layout_y_lo_devuelve(tmp_path) -> None:
+    cx = _cx(tmp_path)
     layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
                                                                   "iman": 8},
               "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
                          "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
                          "tam": 48}]}
-    tid = plantillas.crear(cx_tmp, 1, "Con layout", HTML_MINIMO, CONTRATO_MINIMO,
-                           layout=layout)
-    fila = plantillas.obtener(cx_tmp, tid)
+    tid = plantillas.crear(cx, 1, "Con layout", _HTML, _ct(), layout=layout)
+    fila = plantillas.obtener(cx, tid)
     assert plantillas.layout_de(fila) == layout
     assert plantillas.es_editable(fila) is True
 
 
-def test_plantilla_sin_layout_es_legacy(cx_tmp, HTML_MINIMO, CONTRATO_MINIMO):
-    tid = plantillas.crear(cx_tmp, 1, "Sin layout", HTML_MINIMO, CONTRATO_MINIMO)
-    fila = plantillas.obtener(cx_tmp, tid)
+def test_plantilla_sin_layout_es_legacy(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    tid = plantillas.crear(cx, 1, "Sin layout", _HTML, _ct())
+    fila = plantillas.obtener(cx, tid)
     assert plantillas.layout_de(fila) is None
     assert plantillas.es_editable(fila) is False
 
 
-def test_nueva_version_guarda_el_layout_en_la_version(cx_tmp, HTML_MINIMO,
-                                                       CONTRATO_MINIMO):
+def test_nueva_version_guarda_el_layout_en_la_version(tmp_path) -> None:
+    cx = _cx(tmp_path)
     layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
                                                                   "iman": 8},
               "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
                          "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
                          "tam": 48}]}
-    tid = plantillas.crear(cx_tmp, 1, "Versionada", HTML_MINIMO, CONTRATO_MINIMO,
-                           layout=layout)
+    tid = plantillas.crear(cx, 1, "Versionada", _HTML, _ct(), layout=layout)
     otro = {**layout, "lienzo": {"fondo": "#000000"}}
-    plantillas.nueva_version(cx_tmp, tid, HTML_MINIMO, CONTRATO_MINIMO, layout=otro)
-    v2 = plantillas.version(cx_tmp, tid, 2)
+    plantillas.nueva_version(cx, tid, _HTML, _ct(), layout=otro)
+    v2 = plantillas.version(cx, tid, 2)
     assert json.loads(v2["layout_json"])["lienzo"]["fondo"] == "#000000"
-    assert plantillas.layout_de(plantillas.obtener(cx_tmp, tid))["lienzo"][
+    assert plantillas.layout_de(plantillas.obtener(cx, tid))["lienzo"][
         "fondo"] == "#000000"
 
 
-def test_revertir_recupera_el_layout_viejo(cx_tmp, HTML_MINIMO, CONTRATO_MINIMO):
+def test_revertir_recupera_el_layout_viejo(tmp_path) -> None:
+    cx = _cx(tmp_path)
     layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
                                                                   "iman": 8},
               "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
                          "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
                          "tam": 48}]}
-    tid = plantillas.crear(cx_tmp, 1, "Reversible", HTML_MINIMO, CONTRATO_MINIMO,
-                           layout=layout)
-    plantillas.nueva_version(cx_tmp, tid, HTML_MINIMO, CONTRATO_MINIMO,
+    tid = plantillas.crear(cx, 1, "Reversible", _HTML, _ct(), layout=layout)
+    plantillas.nueva_version(cx, tid, _HTML, _ct(),
                              layout={**layout, "lienzo": {"fondo": "#000000"}})
-    plantillas.revertir(cx_tmp, tid, 1)
-    assert plantillas.layout_de(plantillas.obtener(cx_tmp, tid))["lienzo"][
+    plantillas.revertir(cx, tid, 1)
+    assert plantillas.layout_de(plantillas.obtener(cx, tid))["lienzo"][
         "fondo"] == "#ffffff"
