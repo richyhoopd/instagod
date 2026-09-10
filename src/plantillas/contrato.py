@@ -188,6 +188,12 @@ def validar_html(html: str, contrato: dict[str, Any]) -> None:
         raise ContratoInvalido(
             f"el HTML es demasiado grande ({len(html)} caracteres, tope {MAX_HTML})")
 
+    # El motor fotografía el nodo `.card` (src/compose.py:191). Sin él, el
+    # render no falla: devuelve un PNG vacío, que es mucho peor.
+    if 'class="card"' not in (html or "") and "class='card'" not in (html or ""):
+        raise ContratoInvalido(
+            "el diseño no tiene el marco de la imagen (falta el bloque card)")
+
     env = filtros.entorno()
     try:
         ast = env.parse(html)

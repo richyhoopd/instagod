@@ -57,20 +57,28 @@ def test_variables_declaradas_incluye_base_y_extras() -> None:
 
 def test_html_con_variable_no_declarada() -> None:
     ct = _contrato_minimo()
-    html = "<div>{{ titular }} {{ inventada }}</div>"
+    html = "<div class='card'>{{ titular }} {{ inventada }}</div>"
     with pytest.raises(c.ContratoInvalido, match="inventada"):
         c.validar_html(html, ct)
 
 
 def test_html_puede_usar_variables_de_sistema() -> None:
     ct = _contrato_minimo()
-    c.validar_html("<div>{{ titular }}<img src='{{ fonts_dir }}/a.ttf'></div>", ct)
+    c.validar_html(
+        "<div class='card'>{{ titular }}<img src='{{ fonts_dir }}/a.ttf'></div>", ct)
 
 
 def test_html_roto_de_jinja() -> None:
     ct = _contrato_minimo()
     with pytest.raises(c.ContratoInvalido, match="Jinja"):
-        c.validar_html("<div>{{ titular </div>", ct)
+        c.validar_html("<div class='card'>{{ titular </div>", ct)
+
+
+def test_html_sin_card_se_rechaza() -> None:
+    ct = _contrato_minimo()
+    html = "<html><body><div class='otra'>{{ titular }}</div></body></html>"
+    with pytest.raises(c.ContratoInvalido, match="card"):
+        c.validar_html(html, ct)
 
 
 def test_dimensiones() -> None:

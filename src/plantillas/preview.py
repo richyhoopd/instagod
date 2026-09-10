@@ -2,8 +2,9 @@
 
 Molde: `src/estilo_preview.py` (hash del contenido → nombre de archivo,
 directorio de cache, limpieza de versiones viejas del mismo id). La diferencia
-es la clave del hash: aquí es de `html + contrato_json`, así que el cache se
-invalida solo el día que la plantilla cambie (nueva versión), no antes.
+es la clave del hash: aquí es de `html + contrato_json + layout_json`
+(`clave_de`), así que el cache se invalida solo el día que la plantilla
+cambie (nueva versión), no antes.
 """
 from __future__ import annotations
 
@@ -61,6 +62,17 @@ def campos_de_muestra(contrato: dict[str, Any]) -> dict[str, Any]:
     return campos
 
 
+def clave_de(fila: dict[str, Any]) -> str:
+    """Huella del contenido de un diseño. Si cambia, el PNG se rehace.
+
+    Incluye el layout aunque el HTML se derive de él: así un cambio que no
+    altere el HTML (por ejemplo la rejilla) tampoco resucita un PNG viejo por
+    accidente.
+    """
+    crudo = f"{fila['html']}{fila['contrato_json']}{fila.get('layout_json') or ''}"
+    return hashlib.sha1(crudo.encode()).hexdigest()[:12]
+
+
 def png_de(cx, marca, template_id: int) -> Path:
     """Ruta del preview de la plantilla (la renderiza si no está en cache).
 
@@ -72,8 +84,7 @@ def png_de(cx, marca, template_id: int) -> Path:
         raise ValueError("plantilla")
 
     ct = _contrato.contrato_de_json(tpl["contrato_json"])
-    clave = hashlib.sha1(
-        (tpl["html"] + tpl["contrato_json"]).encode()).hexdigest()[:12]
+    clave = clave_de(tpl)
     PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
     destino = PREVIEWS_DIR / f"tpl_{marca.slug}_{template_id}_{clave}.png"
     if destino.exists():

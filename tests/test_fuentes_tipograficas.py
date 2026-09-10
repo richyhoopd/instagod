@@ -75,7 +75,7 @@ def test_validar_fuentes_tolera_genericas() -> None:
 
 def test_html_demasiado_grande_se_rechaza() -> None:
     import pytest
-    grande = "<div>" + "x" * (c.MAX_HTML + 1) + "</div>"
+    grande = "<div class='card'>" + "x" * (c.MAX_HTML + 1) + "</div>"
     ct = {"aspecto": "4:5", "base": list(c.CAMPOS_BASE), "extras": []}
     with pytest.raises(c.ContratoInvalido, match="grande"):
         c.validar_html(grande, ct)

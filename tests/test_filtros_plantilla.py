@@ -40,10 +40,10 @@ def test_entorno_registra_resaltar() -> None:
 
 def test_validar_html_acepta_el_filtro_resaltar() -> None:
     ct = _contrato_minimo()
-    c.validar_html("<div>{{ titular | resaltar }}</div>", ct)
+    c.validar_html("<div class='card'>{{ titular | resaltar }}</div>", ct)
 
 
 def test_validar_html_rechaza_un_filtro_inventado() -> None:
     ct = _contrato_minimo()
     with pytest.raises(c.ContratoInvalido):
-        c.validar_html("<div>{{ titular | noexiste }}</div>", ct)
+        c.validar_html("<div class='card'>{{ titular | noexiste }}</div>", ct)

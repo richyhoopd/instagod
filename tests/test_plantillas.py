@@ -7,6 +7,7 @@ import pytest
 
 from src import db, plantillas
 from src.plantillas import contrato as c
+from src.plantillas import layout
 
 
 def _cx(tmp_path):
@@ -52,7 +53,7 @@ def test_crear_rechaza_contrato_sin_campo_base(tmp_path) -> None:
 def test_nueva_version_incrementa_y_no_pisa(tmp_path) -> None:
     cx = _cx(tmp_path)
     tid = plantillas.crear(cx, 1, "Clásica", _HTML, _ct())
-    v2 = plantillas.nueva_version(cx, tid, _HTML.replace("card", "card verde"),
+    v2 = plantillas.nueva_version(cx, tid, _HTML.replace("</div>", "<!--verde--></div>"),
                                   _ct(), mensaje_usuario="hazla verde")
     assert v2 == 2
     assert plantillas.obtener(cx, tid)["version_actual"] == 2
@@ -63,7 +64,7 @@ def test_nueva_version_incrementa_y_no_pisa(tmp_path) -> None:
 def test_revertir_agrega_version_nueva(tmp_path) -> None:
     cx = _cx(tmp_path)
     tid = plantillas.crear(cx, 1, "Clásica", _HTML, _ct())
-    plantillas.nueva_version(cx, tid, _HTML.replace("card", "card v2"), _ct())
+    plantillas.nueva_version(cx, tid, _HTML.replace("</div>", "<!--v2--></div>"), _ct())
     v3 = plantillas.revertir(cx, tid, 1)
     assert v3 == 3
     assert len(plantillas.versiones(cx, tid)) == 3
@@ -99,7 +100,7 @@ def test_crear_guarda_layout_y_lo_devuelve(tmp_path) -> None:
     layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
                                                                   "iman": 8},
               "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
-                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
+                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins-Bold",
                          "tam": 48}]}
     tid = plantillas.crear(cx, 1, "Con layout", _HTML, _ct(), layout=layout)
     fila = plantillas.obtener(cx, tid)
@@ -120,7 +121,7 @@ def test_nueva_version_guarda_el_layout_en_la_version(tmp_path) -> None:
     layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
                                                                   "iman": 8},
               "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
-                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
+                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins-Bold",
                          "tam": 48}]}
     tid = plantillas.crear(cx, 1, "Versionada", _HTML, _ct(), layout=layout)
     otro = {**layout, "lienzo": {"fondo": "#000000"}}
@@ -131,12 +132,69 @@ def test_nueva_version_guarda_el_layout_en_la_version(tmp_path) -> None:
         "fondo"] == "#000000"
 
 
+def test_con_layout_el_html_se_deriva_y_se_ignora_el_que_mandan(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    layout_ = layout.vacio("4:5")
+    tid = plantillas.crear(cx, 1, "Derivado", "<p>basura que se ignora</p>",
+                           _ct(), layout=layout_)
+    fila = plantillas.obtener(cx, tid)
+    assert "basura" not in fila["html"]
+    assert 'class="card"' in fila["html"]
+    assert "{{ titular }}" in fila["html"]
+
+
+def test_sin_layout_el_html_se_guarda_tal_cual(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    tid = plantillas.crear(cx, 1, "Legacy", _HTML, _ct())
+    assert plantillas.obtener(cx, tid)["html"] == _HTML
+
+
+def test_layout_invalido_no_se_guarda(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    malo = {**layout.vacio("4:5"), "capas": []}
+    with pytest.raises(c.ContratoInvalido):
+        plantillas.crear(cx, 1, "Malo", "", _ct(), layout=malo)
+    assert plantillas.listar(cx, 1) == []
+
+
+def test_tipografia_fuera_del_catalogo_de_la_marca_no_se_guarda(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    diseno = layout.vacio("4:5")
+    diseno["capas"][1]["fuente"] = "Papyrus"
+    with pytest.raises(c.ContratoInvalido, match="tipografía"):
+        plantillas.crear(cx, 1, "Papyrus", "", _ct(), layout=diseno)
+
+
+def test_fuente_propia_de_la_marca_si_se_acepta(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    db.insert(cx, "brand_fonts", account_id=1, familia="Papyrus",
+              archivo="papyrus.woff2")
+    cx.commit()
+    diseno = layout.vacio("4:5")
+    diseno["capas"][1]["fuente"] = "Papyrus"
+    tid = plantillas.crear(cx, 1, "Papyrus", "", _ct(), layout=diseno)
+    assert "Papyrus" in plantillas.obtener(cx, tid)["html"]
+
+
+def test_el_preview_se_recalcula_si_cambia_solo_el_layout(tmp_path) -> None:
+    """Dos layouts distintos que compilan a HTMLs distintos no comparten PNG."""
+    from src.plantillas import preview
+    cx = _cx(tmp_path)
+    l1 = layout.vacio("4:5")
+    l2 = {**l1, "lienzo": {"fondo": "#123456"}}
+    tid = plantillas.crear(cx, 1, "Cacheada", "", _ct(), layout=l1)
+    c1 = preview.clave_de(plantillas.obtener(cx, tid))
+    plantillas.nueva_version(cx, tid, "", _ct(), layout=l2)
+    c2 = preview.clave_de(plantillas.obtener(cx, tid))
+    assert c1 != c2
+
+
 def test_revertir_recupera_el_layout_viejo(tmp_path) -> None:
     cx = _cx(tmp_path)
     layout = {"v": 1, "lienzo": {"fondo": "#ffffff"}, "guias": {"cols": 12, "filas": 15,
                                                                   "iman": 8},
               "capas": [{"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080,
-                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins",
+                         "h": 200, "z": 1, "campo": "titular", "fuente": "Poppins-Bold",
                          "tam": 48}]}
     tid = plantillas.crear(cx, 1, "Reversible", _HTML, _ct(), layout=layout)
     plantillas.nueva_version(cx, tid, _HTML, _ct(),

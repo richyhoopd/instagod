@@ -11,6 +11,8 @@ from typing import Any
 from .. import db
 from ..entidades import slugificar
 from . import contrato as _contrato
+from . import fuentes_tipograficas
+from . import layout as _layout
 
 ContratoInvalido = _contrato.ContratoInvalido
 
@@ -24,11 +26,29 @@ def _slug_libre(cx, account_id: int, base: str) -> str:
     return candidato
 
 
-def _validado(html: str, contrato_dict: dict[str, Any]) -> str:
-    """Valida contrato y HTML, y devuelve el contrato serializado."""
+def _validado(cx, account_id: int, html: str, contrato_dict: dict[str, Any],
+              layout_dict: dict[str, Any] | None) -> tuple[str, str]:
+    """Valida todo y devuelve (html definitivo, contrato serializado).
+
+    Con layout, el HTML es un artefacto derivado: se compila aquí y se ignora
+    el que haya mandado el llamador. Sin layout es un diseño legacy escrito a
+    mano y el HTML pasa tal cual.
+    """
     _contrato.validar(contrato_dict)
+    fuentes = fuentes_tipograficas.catalogo(cx, account_id)
+    if layout_dict is not None:
+        html = _layout.a_html(layout_dict, contrato_dict, fuentes=fuentes)
     _contrato.validar_html(html, contrato_dict)
-    return json.dumps(contrato_dict, ensure_ascii=False)
+    # Las plantillas legacy (HTML a mano) de gdlscene declaran su tipografía
+    # con @font-face propio; validar_fuentes las tolera casi siempre, pero no
+    # es el contrato de este hito tocarlas. Blindar lo nuevo (con layout) sin
+    # arriesgar lo viejo: si algún día una legacy publicada no pasa, aquí es
+    # donde se nota sin romper el guardado.
+    if layout_dict is not None:
+        _contrato.validar_fuentes(
+            html, {f["familia"] for f in fuentes},
+            archivos={f["archivo"] for f in fuentes})
+    return html, json.dumps(contrato_dict, ensure_ascii=False)
 
 
 def layout_de(fila: dict[str, Any]) -> dict[str, Any] | None:
@@ -49,7 +69,7 @@ def crear(cx, account_id: int, nombre: str, html: str,
           origen: str = "manual", creado_por: int | None = None,
           mensaje_usuario: str | None = None,
           layout: dict[str, Any] | None = None) -> int:
-    contrato_json = _validado(html, contrato_dict)
+    html, contrato_json = _validado(cx, account_id, html, contrato_dict, layout)
     layout_json = json.dumps(layout, ensure_ascii=False) if layout else None
     tid = db.insert(
         cx, "brand_templates", account_id=account_id, nombre=nombre,
@@ -70,11 +90,12 @@ def nueva_version(cx, template_id: int, html: str,
                   mensaje_usuario: str | None = None,
                   llm_meta: dict[str, Any] | None = None,
                   layout: dict[str, Any] | None = None) -> int:
-    contrato_json = _validado(html, contrato_dict)
-    layout_json = json.dumps(layout, ensure_ascii=False) if layout else None
     fila = obtener(cx, template_id)
     if fila is None:
         raise ValueError(f"plantilla {template_id} no existe")
+    html, contrato_json = _validado(
+        cx, fila["account_id"], html, contrato_dict, layout)
+    layout_json = json.dumps(layout, ensure_ascii=False) if layout else None
     numero = int(fila["version_actual"]) + 1
     db.insert(cx, "template_versions", template_id=template_id, version=numero,
               html=html, contrato_json=contrato_json, layout_json=layout_json,
