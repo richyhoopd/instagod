@@ -9,6 +9,7 @@ import pytest
 
 from src import db, fuentes, jobs, topics
 from src.jobs import handlers, worker
+from src.plantillas import contrato, layout
 
 
 @pytest.fixture()
@@ -363,6 +364,45 @@ def test_preset_preview_preset_inexistente_revienta(cx) -> None:
         handlers.preset_preview(cx, job)
 
 
+# ---------- template.preview ----------
+
+def test_template_preview_genera_un_png(cx, monkeypatch, tmp_path) -> None:
+    """Render real (sin mocks de Chromium): igual que test_plantillas_render.py,
+    la vista previa de un diseño sin guardar usa la misma tubería de siempre."""
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    payload = {
+        "layout": layout.vacio("4:5"),
+        "contrato": {"aspecto": "4:5", "base": list(contrato.CAMPOS_BASE), "extras": []},
+        "aspecto": "4:5",
+    }
+    job = _job(cx, "template.preview", 1, payload)  # account_id=1 == gdlscene
+
+    salida = handlers.template_preview(cx, job)
+
+    assert salida["url"].endswith(".png")
+    ruta = tmp_path / "data" / "previews" / "gdlscene" / salida["url"].split("/")[-1]
+    assert ruta.exists() and ruta.stat().st_size > 1000
+
+
+def test_template_preview_no_toca_ninguna_plantilla_guardada(cx, monkeypatch, tmp_path) -> None:
+    """El preview se arma entero a partir del layout que llega: no lee ni
+    escribe brand_templates, aunque el payload trajera un template_id."""
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    antes = db.rows(cx, "SELECT * FROM brand_templates")
+    payload = {
+        "template_id": 999,
+        "layout": layout.vacio("4:5"),
+        "contrato": {"aspecto": "4:5", "base": list(contrato.CAMPOS_BASE), "extras": []},
+        "aspecto": "4:5",
+    }
+    job = _job(cx, "template.preview", 1, payload)
+
+    handlers.template_preview(cx, job)
+
+    despues = db.rows(cx, "SELECT * FROM brand_templates")
+    assert antes == despues
+
+
 # ---------- HANDLERS dict ----------
 
 def test_handlers_registrados() -> None:
@@ -370,6 +410,7 @@ def test_handlers_registrados() -> None:
     assert handlers.HANDLERS["sourcing.newsapi_fetch"] is handlers.sourcing_newsapi_fetch
     assert handlers.HANDLERS["sourcing.ig_scrape"] is handlers.sourcing_ig_scrape
     assert handlers.HANDLERS["preset.preview"] is handlers.preset_preview
+    assert handlers.HANDLERS["template.preview"] is handlers.template_preview
 
 
 # ---------- worker.encolar_fuentes_vencidas ----------

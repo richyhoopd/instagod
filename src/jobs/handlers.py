@@ -31,6 +31,8 @@ from src import (
     topics,
 )
 from src import fuentes as fuentes_mod
+from src.plantillas import fuentes_tipograficas, layout, preview
+from src.plantillas import render as plantillas_render
 
 
 def _marca_de(cx: sqlite3.Connection, account_id: int) -> str:
@@ -346,6 +348,42 @@ def preset_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
     return {"path": str(dest)}
 
 
+def template_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Foto de cómo queda un diseño con datos de muestra, sin guardarlo.
+
+    El editor lo usa para el botón de vista previa: compila el layout que
+    tiene en pantalla, lo renderiza con Chromium y devuelve el PNG. Nada de
+    esto toca la plantilla guardada.
+
+    payload: {layout, contrato, aspecto}. `template_id` (si el editor lo
+    manda) no se usa: la vista previa se arma entera a partir del layout que
+    llega, nunca de lo que ya esté guardado en `brand_templates`.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    contrato_dict = payload["contrato"]
+    slug = _marca_de(cx, job["account_id"])
+    m = marcas.cargar_por_id(cx, job["account_id"])
+    jobs.progresar(cx, job["id"], 20, "Armando el diseño")
+
+    fuentes = fuentes_tipograficas.catalogo(cx, job["account_id"])
+    html = layout.a_html(payload["layout"], contrato_dict, fuentes=fuentes)
+    campos = preview.campos_de_muestra(contrato_dict)
+    jobs.progresar(cx, job["id"], 50, "Tomando la foto")
+
+    # `plantilla` es una fila sintética: nunca se guarda, solo le presta a
+    # `plantillas.render.render` la forma que espera (evita reconstruir a mano
+    # el mismo armado de contexto + Jinja + Chromium que ya hace ese módulo).
+    plantilla = {"html": html, "contrato_json": json.dumps(contrato_dict, ensure_ascii=False)}
+    dest_dir = config.BASE_DIR / "data" / "previews" / slug
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    nombre = f"edit_{job['id']}"
+    destino = dest_dir / f"{nombre}.png"
+    plantillas_render.render(cx, m, plantilla, campos, out_path=destino)
+
+    jobs.progresar(cx, job["id"], 100, "Listo")
+    return {"url": f"/brands/{slug}/files/previews/{nombre}.png"}
+
+
 def _redactar(slug: str, msg: str, tope: int = 300) -> str:
     """Mensaje de error sin secretos de la marca, truncado (patrón _error_seguro)."""
     for val in config.account_creds(slug).values():
@@ -495,6 +533,7 @@ HANDLERS = {
     "sourcing.newsapi_fetch": sourcing_newsapi_fetch,
     "sourcing.ig_scrape": sourcing_ig_scrape,
     "preset.preview": preset_preview,
+    "template.preview": template_preview,
     "plan.proponer_temas": plan_proponer_temas,
     "plan.generar": plan_generar,
     "post.generar": generar_post,

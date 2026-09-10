@@ -169,3 +169,24 @@ def test_los_stickers_son_las_fotos_de_la_marca(cliente_manager, marca):
     r = cliente_manager.get(f"/brands/{marca}/stickers")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+
+def test_pedir_vista_previa_encola_un_trabajo(cliente_manager, marca):
+    r = cliente_manager.post(f"/brands/{marca}/templates/preview",
+                             json={"layout": layout.vacio("4:5"), "aspecto": "4:5"})
+    assert r.status_code == 202
+    assert isinstance(r.json()["job_id"], int)
+
+
+def test_una_vista_previa_invalida_se_rechaza_al_encolar(cliente_manager, marca):
+    """No se encola trabajo para un diseño que ya sabemos que no compila."""
+    malo = {**layout.vacio("4:5"), "capas": []}
+    r = cliente_manager.post(f"/brands/{marca}/templates/preview",
+                             json={"layout": malo, "aspecto": "4:5"})
+    assert r.status_code == 422
+
+
+def test_un_editor_no_puede_pedir_vista_previa(cliente_editor, marca):
+    r = cliente_editor.post(f"/brands/{marca}/templates/preview",
+                            json={"layout": layout.vacio("4:5"), "aspecto": "4:5"})
+    assert r.status_code == 403

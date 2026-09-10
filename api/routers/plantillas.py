@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from api.deps import get_cx, marca_para, usuario_actual
 from api.errors import no_encontrado
 from api.routers.fuentes_api import listar_photos
-from src import marcas, plantillas
+from src import jobs, marcas, plantillas
 from src.plantillas import contrato as contrato_mod
 from src.plantillas import fuentes_tipograficas, preview
 from src.plantillas import layout as layout_mod
@@ -83,6 +83,12 @@ class DisenoGuardado(BaseModel):
     mensaje: str | None = Field(default=None, max_length=200)
 
 
+class VistaPrevia(BaseModel):
+    layout: dict[str, Any]
+    contrato: dict[str, Any] | None = None
+    aspecto: str = Field(pattern="^(4:5|9:16)$")
+
+
 def _vista(fila) -> dict[str, Any]:
     """Cómo ve el portal un diseño. Nunca expone el HTML: es derivado."""
     return {
@@ -143,6 +149,31 @@ def guardar_diseno(slug: str, tid: int, cuerpo: DisenoGuardado,
     except contrato_mod.ContratoInvalido as exc:
         raise HTTPException(422, str(exc)) from exc
     return _vista(plantillas.obtener(cx, tid))
+
+
+@router.post("/templates/preview", status_code=202)
+def vista_previa(slug: str, cuerpo: VistaPrevia, user: dict = Depends(usuario_actual),
+                 cx=Depends(get_cx)) -> dict:
+    """Encola el trabajo que renderiza el diseño en pantalla, sin guardarlo."""
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    contrato_dict = cuerpo.contrato or {
+        "aspecto": cuerpo.aspecto,
+        "base": list(contrato_mod.CAMPOS_BASE),
+        "extras": [],
+    }
+    # Se valida aquí, no en el worker: un diseño roto debe dar error en
+    # pantalla al instante, no un trabajo que falla treinta segundos después.
+    try:
+        layout_mod.validar(
+            cuerpo.layout, contrato_dict,
+            familias=fuentes_tipograficas.familias(cx, marca["id"]))
+    except contrato_mod.ContratoInvalido as exc:
+        raise HTTPException(422, str(exc)) from exc
+    job_id = jobs.crear(cx, "template.preview", marca["id"],
+                        {"layout": cuerpo.layout, "contrato": contrato_dict,
+                         "aspecto": cuerpo.aspecto},
+                        creado_por=user["id"])
+    return {"job_id": job_id}
 
 
 @router.post("/templates/{tid}/duplicate", status_code=201)
