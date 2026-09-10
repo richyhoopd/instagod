@@ -180,6 +180,44 @@ def test_el_catalogo_de_tipografias(cliente_manager, marca):
     assert len(r.json()) > 0
 
 
+def test_la_tipografia_se_sirve_por_familia(cliente_manager, marca):
+    """El lienzo del editor necesita los bytes de la tipografía para dibujar con
+    ella. Se piden por familia, que es lo único que el catálogo expone."""
+    r = cliente_manager.get(f"/brands/{marca}/files/fonts/Poppins-Bold")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "font/ttf"
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert len(r.content) > 1000
+
+
+def test_una_tipografia_que_no_esta_en_el_catalogo_es_404(cliente_manager, marca):
+    r = cliente_manager.get(f"/brands/{marca}/files/fonts/Comic-Sans")
+    assert r.status_code == 404
+
+
+def test_la_tipografia_propia_apuntando_fuera_de_las_carpetas_no_se_sirve(
+        cx, cliente_manager, marca, tmp_path):
+    """`archivo` de una tipografía propia sale de la BD: si algún día se sube por
+    el portal, este endpoint no puede volverse un lector de archivos arbitrarios."""
+    fuera = tmp_path / "robada.ttf"
+    fuera.write_bytes(b"x" * 2000)
+    db.insert(cx, "brand_fonts", account_id=1, familia="Robada",
+              archivo=str(fuera))
+    r = cliente_manager.get(f"/brands/{marca}/files/fonts/Robada")
+    assert r.status_code == 404
+
+
+def test_la_tipografia_de_otra_marca_no_se_ve(cx, cliente_manager, marca):
+    """Aislamiento: el catálogo es por cuenta, así que una familia de otra marca
+    simplemente no existe aquí."""
+    otra = db.insert(cx, "accounts", slug="ajena", ig_handle="ajena",
+                     nombre="Ajena", ciudad="CDMX")
+    db.insert(cx, "brand_fonts", account_id=otra, familia="Ajena-Bold",
+              archivo="Poppins-Bold.ttf")
+    r = cliente_manager.get(f"/brands/{marca}/files/fonts/Ajena-Bold")
+    assert r.status_code == 404
+
+
 def test_los_stickers_son_las_fotos_de_la_marca(cliente_manager, marca):
     r = cliente_manager.get(f"/brands/{marca}/stickers")
     assert r.status_code == 200

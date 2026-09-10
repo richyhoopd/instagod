@@ -1,6 +1,7 @@
 """Endpoints de plantillas/diseños del portal."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,7 +11,8 @@ from pydantic import BaseModel, Field
 from api.deps import get_cx, marca_para, usuario_actual
 from api.errors import no_encontrado
 from api.routers.fuentes_api import listar_photos
-from src import jobs, marcas, plantillas
+from src import compose, jobs, marcas, plantillas
+from src.image_sources import BRANDS_DIR
 from src.plantillas import contrato as contrato_mod
 from src.plantillas import fuentes_tipograficas, preview
 from src.plantillas import layout as layout_mod
@@ -280,6 +282,46 @@ def listar_fuentes(slug: str, user: dict = Depends(usuario_actual),
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     return [{"familia": f["familia"], "propia": f["propia"]}
             for f in fuentes_tipograficas.catalogo(cx, marca["id"])]
+
+
+# Extensiones que el navegador sabe leer como tipografía. Es lista blanca:
+# lo que no esté aquí no se sirve, aunque exista el archivo.
+_TIPO_FUENTE = {".ttf": "font/ttf", ".otf": "font/otf",
+                ".woff": "font/woff", ".woff2": "font/woff2"}
+
+
+@router.get("/files/fonts/{familia}")
+def archivo_fuente(slug: str, familia: str, user: dict = Depends(usuario_actual),
+                   cx=Depends(get_cx)) -> FileResponse:
+    """Los bytes de una tipografía, para que el lienzo del editor dibuje igual que
+    el render final.
+
+    Se pide por FAMILIA, que es lo único que el catálogo le da al portal: el
+    nombre del archivo se resuelve aquí dentro, así que nada de lo que manda el
+    navegador llega a tocar una ruta de disco, y el aislamiento entre marcas sale
+    del propio catálogo, que ya es por cuenta.
+    """
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    catalogo = {f["familia"]: f
+                for f in fuentes_tipograficas.catalogo(cx, marca["id"])}
+    fuente = catalogo.get(familia)
+    if fuente is None:
+        raise no_encontrado("esa tipografía")
+    ruta = (Path(fuente["archivo"]) if fuente["propia"]
+            else compose.FONTS_DIR / fuente["archivo"])
+    ruta = ruta.resolve()
+    # El `archivo` de una tipografía propia sale de la BD. El día que se puedan
+    # subir por el portal, este endpoint no debe poder convertirse en un lector
+    # de archivos arbitrarios: solo se sirve lo que vive en las dos carpetas
+    # permitidas y tiene extensión de tipografía.
+    carpetas = (compose.FONTS_DIR.resolve(), BRANDS_DIR.resolve())
+    if (ruta.suffix.lower() not in _TIPO_FUENTE
+            or not any(ruta.is_relative_to(c) for c in carpetas)
+            or not ruta.is_file()):
+        raise no_encontrado("esa tipografía")
+    return FileResponse(ruta, media_type=_TIPO_FUENTE[ruta.suffix.lower()],
+                        headers={"X-Content-Type-Options": "nosniff",
+                                 "Cache-Control": "public, max-age=604800"})
 
 
 @router.get("/stickers")
