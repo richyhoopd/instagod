@@ -164,6 +164,10 @@ def vista_previa(slug: str, cuerpo: VistaPrevia, user: dict = Depends(usuario_ac
     # Se valida aquí, no en el worker: un diseño roto debe dar error en
     # pantalla al instante, no un trabajo que falla treinta segundos después.
     try:
+        # El contrato primero, en el mismo orden que `plantillas._validado`:
+        # `layout.validar` no revisa el aspecto, y `a_html` lo indexa a pelo
+        # (`LIENZO[contrato["aspecto"]]`, src/plantillas/layout.py:371).
+        contrato_mod.validar(contrato_dict)
         layout_mod.validar(
             cuerpo.layout, contrato_dict,
             familias=fuentes_tipograficas.familias(cx, marca["id"]))

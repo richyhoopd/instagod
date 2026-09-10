@@ -186,6 +186,17 @@ def test_una_vista_previa_invalida_se_rechaza_al_encolar(cliente_manager, marca)
     assert r.status_code == 422
 
 
+def test_una_vista_previa_con_aspecto_inventado_se_rechaza(cliente_manager, marca):
+    """El aspecto solo lo revisa `contrato.validar`: sin esa llamada el trabajo
+    se encolaba y reventaba con un KeyError dentro del worker."""
+    r = cliente_manager.post(
+        f"/brands/{marca}/templates/preview",
+        json={"layout": layout.vacio("4:5"), "aspecto": "4:5",
+              "contrato": {"aspecto": "16:9", "base": list(c.CAMPOS_BASE),
+                           "extras": []}})
+    assert r.status_code == 422
+
+
 def test_un_editor_no_puede_pedir_vista_previa(cliente_editor, marca):
     r = cliente_editor.post(f"/brands/{marca}/templates/preview",
                             json={"layout": layout.vacio("4:5"), "aspecto": "4:5"})
