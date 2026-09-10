@@ -77,8 +77,15 @@ def test_html_roto_de_jinja() -> None:
 def test_html_sin_card_se_rechaza() -> None:
     ct = _contrato_minimo()
     html = "<html><body><div class='otra'>{{ titular }}</div></body></html>"
-    with pytest.raises(c.ContratoInvalido, match="card"):
+    with pytest.raises(c.ContratoInvalido, match="marco"):
         c.validar_html(html, ct)
+
+
+def test_html_con_card_y_otras_clases_se_acepta() -> None:
+    """`page.locator(".card")` encuentra `class="foo card"` igual que
+    `class="card"` a secas; el validador no debe exigir el valor exacto."""
+    ct = _contrato_minimo()
+    c.validar_html("<div class=\"marco card\">{{ titular }}</div>", ct)
 
 
 def test_dimensiones() -> None:

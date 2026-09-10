@@ -149,6 +149,16 @@ def test_sin_layout_el_html_se_guarda_tal_cual(tmp_path) -> None:
     assert plantillas.obtener(cx, tid)["html"] == _HTML
 
 
+def test_legacy_con_tipografia_fuera_del_catalogo_no_se_guarda(tmp_path) -> None:
+    """Sin layout también se valida: `validar_fuentes` protege al HTML a mano,
+    no solo al que compila el editor visual."""
+    cx = _cx(tmp_path)
+    html = _HTML + "<style>.card{font-family:'Papyrus'}</style>"
+    with pytest.raises(c.ContratoInvalido):
+        plantillas.crear(cx, 1, "Papyrus a mano", html, _ct())
+    assert plantillas.listar(cx, 1) == []
+
+
 def test_layout_invalido_no_se_guarda(tmp_path) -> None:
     cx = _cx(tmp_path)
     malo = {**layout.vacio("4:5"), "capas": []}

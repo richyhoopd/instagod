@@ -40,6 +40,12 @@ _FONT_FAMILY = re.compile(r"font-family\s*:\s*([^;}\n]+)", re.I)
 
 _FONT_FACE = re.compile(r"@font-face\s*\{([^}]*)\}", re.I)
 _JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
+# `card` como palabra completa dentro del atributo class, sin importar qué
+# otras clases lo acompañen: el motor usa `page.locator(".card")`
+# (src/compose.py:191), que encuentra `class="foo card"` igual que
+# `class="card"`. Exigir el valor exacto rechazaría de más un HTML legítimo
+# con clases combinadas.
+_CLASE_CARD = re.compile(r"""class\s*=\s*["'][^"']*\bcard\b[^"']*["']""")
 
 
 def _sin_jinja(html: str) -> str:
@@ -190,9 +196,8 @@ def validar_html(html: str, contrato: dict[str, Any]) -> None:
 
     # El motor fotografía el nodo `.card` (src/compose.py:191). Sin él, el
     # render no falla: devuelve un PNG vacío, que es mucho peor.
-    if 'class="card"' not in (html or "") and "class='card'" not in (html or ""):
-        raise ContratoInvalido(
-            "el diseño no tiene el marco de la imagen (falta el bloque card)")
+    if not _CLASE_CARD.search(html or ""):
+        raise ContratoInvalido("el diseño no tiene el marco de la imagen")
 
     env = filtros.entorno()
     try:

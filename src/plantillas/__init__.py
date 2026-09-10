@@ -42,9 +42,11 @@ def _validado(cx, account_id: int, html: str, contrato_dict: dict[str, Any],
     # Sin condicionar al layout: las 15 plantillas legacy de `templates/` pasan
     # esta validación contra el catálogo global, así que también protege al
     # diseño escrito a mano de pedir una tipografía que la marca no tiene.
-    _contrato.validar_fuentes(
+    errores = _contrato.validar_fuentes(
         html, {f["familia"] for f in fuentes},
         archivos={f["archivo"] for f in fuentes})
+    if errores:
+        raise ContratoInvalido("; ".join(errores))
     return html, json.dumps(contrato_dict, ensure_ascii=False)
 
 
