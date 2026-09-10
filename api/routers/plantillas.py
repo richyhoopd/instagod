@@ -89,6 +89,12 @@ class VistaPrevia(BaseModel):
     aspecto: str = Field(pattern="^(4:5|9:16)$")
 
 
+class PedirDiseno(BaseModel):
+    instruccion: str = Field(min_length=1, max_length=2000)
+    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    template_id: int | None = None
+
+
 def _vista(fila) -> dict[str, Any]:
     """Cómo ve el portal un diseño. Nunca expone el HTML: es derivado."""
     return {
@@ -176,6 +182,28 @@ def vista_previa(slug: str, cuerpo: VistaPrevia, user: dict = Depends(usuario_ac
     job_id = jobs.crear(cx, "template.preview", marca["id"],
                         {"layout": cuerpo.layout, "contrato": contrato_dict,
                          "aspecto": cuerpo.aspecto},
+                        creado_por=user["id"])
+    return {"job_id": job_id}
+
+
+@router.post("/templates/design", status_code=202)
+def pedir_diseno(slug: str, cuerpo: PedirDiseno, user: dict = Depends(usuario_actual),
+                 cx=Depends(get_cx)) -> dict:
+    """Encola al asistente: le pide un diseño al modelo y devuelve las capas.
+
+    El asistente propone, no guarda: el handler nunca escribe en
+    `brand_templates` ni en `template_versions`, así que aquí no hay nada que
+    validar contra un contrato todavía — eso pasa dentro del job, contra el
+    diseño que de verdad devuelva el modelo.
+    """
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    if cuerpo.template_id is not None:
+        # Aislamiento: partir de un diseño ajeno es 404, no un job que falle
+        # después dentro del worker.
+        _plantilla_de_marca(cx, marca["id"], cuerpo.template_id)
+    job_id = jobs.crear(cx, "template.disenar", marca["id"],
+                        {"template_id": cuerpo.template_id,
+                         "instruccion": cuerpo.instruccion, "aspecto": cuerpo.aspecto},
                         creado_por=user["id"])
     return {"job_id": job_id}
 

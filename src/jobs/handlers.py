@@ -25,13 +25,16 @@ from src import (
     marcas,
     plan_temas,
     planes,
+    plantillas,
     posts,
     slideshow_compile,
     slideshow_model,
     topics,
 )
 from src import fuentes as fuentes_mod
-from src.plantillas import fuentes_tipograficas, layout, preview
+from src.image_sources import BRANDS_DIR
+from src.plantillas import contrato as contrato_mod
+from src.plantillas import disenador, fuentes_tipograficas, layout, preview
 from src.plantillas import render as plantillas_render
 
 
@@ -384,6 +387,58 @@ def template_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, A
     return {"url": f"/brands/{slug}/files/previews/{nombre}.png"}
 
 
+def _stickers_de(cx: sqlite3.Connection, account_id: int) -> list[str]:
+    """Nombres de las fotos de la marca, para ofrecérselos al LLM como 'archivo'.
+
+    Corre en el worker, sin `user`: no puede llamar al endpoint `GET /photos`
+    (exige `Depends(usuario_actual)`). Lista la misma carpeta que ese
+    endpoint por dentro — el permiso ya se comprobó al encolar el job.
+    """
+    slug = _marca_de(cx, account_id)
+    carpeta = BRANDS_DIR / slug / "fotos"
+    if not carpeta.is_dir():
+        return []
+    return sorted(p.name for p in carpeta.iterdir() if p.is_file())
+
+
+def template_disenar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Le pide un diseño al modelo y devuelve las capas, sin guardarlas.
+
+    Guardar es decisión de la persona: el chat propone, el editor dispone.
+
+    payload: {template_id, instruccion, aspecto}. Con `template_id` el
+    diseño existente de ESA marca (job["account_id"], nunca el que venga del
+    payload) se manda como base para que el modelo lo modifique en vez de
+    partir de cero.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    slug = _marca_de(cx, job["account_id"])
+    marca = db.get(cx, "accounts", job["account_id"])
+    jobs.progresar(cx, job["id"], 20, "Pensando el diseño")
+
+    base = None
+    contrato_dict = None
+    if payload.get("template_id"):
+        fila = plantillas.obtener(cx, payload["template_id"])
+        if fila is None or fila["account_id"] != job["account_id"]:
+            raise ValueError("ese diseño no existe en esta marca")
+        base = plantillas.layout_de(fila)
+        contrato_dict = plantillas.contrato_de(fila)
+    if not contrato_dict:
+        contrato_dict = {"aspecto": payload["aspecto"],
+                         "base": list(contrato_mod.CAMPOS_BASE), "extras": []}
+
+    try:
+        propuesta = disenador.disenar(
+            marca=marca, contrato=contrato_dict, instruccion=payload["instruccion"],
+            base=base, familias=fuentes_tipograficas.familias(cx, job["account_id"]),
+            stickers=_stickers_de(cx, job["account_id"]))
+    except contrato_mod.ContratoInvalido as exc:
+        raise ValueError(_redactar(slug, str(exc))) from exc
+    jobs.progresar(cx, job["id"], 100, "Listo")
+    return {"layout": propuesta, "mensaje": "Diseño propuesto"}
+
+
 def _redactar(slug: str, msg: str, tope: int = 300) -> str:
     """Mensaje de error sin secretos de la marca, truncado (patrón _error_seguro)."""
     for val in config.account_creds(slug).values():
@@ -534,6 +589,7 @@ HANDLERS = {
     "sourcing.ig_scrape": sourcing_ig_scrape,
     "preset.preview": preset_preview,
     "template.preview": template_preview,
+    "template.disenar": template_disenar,
     "plan.proponer_temas": plan_proponer_temas,
     "plan.generar": plan_generar,
     "post.generar": generar_post,

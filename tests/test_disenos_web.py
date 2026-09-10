@@ -201,3 +201,24 @@ def test_un_editor_no_puede_pedir_vista_previa(cliente_editor, marca):
     r = cliente_editor.post(f"/brands/{marca}/templates/preview",
                             json={"layout": layout.vacio("4:5"), "aspecto": "4:5"})
     assert r.status_code == 403
+
+
+def test_pedirle_un_diseno_al_asistente_encola_un_trabajo(cliente_manager, marca):
+    r = cliente_manager.post(f"/brands/{marca}/templates/design",
+                             json={"instruccion": "algo minimalista", "aspecto": "4:5"})
+    assert r.status_code == 202
+    assert isinstance(r.json()["job_id"], int)
+
+
+def test_un_editor_no_puede_pedirle_un_diseno_al_asistente(cliente_editor, marca):
+    r = cliente_editor.post(f"/brands/{marca}/templates/design",
+                            json={"instruccion": "algo minimalista", "aspecto": "4:5"})
+    assert r.status_code == 403
+
+
+def test_pedirle_un_diseno_partiendo_de_uno_ajeno_es_404(cliente_manager, marca, diseno_ajeno):
+    r = cliente_manager.post(
+        f"/brands/{marca}/templates/design",
+        json={"instruccion": "hazlo más grande", "aspecto": "4:5",
+              "template_id": diseno_ajeno})
+    assert r.status_code == 404
