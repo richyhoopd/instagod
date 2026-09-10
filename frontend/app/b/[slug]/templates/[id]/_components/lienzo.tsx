@@ -51,7 +51,11 @@ export function Lienzo({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setEscala(e.contentRect.width / ancho));
+    const ro = new ResizeObserver(([e]) =>
+      // Un ancestro oculto reporta ancho 0 y una escala 0 vuelve infinitos
+      // los deltas y las asas. El piso mantiene el lienzo utilizable.
+      setEscala(Math.max(0.05, e.contentRect.width / ancho))
+    );
     ro.observe(el);
     return () => ro.disconnect();
   }, [ancho]);
@@ -68,11 +72,18 @@ export function Lienzo({
     const marcar = (e: KeyboardEvent) => {
       alt.current = e.altKey;
     };
+    // Al salir de la ventana con Alt apretado no llega el `keyup` y el imán
+    // se quedaría apagado en silencio.
+    const soltar = () => {
+      alt.current = false;
+    };
     window.addEventListener("keydown", marcar);
     window.addEventListener("keyup", marcar);
+    window.addEventListener("blur", soltar);
     return () => {
       window.removeEventListener("keydown", marcar);
       window.removeEventListener("keyup", marcar);
+      window.removeEventListener("blur", soltar);
     };
   }, []);
 
@@ -88,7 +99,7 @@ export function Lienzo({
       fuentes
         .map(
           (f) =>
-            `@font-face{font-family:'${f.familia}';` +
+            `@font-face{font-family:${JSON.stringify(f.familia)};` +
             `src:url('/api/brands/${slug}/files/fonts/${encodeURIComponent(f.familia)}');` +
             `font-display:block;}`
         )
@@ -116,7 +127,14 @@ export function Lienzo({
 
   function redimensionar(capa: Capa, asa: Asa, dx: number, dy: number) {
     const base = (partida.current ??= capa);
-    const cambio = REDIM[asa](base, dx, dy);
+    // Si el tirón pasa de largo el borde opuesto, acotar `w` y `h` después no
+    // basta: `x`/`y` ya se movieron y el elemento salta más allá del borde que
+    // debía quedarse quieto. Se acota el delta antes de repartirlo.
+    const mueveIzq = asa === "sw" || asa === "nw";
+    const mueveArr = asa === "ne" || asa === "nw";
+    const ddx = mueveIzq ? Math.min(dx, base.w - MINIMO) : Math.max(dx, MINIMO - base.w);
+    const ddy = mueveArr ? Math.min(dy, base.h - MINIMO) : Math.max(dy, MINIMO - base.h);
+    const cambio = REDIM[asa](base, ddx, ddy);
     onCambiar(
       dentro(
         {
@@ -171,6 +189,9 @@ export function Lienzo({
           height: alto,
           transform: `scale(${escala})`,
           transformOrigin: "top left",
+          // Sin esto, arrastrar un texto pinta la selección azul del navegador
+          // encima del editor y dispara el arrastre nativo de texto.
+          userSelect: "none",
           background: layout.lienzo.fondo === "marca" ? colorMarca : layout.lienzo.fondo,
           position: "relative",
         }}

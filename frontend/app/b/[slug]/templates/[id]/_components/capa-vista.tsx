@@ -225,7 +225,7 @@ function Contenido({
       <span
         style={{
           width: "100%",
-          fontFamily: capa.fuente ? `'${capa.fuente}'` : undefined,
+          fontFamily: capa.fuente ? JSON.stringify(capa.fuente) : undefined,
           fontSize: capa.tam ?? 48,
           fontWeight: capa.peso ?? 400,
           color: esDato ? "#9ca3af" : color(capa.color),
