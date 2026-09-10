@@ -201,7 +201,7 @@ export default function TemplatesPage() {
         <div>
           <h1 className="text-2xl font-semibold">Diseños</h1>
           <p className="text-sm text-muted-foreground">
-            Las plantillas visuales con las que se arman los posts de la marca.
+            Cada diseño define cómo se ve un post de la marca.
           </p>
         </div>
         <NuevoDisenoDialog slug={slug} />
