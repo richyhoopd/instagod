@@ -6,6 +6,7 @@ import { useParams, usePathname } from "next/navigation";
 import {
   CalendarDays,
   ClipboardList,
+  Layers,
   LayoutDashboard,
   Library,
   Settings,
@@ -16,13 +17,16 @@ import { BrandAvatar } from "@/components/brand-avatar";
 import { cn } from "@/lib/utils";
 import { useBrand } from "@/hooks/use-brands";
 
+// `soloGdlscene`: los memes de banda son un pipeline exclusivo de esa marca
+// (ver api/routers/lotes.py); en las demás la pantalla solo daría un 422.
 const NAV = [
-  { segment: "", label: "Resumen", icon: LayoutDashboard, soloManager: false },
-  { segment: "calendar", label: "Calendario", icon: CalendarDays, soloManager: false },
-  { segment: "plans", label: "Planes", icon: ClipboardList, soloManager: false },
-  { segment: "create", label: "Crear", icon: Sparkles, soloManager: false },
-  { segment: "library", label: "Biblioteca", icon: Library, soloManager: false },
-  { segment: "settings", label: "Ajustes", icon: Settings, soloManager: true },
+  { segment: "", label: "Resumen", icon: LayoutDashboard, soloManager: false, soloGdlscene: false },
+  { segment: "calendar", label: "Calendario", icon: CalendarDays, soloManager: false, soloGdlscene: false },
+  { segment: "plans", label: "Planes", icon: ClipboardList, soloManager: false, soloGdlscene: false },
+  { segment: "lotes", label: "Lotes", icon: Layers, soloManager: false, soloGdlscene: true },
+  { segment: "create", label: "Crear", icon: Sparkles, soloManager: false, soloGdlscene: false },
+  { segment: "library", label: "Biblioteca", icon: Library, soloManager: false, soloGdlscene: false },
+  { segment: "settings", label: "Ajustes", icon: Settings, soloManager: true, soloGdlscene: false },
 ] as const;
 
 export default function BrandLayout({ children }: { children: React.ReactNode }) {
@@ -66,7 +70,11 @@ export default function BrandLayout({ children }: { children: React.ReactNode })
           )}
         </div>
         <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
-          {NAV.filter((item) => !item.soloManager || puedeVerAjustes).map((item) => {
+          {NAV.filter(
+            (item) =>
+              (!item.soloManager || puedeVerAjustes) &&
+              (!item.soloGdlscene || slug === "gdlscene")
+          ).map((item) => {
             const href = `/b/${slug}${item.segment ? `/${item.segment}` : ""}`;
             const activo = pathname === href;
             const Icon = item.icon;

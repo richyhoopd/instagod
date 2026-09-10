@@ -25,6 +25,7 @@ from src import (
     marcas,
     plan_temas,
     planes,
+    send_plan,
     slideshow_compile,
     slideshow_model,
     topics,
@@ -455,6 +456,50 @@ def plan_generar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     return {"generadas": generadas, "fallidas": fallidas}
 
 
+# ---------------------------------------------------------------- lotes gdlscene
+
+def lote_enviar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {mes}. Manda a Telegram los borradores de meme del mes.
+
+    Es `src.send_plan.main` sin CLI: misma selección, misma composición, mismo
+    contrato con el approval-daemon (que sigue siendo el único poller). Corre
+    aquí y no en la API porque cada render pica ~550 MB y el contenedor `api`
+    está topado a 768m; el worker tiene 2g.
+
+    Tolerante por pieza (un meme caído no tumba el lote); revienta solo si NADA
+    salió, para que el job quede en 'error' y se vea en el portal.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    mes = str(payload.get("mes") or "").strip()
+    if len(mes) != 7 or mes[4] != "-":
+        raise ValueError(f"mes inválido: {mes!r} (se espera YYYY-MM)")
+    slug = _marca_de(cx, job["account_id"])
+    if slug != "gdlscene":
+        raise ValueError("los lotes de memes solo existen para gdlscene")
+
+    filas = send_plan.borradores_del_mes(cx, mes)
+    if not filas:
+        jobs.progresar(cx, job["id"], 100, f"nada por mandar en {mes}")
+        return {"enviadas": 0, "fallidas": 0}
+
+    enviadas, errores = 0, []
+    for i, f in enumerate(filas):
+        jobs.progresar(cx, job["id"], int(5 + 90 * i / len(filas)),
+                       f"meme {i + 1}/{len(filas)}: {str(f['nombre'])[:40]}")
+        try:
+            send_plan._componer_y_enviar(cx, f)
+            enviadas += 1
+        except Exception as exc:  # noqa: BLE001 — un meme caído no tumba el lote
+            errores.append(f"{f['nombre']}: {_redactar(slug, str(exc), 120)}")
+        time.sleep(send_plan._PAUSA_ENVIO_S)  # anti-flood de Telegram
+
+    if enviadas == 0:
+        raise RuntimeError(f"lote {mes}: las {len(errores)} piezas fallaron")
+    jobs.progresar(cx, job["id"], 100,
+                   f"{enviadas} enviadas a Telegram, {len(errores)} fallidas")
+    return {"enviadas": enviadas, "fallidas": len(errores), "errores": errores[:10]}
+
+
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
@@ -465,4 +510,5 @@ HANDLERS = {
     "preset.preview": preset_preview,
     "plan.proponer_temas": plan_proponer_temas,
     "plan.generar": plan_generar,
+    "lote.enviar": lote_enviar,
 }

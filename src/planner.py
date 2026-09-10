@@ -247,27 +247,36 @@ def _descartar_y_reemplazar(cx, actual: dict[str, Any]) -> dict[str, Any] | None
     """, (new_id,))[0]
 
 
-def reemplazar(queue_id: int) -> dict[str, Any] | None:
+def reemplazar(queue_id: int, cx=None) -> dict[str, Any] | None:
     """Quita una fila del plan (la marca DESCARTADA) y mete otra en su slot.
 
     Mantiene el plan lleno SIN que lo quitado regrese. Devuelve la fila nueva o
     None si no hubo con qué rellenar (pool agotado).
+
+    `cx` opcional: la API del portal ya trae su conexión (Depends(get_cx)) y no
+    debe abrir una segunda contra el mismo SQLite. Sin `cx` abre y cierra la
+    suya, como siempre (GUI htmx y CLI).
     """
-    cx = db.connect()
+    propia = cx is None
+    cx = cx or db.connect()
     try:
         actual = db.get(cx, "content_queue", queue_id)
         if actual is None:
             return None
         return _descartar_y_reemplazar(cx, actual)
     finally:
-        cx.close()
+        if propia:
+            cx.close()
 
 
-def eliminar(queue_id: int) -> dict[str, Any] | None:
+def eliminar(queue_id: int, cx=None) -> dict[str, Any] | None:
     """Lista negra: marca la foto como descartada (NUNCA volver a sugerir), la saca
     del plan y mete otra banda. La foto no reaparece ni tras reclasificar.
+
+    `cx` opcional: ver `reemplazar`.
     """
-    cx = db.connect()
+    propia = cx is None
+    cx = cx or db.connect()
     try:
         actual = db.get(cx, "content_queue", queue_id)
         if actual is None:
@@ -276,18 +285,22 @@ def eliminar(queue_id: int) -> dict[str, Any] | None:
             db.update(cx, "photos", actual["photo_id"], descartada=1, usable_meme=0)
         return _descartar_y_reemplazar(cx, actual)
     finally:
-        cx.close()
+        if propia:
+            cx.close()
 
 
-def marcar_flyer(queue_id: int) -> dict[str, Any] | None:
+def marcar_flyer(queue_id: int, cx=None) -> dict[str, Any] | None:
     """Reclasifica un post del plan como FLYER: lo saca de memes y lo manda a eventos.
 
     La foto deja de ser usable y se registra como flyer (tipo='flyer', con su ruta)
     para que la sección de Eventos la escanee con OCR/LLM y complete la fecha. El
     slot del plan se rellena con otra banda. Devuelve la fila de reemplazo o None.
+
+    `cx` opcional: ver `reemplazar`.
     """
     from src.classify import _registrar_flyer
-    cx = db.connect()
+    propia = cx is None
+    cx = cx or db.connect()
     try:
         actual = db.get(cx, "content_queue", queue_id)
         if actual is None:
@@ -299,7 +312,8 @@ def marcar_flyer(queue_id: int) -> dict[str, Any] | None:
                 _registrar_flyer(cx, foto)  # crea evento flyer (idempotente)
         return _descartar_y_reemplazar(cx, actual)
     finally:
-        cx.close()
+        if propia:
+            cx.close()
 
 
 def reagendar_publicados(year: int, month: int, desde: date | None = None) -> dict[str, int]:
@@ -352,12 +366,14 @@ def reagendar_publicados(year: int, month: int, desde: date | None = None) -> di
 
 
 def plan_month(year: int, month: int, *, replan: bool = False,
-               criterio: str = "impacto") -> dict[str, int]:
+               criterio: str = "impacto", cx=None) -> dict[str, int]:
     """Materializa el plan del mes en content_queue. Devuelve conteos.
 
     `criterio` se pasa tal cual a `seleccionar` (ver ahí).
+    `cx` opcional: ver `reemplazar`.
     """
-    cx = db.connect()
+    propia = cx is None
+    cx = cx or db.connect()
     try:
         db.init_db(cx)
         slots = _slots_del_mes(year, month)
@@ -410,7 +426,8 @@ def plan_month(year: int, month: int, *, replan: bool = False,
               f"en {len(slots)} slots. Cura en /plan y manda a Telegram.")
         return {"posts": len(seleccion), "bandas": bandas_distintas, "slots": len(slots)}
     finally:
-        cx.close()
+        if propia:
+            cx.close()
 
 
 if __name__ == "__main__":
