@@ -15,6 +15,10 @@ export interface Job {
   queue_id: number | null;
   created_at: string;
   finished_at: string | null;
+  // Cadena JSON con lo que devolvió el handler (src/jobs/__init__.py:106).
+  // Solo GET /jobs/{jid} la trae; la lista GET /jobs la filtra. Se parsea
+  // con el helper resultadoDeJob de use-disenos.ts, nunca a pelo.
+  resultado_json: string | null;
 }
 
 const TERMINALES: readonly JobEstado[] = ["ok", "error", "cancelado"];
