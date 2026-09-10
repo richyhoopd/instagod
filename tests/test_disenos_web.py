@@ -158,6 +158,21 @@ def test_la_lista_por_defecto_solo_trae_activas(cliente_editor, cliente_manager,
     assert "Borrador" in nombres
 
 
+def test_la_lista_dice_el_estado_y_si_se_puede_editar(cliente_manager, marca):
+    """La pantalla de Diseños pinta la etiqueta de estado y decide si abre el
+    editor o la vista de solo lectura con la lista, sin pedir cada diseño."""
+    cliente_manager.post(f"/brands/{marca}/templates",
+                         json={"nombre": "Nuevo", "aspecto": "4:5"})
+    lista = cliente_manager.get(
+        f"/brands/{marca}/templates?estado=borrador").json()
+    nuevo = next(d for d in lista if d["nombre"] == "Nuevo")
+    assert nuevo["estado"] == "borrador"
+    # Nace con capas, así que se puede editar visualmente.
+    assert nuevo["editable"] is True
+    # El HTML es derivado: la lista nunca lo expone.
+    assert "html" not in nuevo
+
+
 def test_el_catalogo_de_tipografias(cliente_manager, marca):
     r = cliente_manager.get(f"/brands/{marca}/fonts")
     assert r.status_code == 200

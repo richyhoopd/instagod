@@ -45,8 +45,10 @@ def listar_templates(slug: str,
             "nombre": t["nombre"],
             "descripcion": t["descripcion"],
             "aspecto": t["aspecto"],
+            "estado": t["estado"],
             "version_actual": t["version_actual"],
             "contrato": plantillas.contrato_de(t),
+            "editable": plantillas.es_editable(t),
         }
         for t in activas
     ]
