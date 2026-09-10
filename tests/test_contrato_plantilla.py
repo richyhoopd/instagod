@@ -91,3 +91,11 @@ def test_html_con_card_y_otras_clases_se_acepta() -> None:
 def test_dimensiones() -> None:
     assert c.dimensiones("4:5") == (1080, 1350)
     assert c.dimensiones("9:16") == (1080, 1920)
+
+
+def test_html_con_card_como_prefijo_se_rechaza() -> None:
+    """`class="card-top"` no lo encuentra `page.locator(".card")`: si pasara,
+    el render devolvería un PNG vacío en silencio."""
+    ct = _contrato_minimo()
+    with pytest.raises(c.ContratoInvalido, match="marco"):
+        c.validar_html('<div class="card-top">{{ titular }}</div>', ct)

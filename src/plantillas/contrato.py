@@ -45,7 +45,13 @@ _JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
 # (src/compose.py:191), que encuentra `class="foo card"` igual que
 # `class="card"`. Exigir el valor exacto rechazaría de más un HTML legítimo
 # con clases combinadas.
-_CLASE_CARD = re.compile(r"""class\s*=\s*["'][^"']*\bcard\b[^"']*["']""")
+_ATRIBUTO_CLASS = re.compile(r"""class\s*=\s*["']([^"']*)["']""")
+
+
+def _tiene_card(html: str) -> bool:
+    """`card` como clase entera, no como prefijo: `class="card-top"` no vale
+    porque `page.locator(".card")` tampoco lo encuentra."""
+    return any("card" in v.split() for v in _ATRIBUTO_CLASS.findall(html))
 
 
 def _sin_jinja(html: str) -> str:
@@ -196,7 +202,7 @@ def validar_html(html: str, contrato: dict[str, Any]) -> None:
 
     # El motor fotografía el nodo `.card` (src/compose.py:191). Sin él, el
     # render no falla: devuelve un PNG vacío, que es mucho peor.
-    if not _CLASE_CARD.search(html or ""):
+    if not _tiene_card(html or ""):
         raise ContratoInvalido("el diseño no tiene el marco de la imagen")
 
     env = filtros.entorno()
