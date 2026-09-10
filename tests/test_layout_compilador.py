@@ -72,6 +72,20 @@ def test_texto_literal_va_escapado_y_sin_jinja():
     contrato.validar_html(html, CONTRATO)
 
 
+def test_fuente_maliciosa_no_rompe_el_atributo_style():
+    # `validar()` ya rechaza esta `fuente` (ver
+    # tests/test_layout_esquema.py::test_tipografia_con_caracteres_raros_se_rechaza),
+    # pero `_capa_texto` escapa por su cuenta — cinturón y tirantes: si algún
+    # día alguien llama al compilador saltándose la validación, el HTML sigue
+    # sin poder salirse del atributo `style="..."`.
+    capa = {"id": "titular", "tipo": "texto", "x": 0, "y": 0, "w": 1080, "h": 300,
+            "z": 1, "campo": "titular", "fuente": 'Tinos"><script>alert(1)</script>',
+            "tam": 48}
+    html = layout._capa_texto(capa)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
 def test_capa_de_imagen_por_archivo_usa_fotos_dir():
     capa = {"id": "sticker", "tipo": "imagen", "x": 800, "y": 40, "w": 200, "h": 200,
             "z": 5, "archivo": "corazon.png", "ajuste": "contain"}
@@ -124,7 +138,10 @@ def test_las_font_faces_apuntan_a_fonts_dir_y_nunca_a_la_red():
 
 def test_solo_se_emiten_las_fuentes_que_el_diseno_usa():
     html = layout.a_html(_layout(), CONTRATO, fuentes=FUENTES)
-    assert "Poppins" in html
+    # No basta "Poppins" in html: el font-family inline de la capa titular
+    # también lo contiene. Se pide el @font-face completo y exacto.
+    assert "@font-face{font-family:'Poppins-Bold';src:url('{{ fonts_dir }}/Poppins-Bold.ttf');" \
+        "font-display:block;}" in html
     assert "Tinos-Bold" not in html
 
 

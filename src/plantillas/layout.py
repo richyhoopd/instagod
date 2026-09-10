@@ -34,6 +34,9 @@ PESOS = tuple(range(100, 1000, 100))
 _ID = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 _ARCHIVO = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+# La tipografía la puede escribir un LLM (Tarea 7): sin esta forma, `fuente`
+# se cuela sin escapar dentro de un atributo `style="..."` en `a_html`.
+_FUENTE = re.compile(r"^[A-Za-z0-9 ._-]{1,60}$")
 
 
 def _color(valor: Any, donde: str) -> None:
@@ -101,6 +104,9 @@ def _validar_texto(capa: dict[str, Any], declaradas: set[str],
     fuente = capa.get("fuente")
     if not isinstance(fuente, str) or not fuente.strip():
         raise ContratoInvalido(f"capa '{capa['id']}': falta la tipografía")
+    if not _FUENTE.match(fuente):
+        raise ContratoInvalido(
+            f"capa '{capa['id']}': la tipografía {fuente!r} tiene caracteres no permitidos")
     if familias is not None and fuente not in familias:
         raise ContratoInvalido(
             f"capa '{capa['id']}': la tipografía '{fuente}' no está en el catálogo "
@@ -274,9 +280,11 @@ def _font_faces(diseno: dict[str, Any], fuentes: list[dict[str, Any]] | None) ->
     for f in sorted(fuentes, key=lambda x: x["familia"]):
         if f["familia"] not in usadas:
             continue
-        ruta = f["archivo"] if f.get("propia") else "{{ fonts_dir }}/" + f["archivo"]
+        familia = _html.escape(f["familia"], quote=True)
+        archivo = _html.escape(f["archivo"], quote=True)
+        ruta = archivo if f.get("propia") else "{{ fonts_dir }}/" + archivo
         piezas.append(
-            f"@font-face{{font-family:'{f['familia']}';src:url('{ruta}');"
+            f"@font-face{{font-family:'{familia}';src:url('{ruta}');"
             "font-display:block;}")
     return "\n  ".join(piezas)
 
@@ -312,7 +320,7 @@ def _capa_texto(capa: dict[str, Any]) -> str:
             f"align-items:{_ALIGN[capa.get('vertical', 'centro')]}",
             "overflow:hidden"]
     texto = [
-        f"font-family:'{capa['fuente']}',sans-serif",
+        f"font-family:'{_html.escape(capa['fuente'], quote=True)}',sans-serif",
         f"font-size:{capa['tam']}px",
         f"font-weight:{capa.get('peso', 400)}",
         f"color:{_css_color(capa.get('color', '#000000'))}",

@@ -9,16 +9,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import config
-
 from .. import compose, db
+from ..image_sources import BRANDS_DIR
 from . import contrato as _contrato
 from . import filtros
 
-# Misma carpeta que sirve `api/routers/fuentes_api.py` (`BRANDS_DIR`) y a la
-# que escribe `src/jobs/handlers.py`: fotos y stickers subidos por la marca,
-# NO `config.PHOTOS_DIR` (esa es la de fotos scrapeadas de IG, otro concepto).
-BRANDS_DIR = config.BASE_DIR / "data" / "brands"
+# BRANDS_DIR (fotos y stickers subidos por la marca) se importa de
+# ..image_sources, que ya la define y la usa `preview.py` — una sola fuente
+# de verdad para esa carpeta. NO es `config.PHOTOS_DIR` (esa es la de fotos
+# scrapeadas de IG, otro concepto).
 
 
 class CamposInvalidos(ValueError):

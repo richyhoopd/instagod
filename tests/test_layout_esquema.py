@@ -81,6 +81,15 @@ def test_sin_catalogo_no_se_valida_la_tipografia():
     layout.validar(_layout(_capa_texto(fuente="Comic Sans")), CONTRATO)
 
 
+def test_tipografia_con_caracteres_raros_se_rechaza():
+    # El campo lo puede escribir un LLM: sin esta forma, se cuela sin escapar
+    # dentro de un atributo `style="..."` en `a_html`. Se rechaza incluso sin
+    # catálogo (`familias=None`), antes de llegar a esa comparación.
+    capa = _capa_texto(fuente='Tinos"><script>alert(1)</script>')
+    with pytest.raises(contrato.ContratoInvalido, match="caracteres no permitidos"):
+        layout.validar(_layout(capa), CONTRATO)
+
+
 def test_resaltar_sobre_literal_se_rechaza():
     capa = _capa_texto(texto="Hola", resaltar=True)
     del capa["campo"]
