@@ -8,6 +8,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   Library,
+  Palette,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -22,6 +23,7 @@ const NAV = [
   { segment: "plans", label: "Planes", icon: ClipboardList, soloManager: false },
   { segment: "create", label: "Crear", icon: Sparkles, soloManager: false },
   { segment: "library", label: "Biblioteca", icon: Library, soloManager: false },
+  { segment: "templates", label: "Diseños", icon: Palette, soloManager: true },
   { segment: "settings", label: "Ajustes", icon: Settings, soloManager: true },
 ] as const;
 
