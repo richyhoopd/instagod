@@ -39,15 +39,12 @@ def _validado(cx, account_id: int, html: str, contrato_dict: dict[str, Any],
     if layout_dict is not None:
         html = _layout.a_html(layout_dict, contrato_dict, fuentes=fuentes)
     _contrato.validar_html(html, contrato_dict)
-    # Las plantillas legacy (HTML a mano) de gdlscene declaran su tipografía
-    # con @font-face propio; validar_fuentes las tolera casi siempre, pero no
-    # es el contrato de este hito tocarlas. Blindar lo nuevo (con layout) sin
-    # arriesgar lo viejo: si algún día una legacy publicada no pasa, aquí es
-    # donde se nota sin romper el guardado.
-    if layout_dict is not None:
-        _contrato.validar_fuentes(
-            html, {f["familia"] for f in fuentes},
-            archivos={f["archivo"] for f in fuentes})
+    # Sin condicionar al layout: las 15 plantillas legacy de `templates/` pasan
+    # esta validación contra el catálogo global, así que también protege al
+    # diseño escrito a mano de pedir una tipografía que la marca no tiene.
+    _contrato.validar_fuentes(
+        html, {f["familia"] for f in fuentes},
+        archivos={f["archivo"] for f in fuentes})
     return html, json.dumps(contrato_dict, ensure_ascii=False)
 
 
