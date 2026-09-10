@@ -102,6 +102,11 @@ export function capaNueva(tipo: TipoCapa, layout: Layout): Capa {
       tipo,
       w: 400,
       h: 400,
+      // Un elemento de imagen tiene que decir de dónde sale la imagen: o de un
+      // dato del diseño o de un archivo de la marca, y nunca de ninguno de los
+      // dos. Nace atado a "imagen", que es un dato del núcleo y por lo tanto
+      // siempre está declarado; el panel deja cambiarlo a un sticker después.
+      campo: "imagen",
       ajuste: "cover",
       anclaje: "center",
     };
