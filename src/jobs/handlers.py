@@ -429,6 +429,10 @@ def template_disenar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, A
                          "base": list(contrato_mod.CAMPOS_BASE), "extras": []}
 
     try:
+        # El contrato manda el aspecto y `_prompt` indexa ASPECTOS con él: un
+        # aspecto inventado tiene que ser un error legible, no un KeyError
+        # crudo dentro del worker (el defecto que la vista previa ya tapó).
+        contrato_mod.validar(contrato_dict)
         propuesta = disenador.disenar(
             marca=marca, contrato=contrato_dict, instruccion=payload["instruccion"],
             base=base, familias=fuentes_tipograficas.familias(cx, job["account_id"]),
