@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Check, Images, ListChecks, X } from "lucide-react";
+import { ArrowRight, Check, Images, ListChecks, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,14 +18,22 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useAprobar, useQueue, useRechazar, type QueueItem } from "@/hooks/use-queue";
-import { primeraImagen, contarImagenes } from "@/lib/imagenes";
+import { contarImagenes, esVideo, miniatura } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
 import { ApiError } from "@/lib/api";
+
+const ETIQUETA_TIPO: Record<string, string> = {
+  slideshow: "Carrusel",
+  video: "Reel",
+  anuncio: "Anuncio",
+  meme: "Meme",
+};
 
 function PendienteCard({ item, slug }: { item: QueueItem; slug: string }) {
   const aprobar = useAprobar(slug);
   const rechazar = useRechazar(slug);
-  const thumb = primeraImagen(item.imagen_url);
+  const thumb = miniatura(item.imagen_url);
+  const video = esVideo(item.imagen_url);
   const n = contarImagenes(item.imagen_url);
   const enCurso = aprobar.isPending || rechazar.isPending;
 
@@ -54,7 +62,12 @@ function PendienteCard({ item, slug }: { item: QueueItem; slug: string }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={thumb} alt="" className="size-full object-cover" />
         )}
-        {n > 1 && (
+        {video && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <Play className="size-4 fill-white text-white" />
+          </span>
+        )}
+        {!video && n > 1 && (
           <span className="absolute right-0.5 bottom-0.5 flex items-center gap-0.5 rounded bg-black/60 px-1 text-[10px] text-white">
             <Images className="size-2.5" />
             {n}
@@ -64,7 +77,7 @@ function PendienteCard({ item, slug }: { item: QueueItem; slug: string }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{item.caption || item.tema_semilla || "(sin caption)"}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {item.tipo === "slideshow" ? "Carrusel" : "Meme"}
+          {ETIQUETA_TIPO[item.tipo] ?? item.tipo}
           {item.tema_semilla ? ` · ${item.tema_semilla}` : ""}
         </p>
       </div>

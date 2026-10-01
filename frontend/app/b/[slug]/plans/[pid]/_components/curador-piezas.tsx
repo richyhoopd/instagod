@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { QueueDrawer } from "@/components/queue-drawer";
 import { formatearFecha } from "@/lib/fecha";
-import { contarImagenes, primeraImagen } from "@/lib/imagenes";
+import { contarImagenes, miniatura } from "@/lib/imagenes";
 import {
   useAprobarPlan,
   useEditarTopic,
@@ -161,7 +161,7 @@ export function CuradorPiezas({ slug, plan }: { slug: string; plan: PlanDetail }
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
         {plan.piezas.map((p) => {
           const badge = etiqueta(p);
-          const portada = primeraImagen(p.imagen_url);
+          const portada = miniatura(p.imagen_url);
           const slides = contarImagenes(p.imagen_url);
           return (
             <Card

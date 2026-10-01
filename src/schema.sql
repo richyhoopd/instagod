@@ -131,11 +131,12 @@ CREATE INDEX IF NOT EXISTS idx_events_status_fecha ON events(status, fecha_event
 -- -----------------------------------------------------------------------------
 -- content_queue — trabajos de contenido generados desde la DB.
 -- Equivale a tus filas `pending`, pero como fuente de verdad. El sync los
--- escribe al Google Sheet cuando status='listo'. (Sin 'reel': video fuera de alcance.)
+-- escribe al Google Sheet cuando status='listo'. 'video' = reel vertical
+-- narrado (motor de video, spec 2026-10-01): su contrato vive en video_json.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS content_queue (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    tipo               TEXT    NOT NULL DEFAULT 'meme', -- 'meme' | 'anuncio' | 'slideshow'
+    tipo               TEXT    NOT NULL DEFAULT 'meme', -- 'meme'|'anuncio'|'slideshow'|'video'
     band_id            INTEGER REFERENCES bands(id)  ON DELETE CASCADE,
     member_id          INTEGER REFERENCES members(id) ON DELETE SET NULL,
     photo_id           INTEGER REFERENCES photos(id)  ON DELETE SET NULL,
@@ -147,7 +148,7 @@ CREATE TABLE IF NOT EXISTS content_queue (
     sheet_row_id       TEXT,                            -- id de la fila en el Sheet (para rastrear)
     created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    CHECK (tipo   IN ('meme','anuncio','slideshow')),
+    CHECK (tipo   IN ('meme','anuncio','slideshow','video')),
     CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
 );
 CREATE INDEX IF NOT EXISTS idx_queue_status        ON content_queue(status);

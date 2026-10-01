@@ -3,7 +3,7 @@
 import { useDraggable } from "@dnd-kit/core";
 import { Images } from "lucide-react";
 import { EstadoBadge } from "@/components/estado-badge";
-import { contarImagenes, primeraImagen } from "@/lib/imagenes";
+import { contarImagenes, miniatura } from "@/lib/imagenes";
 import { formatHora } from "@/lib/calendario";
 import { cn } from "@/lib/utils";
 import type { QueueItem } from "@/hooks/use-queue";
@@ -17,7 +17,7 @@ export function QueueCard({ item, onClick }: { item: QueueItem; onClick: () => v
     id: `item-${item.id}`,
     disabled: !arrastrable,
   });
-  const thumb = primeraImagen(item.imagen_url);
+  const thumb = miniatura(item.imagen_url);
   const n = contarImagenes(item.imagen_url);
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }

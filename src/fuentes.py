@@ -14,9 +14,18 @@ import re
 from src import db, topics
 
 PROVIDERS_IMAGEN = ("carpeta", "ig_accounts", "pinterest", "pexels", "unsplash", "banco", "covers")
-PROVIDERS_INFO = ("rss", "newsapi")
+# 'reddit' (motor de video, spec 2026-10-01): historias narrables vía el RSS
+# público de un subreddit. Mismo kind='info' que rss/newsapi: alimenta
+# `topic_suggestions`, pero su `resumen` trae la historia completa.
+PROVIDERS_INFO = ("rss", "newsapi", "reddit")
 
 _CATALOGO = {"imagen": PROVIDERS_IMAGEN, "info": PROVIDERS_INFO}
+
+# Ruta de fuente de Reddit: path relativo (no URL) para que el host quede
+# fijado en `topics.fetch_reddit` y una fuente no pueda redirigir el fetch.
+# Se importa de `topics` (fuente única) para que lo que valida esta capa sea
+# exactamente lo que el fetch acepta después.
+from src.topics import RUTA_REDDIT_RE as _RUTA_REDDIT_RE  # noqa: E402
 
 # @handle de Instagram: solo letras/dígitos/punto/guion bajo (charset real de IG),
 # 1-30 chars tras la @ — un `startswith("@")` a secas dejaba pasar cosas como
@@ -73,6 +82,17 @@ def validar_config(kind: str, provider: str, config: dict | None) -> None:
             valor = config.get(campo)
             if valor is not None and not isinstance(valor, str):
                 raise ValueError("config")
+        if not _cada_horas_valido(config):
+            raise ValueError("config")
+    elif provider == "reddit":
+        rutas = config.get("rutas")
+        if not isinstance(rutas, list) or not rutas or not all(
+            isinstance(r, str) and _RUTA_REDDIT_RE.match(r) for r in rutas
+        ):
+            raise ValueError("config")
+        min_palabras = config.get("min_palabras")
+        if min_palabras is not None and not (_es_entero(min_palabras) and 20 <= min_palabras <= 400):
+            raise ValueError("config")
         if not _cada_horas_valido(config):
             raise ValueError("config")
 

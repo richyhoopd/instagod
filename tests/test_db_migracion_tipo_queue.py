@@ -24,20 +24,26 @@ from src import db
 # guard de _migrar_check_tipo_queue busca el literal 'slideshow' en ESE texto.
 _OLD_SCHEMA = (
     db.SCHEMA_PATH.read_text(encoding="utf-8")
-    .replace("-- 'meme' | 'anuncio' | 'slideshow'", "-- 'meme' | 'anuncio'")
-    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow')),",
+    .replace("-- 'meme'|'anuncio'|'slideshow'|'video'", "-- 'meme' | 'anuncio'")
+    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow','video')),",
              "CHECK (tipo   IN ('meme','anuncio')),")
 )
-assert "slideshow" not in _OLD_SCHEMA, (
-    "el reemplazo del schema viejo no tumbó todas las menciones a 'slideshow' "
-    "(¿cambió el formato en schema.sql?)"
-)
+# El guard de _migrar_check_tipo_queue mira el DDL que sqlite guarda en
+# sqlite_master, que empieza en "CREATE TABLE" (los comentarios `--` previos
+# NO entran). Así que el assert se hace sobre ESE bloque, no sobre el archivo
+# entero: el encabezado del archivo sí menciona 'video'/'slideshow' en prosa.
+_DDL_QUEUE_VIEJO = _OLD_SCHEMA.split("CREATE TABLE IF NOT EXISTS content_queue", 1)[1].split(");", 1)[0]
+for _lit in ("'slideshow'", "'video'"):
+    assert _lit not in _DDL_QUEUE_VIEJO, (
+        f"el reemplazo del schema viejo no tumbó {_lit} del DDL de "
+        "content_queue (¿cambió el formato en schema.sql?)"
+    )
 
 # Columnas que _MIGRATIONS["content_queue"] agrega vía ALTER, tal como
-# estaban ANTES de esta migración (todo excepto slideshow_json, que es
-# exactamente la columna nueva de esta tarea).
+# estaban ANTES de estas migraciones (todo excepto slideshow_json y
+# video_json, que son exactamente las columnas nuevas de cada tarea).
 _OLD_MIGRATED_COLS = {c: ddl for c, ddl in db._MIGRATIONS["content_queue"].items()
-                      if c != "slideshow_json"}
+                      if c not in ("slideshow_json", "video_json")}
 
 
 def _preparar_db_vieja(path) -> None:
@@ -80,11 +86,16 @@ def test_migra_check_tipo_sin_perder_datos(tmp_path) -> None:
         {"queue_id": 1},
     ]
 
-    # tipo='slideshow' ahora insertable (antes reventaba con CHECK constraint failed).
+    # tipo='slideshow' y 'video' ahora insertables (antes reventaban con
+    # CHECK constraint failed), con su columna *_json respectiva.
     qid = db.insert(cx, "content_queue", tipo="slideshow", caption="ss",
                     imagen_url="[]", status="borrador", aprobacion="pendiente",
                     slideshow_json="{}")
     assert db.get(cx, "content_queue", qid)["tipo"] == "slideshow"
+    vid = db.insert(cx, "content_queue", tipo="video", caption="reel",
+                    imagen_url="http://x/r.mp4", status="borrador",
+                    aprobacion="pendiente", video_json="{}")
+    assert db.get(cx, "content_queue", vid)["tipo"] == "video"
 
     # el CHECK sigue vivo: un tipo inventado se sigue rechazando.
     with pytest.raises(sqlite3.IntegrityError):

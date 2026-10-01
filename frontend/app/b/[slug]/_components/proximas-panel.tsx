@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { EstadoBadge } from "@/components/estado-badge";
 import { useQueue } from "@/hooks/use-queue";
-import { primeraImagen, contarImagenes } from "@/lib/imagenes";
+import { miniatura, contarImagenes } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
 
 export function ProximasPanel({ slug }: { slug: string }) {
@@ -55,7 +55,7 @@ export function ProximasPanel({ slug }: { slug: string }) {
           </div>
         )}
         {proximas.map((item) => {
-          const thumb = primeraImagen(item.imagen_url);
+          const thumb = miniatura(item.imagen_url);
           const n = contarImagenes(item.imagen_url);
           return (
             <div key={item.id} className="flex items-center gap-3 rounded-lg border p-2">

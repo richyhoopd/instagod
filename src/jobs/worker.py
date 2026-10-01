@@ -24,7 +24,8 @@ from src.jobs import handlers
 
 _TRUNCA_ERROR = 400
 _CADA_HORAS_DEFAULT = 24
-_TIPO_POR_PROVIDER = {"rss": "sourcing.rss_fetch", "newsapi": "sourcing.newsapi_fetch"}
+_TIPO_POR_PROVIDER = {"rss": "sourcing.rss_fetch", "newsapi": "sourcing.newsapi_fetch",
+                      "reddit": "sourcing.reddit_fetch"}
 
 
 def _dormir(seg: float) -> None:

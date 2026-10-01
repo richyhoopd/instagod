@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import config
 from src import db
+from src.video_model import VideoPreset, preset_desde
 
 # Vars de entorno que una marca necesita para operar completa (con sufijo).
 CRED_VARS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "IG_USER_ID",
@@ -33,6 +34,10 @@ class Marca:
     posting_slots: list[str] | None
     activa: bool
     prompts: dict
+    # Preset del motor de video (spec 2026-10-01): voz, personaje, CTA y
+    # estética del reel. Siempre presente (defaults de `video_model`) para que
+    # el caller no tenga que distinguir marca-con-video de marca-sin-video.
+    video: VideoPreset
 
 
 def _formatos_default() -> list[str]:
@@ -100,6 +105,9 @@ def _fila_a_marca(fila: dict) -> Marca:
                       if slots_raw else None,
         activa=bool(fila.get("activa", 1)),
         prompts=_prompts_de(fila.get("prompts_json"), slug=slug),
+        # `preset_desde` ya es tolerante campo por campo (JSON malformado o
+        # columna ausente → defaults), mismo criterio que `_json_o`.
+        video=preset_desde(fila.get("video_json")),
     )
 
 

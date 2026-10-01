@@ -39,3 +39,24 @@ export function contarImagenes(url: string | null | undefined): number {
   }
   return 1;
 }
+
+// Los reels (tipo 'video') guardan el mp4 de Cloudinary en el mismo campo
+// imagen_url. Un <img> con un .mp4 queda en blanco: hay que detectarlo para
+// pintar un <video> o su poster.
+export function esVideo(url: string | null | undefined): boolean {
+  const v = primeraImagen(url);
+  if (!v) return false;
+  return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(v) || v.includes("/video/upload/");
+}
+
+// Miniatura de un reel de Cloudinary: la misma URL con extensión .jpg devuelve
+// un frame. Para cualquier otra cosa, la propia URL sirve de imagen.
+export function miniatura(url: string | null | undefined): string | null {
+  const v = primeraImagen(url);
+  if (!v) return null;
+  if (!esVideo(v)) return v;
+  if (v.includes("/video/upload/")) {
+    return v.replace(/\.(mp4|mov|webm|m4v)(\?.*)?$/i, ".jpg");
+  }
+  return null;
+}

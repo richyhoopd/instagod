@@ -65,6 +65,25 @@ def _create_carousel_container(children: list[str], caption: str, creds: dict | 
     return resp.json()["id"]
 
 
+def _create_reel_container(video_url: str, caption: str,
+                           creds: dict | None = None,
+                           share_to_feed: bool = True) -> str:
+    """Container de Reel. `media_type=REELS` es el único camino para video:
+    IG retiró el flujo VIDEO del feed, todo video entra como Reel."""
+    user_id, token = _c(creds)
+    url = f"{_base()}/{user_id}/media"
+    resp = requests.post(
+        url,
+        data={"media_type": "REELS", "video_url": video_url,
+              "caption": caption,
+              "share_to_feed": "true" if share_to_feed else "false",
+              "access_token": token},
+        timeout=_TIMEOUT,
+    )
+    _raise_for_graph(resp)
+    return resp.json()["id"]
+
+
 def _wait_until_ready(creation_id: str, *, attempts: int = 10, delay: float = 3.0,
                        creds: dict | None = None) -> None:
     """Espera a que el container esté FINISHED antes de publicar."""
@@ -136,6 +155,29 @@ def publish_carousel(image_urls: list[str], caption: str, *, retries: int = 3,
             last_err = exc
             time.sleep(2 ** attempt)
     raise RuntimeError(f"Falló el carrusel tras {retries} intentos: {last_err}")
+
+
+def publish_reel(video_url: str, caption: str, *, retries: int = 3,
+                 creds: dict | None = None, share_to_feed: bool = True) -> str:
+    """Publica un Reel y devuelve el `ig_post_id`.
+
+    La espera es MUCHO más larga que en imagen: IG tiene que descargar y
+    transcodificar el mp4, lo que tarda del orden de minutos en videos de
+    ~60 s. Con los 10 intentos × 3 s de `_wait_until_ready` el container
+    seguía en IN_PROGRESS y `media_publish` fallaba con "Media ID is not
+    available"; aquí se espera hasta 5 min antes de dar por muerto el intento.
+    """
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            creation_id = _create_reel_container(video_url, caption, creds,
+                                                 share_to_feed)
+            _wait_until_ready(creation_id, attempts=60, delay=5.0, creds=creds)
+            return _publish(creation_id, creds)
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"Falló el reel tras {retries} intentos: {last_err}")
 
 
 def _raise_for_graph(resp: requests.Response) -> None:

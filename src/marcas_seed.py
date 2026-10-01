@@ -191,6 +191,73 @@ _PERFIL_GDLSCENE = {
     "estilos_json": json.dumps(ESTILOS_GDLSCENE, ensure_ascii=False),
 }
 
+VOZ_SHITBOOK = (
+    "Marca: shit.book (@shit.book) — historias reales de internet narradas en "
+    "video vertical, con un pájaro de dientes humanos como narrador. "
+    "Audiencia: 18-30, México, consumo de reels en loop. "
+    "TONO: primera persona, frases cortas, sin preámbulo. El gancho va en los "
+    "primeros tres segundos o no hay video. Humor seco e incomodidad, nunca "
+    "moraleja ni 'reflexión final'. "
+    "PROHIBIDO: 'les cuento', 'no van a creer lo que pasó', llamados a seguir "
+    "al inicio, lenguaje de locutor, hashtags dentro de la narración. "
+    "NO inventes hechos de la historia original: se puede recortar y reordenar, "
+    "nunca cambiar el desenlace."
+)
+
+# Preset del motor de video de la marca (accounts.video_json → VideoPreset).
+# Es el look que ya estaba validado en el prototipo: narrador rebotando,
+# subtítulos de 3 palabras con la activa en amarillo, fondos del personaje.
+VIDEO_SHITBOOK = {
+    "voz": "es-MX-JorgeNeural",
+    "rate": "+22%",
+    "pitch": "-8Hz",
+    "personaje_path": "data/brands/shitbook/personaje.png",
+    "etiqueta_tarjeta": "r/historias",
+    "autor_tarjeta": "anónimo · hace 3 h",
+    "cta_texto": "sigue la historia",
+    "cta_marca": "@shit.book",
+    "color_acento": "#FFE600",
+    "color_fondo": "#3B2414",
+    "palabras_subtitulo": 3,
+    # ~65 s de narración: medido, 170 palabras a rate +22% ≈ 65 s.
+    "palabras_min": 90,
+    "palabras_max": 170,
+    "max_duracion_s": 90.0,
+}
+
+_PERFIL_SHITBOOK = {
+    "voz": VOZ_SHITBOOK,
+    # Marca de solo video: no hay carruseles ni banco de imágenes que curar.
+    "formatos": json.dumps(["video"]),
+    "video_json": json.dumps(VIDEO_SHITBOOK, ensure_ascii=False),
+    "posting_slots": "14:00,21:00",
+}
+
+# Subreddits de historias narrables. Rutas (no URLs): el host lo fija
+# `topics.fetch_reddit`. `t=week` para que la bandeja rote sola.
+FUENTES_SHITBOOK = [
+    "/r/HistoriasDeReddit/top/.rss?t=week",
+    "/r/RelatosDeNoche/top/.rss?t=week",
+    "/r/nosleep/top/.rss?t=week",
+]
+
+
+def _sembrar_fuentes_shitbook(cx, account_id: int) -> None:
+    """Registra la fuente `reddit` de la marca si todavía no tiene ninguna.
+
+    Idempotente y respetuoso igual que `_completar`: si ya hay una fuente
+    reddit (aunque esté editada con otros subreddits) no se toca.
+    """
+    from src import fuentes as fuentes_mod
+
+    ya = db.rows(cx, "SELECT id FROM brand_sources "
+                     "WHERE account_id = ? AND provider = 'reddit'", (account_id,))
+    if ya:
+        return
+    fuentes_mod.crear(cx, account_id, "info", "reddit",
+                      {"rutas": FUENTES_SHITBOOK, "min_palabras": 60,
+                       "cada_horas": 12})
+
 
 def _fusionar_estilos(cx, account_id: int, semilla: dict) -> None:
     """Agrega presets NUEVOS a un estilos_json ya poblado sin tocar los que
@@ -233,9 +300,17 @@ def sembrar(cx) -> None:
             nombre="Melaque West Coast Real Estate", ciudad="Melaque",
             color_marca="#223124", activa=1)
     _completar(cx, por_slug["melaquecapital"], _PERFIL_MELAQUECAPITAL)
+    if "shitbook" not in por_slug:
+        por_slug["shitbook"] = db.insert(
+            cx, "accounts", slug="shitbook", ig_handle="@shit.book",
+            nombre="shit.book", ciudad="Guadalajara",
+            color_marca="#FFE600", activa=1)
+    _completar(cx, por_slug["shitbook"], _PERFIL_SHITBOOK)
+    _sembrar_fuentes_shitbook(cx, por_slug["shitbook"])
     _fusionar_estilos(cx, por_slug["pensionmas"], ESTILOS_PENSIONMAS)
     _fusionar_estilos(cx, por_slug["melaquecapital"], ESTILOS_MELAQUECAPITAL)
-    print("Seeds de marca aplicados (gdlscene + pensionmas + melaquecapital).")
+    print("Seeds de marca aplicados "
+          "(gdlscene + pensionmas + melaquecapital + shitbook).")
 
 
 if __name__ == "__main__":

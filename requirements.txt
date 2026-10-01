@@ -22,3 +22,6 @@ rapidocr_onnxruntime  # OCR potente para flyers (Fase 5): lee tipografía artís
 cryptography     # secretos por marca cifrados en DB (Fernet) — portal
 httpx            # cliente HTTP de la API (Resend) y TestClient
 email-validator  # EmailStr en la API
+edge-tts         # motor de voz del motor de video (gratis, sin API key)
+# Motor de video (spec 2026-10-01): también necesita `ffmpeg`+`ffprobe` del
+# sistema (`brew install ffmpeg`). Pillow entra como dependencia de otros.

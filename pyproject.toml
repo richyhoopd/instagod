@@ -8,6 +8,11 @@ filterwarnings = [
     # Avisos de deps (FastAPI/Starlette) que no son nuestros y ensucian la salida.
     "ignore::DeprecationWarning",
 ]
+markers = [
+    # Tests que salen a la red o corren ffmpeg (motor de video). Fuera del
+    # default: `pytest -m lento` los corre, `pytest -m 'not lento'` en CI.
+    "lento: usa red (edge-tts) o ffmpeg; tarda decenas de segundos",
+]
 
 [tool.coverage.run]
 source = ["src"]

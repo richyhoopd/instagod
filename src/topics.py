@@ -11,6 +11,7 @@ import html
 import ipaddress
 import re
 import socket
+import time
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +21,17 @@ import requests
 from src import db
 
 _RESUMEN_MAX = 500
+# Historias narrables (fetch_reddit): el cuerpo ES el contenido, no un resumen.
+# 6000 chars ~= 1000 palabras, de sobra para el tope de 400 de video_model.
+_HISTORIA_MAX = 6000
+# Reddit tira 429 seguido desde IPs de datacenter; esperas entre intentos.
+_REDDIT_ESPERAS = (0, 3, 9)
+# Ruta aceptada por `fetch_reddit`: un path /r/<sub>/... dentro de reddit.com.
+# Es la MISMA regla que valida `fuentes.crear` (que la importa de aquí) para
+# que una fuente guardada no pueda fallar luego en el fetch.
+RUTA_REDDIT_RE = re.compile(r"^/r/[A-Za-z0-9_]{2,30}/[A-Za-z0-9_./?=&-]*\Z")
+_REDDIT_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 _NEWSAPI_URL = "https://newsapi.org/v2/everything"
 _NEWSAPI_TOP = 20
 # Hostnames literales que apuntan a la propia máquina/red aunque no sean IPs
@@ -221,6 +233,98 @@ def fetch_newsapi(query: str, key: str, *, idioma: str = "es", pais: str | None 
         "url": a.get("url") or None,
         "publicado_en": a.get("publishedAt") or None,
     } for a in articulos]
+
+
+def _historia_plana(crudo: str) -> str:
+    """HTML de un comentario/post de Reddit → texto plano COMPLETO.
+
+    Igual que `_texto_plano` pero sin el tope de 500 chars: aquí el cuerpo ES
+    el contenido (una historia que después se narra), no un resumen. Los <br>
+    y </p> se vuelven saltos de línea antes de borrar tags para no pegar
+    párrafos, y se corta el pie "submitted by ..." que el RSS agrega.
+    """
+    t = re.sub(r"<br\s*/?>|</p>", "\n", crudo or "")
+    t = html.unescape(re.sub(r"<[^>]+>", "", t))
+    t = re.sub(r"submitted by .*$", "", t, flags=re.S)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()[:_HISTORIA_MAX]
+
+
+def fetch_reddit(ruta: str, *, min_palabras: int = 60, _get=None,
+                 _sleep=None) -> list[dict[str, Any]]:
+    """Historias de Reddit vía el RSS PÚBLICO → [{titulo, resumen, url, ...}].
+
+    `ruta`: path dentro de reddit.com, p. ej. "/r/copypasta_es/top/.rss?t=all".
+    Se acepta solo el path (no una URL completa) a propósito: el host queda
+    fijado aquí, así una fuente no puede apuntar el fetch a otro sitio.
+
+    Por qué el RSS y no la API: la API OAuth de Reddit exige aprobación previa
+    (Responsible Builder Policy) y los endpoints `.json` responden 403 sin
+    navegador. El `.rss` responde 200 con un User-Agent de navegador; el 429
+    es normal y se reintenta con espera creciente.
+
+    El RSS no trae score: el orden es el que pidió la propia URL (sort=top).
+    `min_palabras` descarta las entradas demasiado cortas para narrar.
+    Cualquier falla → `[]` (fuente rota no tumba el job, igual que `fetch_rss`).
+    """
+    get = _get or requests.get
+    # La ruta debe ser un path, no una URL: aceptar "https://otro.com/..."
+    # produciría "https://www.reddit.com/https://otro.com/..." (no sale de
+    # reddit.com, pero es un 404 deforme). Mejor rechazarlo de una.
+    if not RUTA_REDDIT_RE.match(ruta or ""):
+        print(f"[topics] fetch_reddit ruta inválida: {ruta!r}")
+        return []
+    url = "https://www.reddit.com" + ruta
+    dormir = _sleep or time.sleep
+    crudo = None
+    for espera in _REDDIT_ESPERAS:
+        if espera:
+            dormir(espera)
+        try:
+            resp = get(url, timeout=20, allow_redirects=False,
+                       headers={"User-Agent": _REDDIT_UA})
+        except Exception as exc:  # noqa: BLE001 — red caída: fuente rota, no fatal
+            print(f"[topics] fetch_reddit error en {ruta}: {exc}")
+            return []
+        status = getattr(resp, "status_code", None)
+        if status == 429:
+            continue
+        if status is not None and 300 <= status < 400:
+            print(f"[topics] fetch_reddit bloqueado (redirect {status}): {ruta}")
+            return []
+        try:
+            if hasattr(resp, "raise_for_status"):
+                resp.raise_for_status()
+            crudo = resp.text if hasattr(resp, "text") else resp
+        except Exception as exc:  # noqa: BLE001
+            print(f"[topics] fetch_reddit error en {ruta}: {exc}")
+            return []
+        break
+    if crudo is None:
+        print(f"[topics] fetch_reddit 429 persistente en {ruta}")
+        return []
+
+    try:
+        root = ET.fromstring(crudo)
+    except ET.ParseError as exc:
+        print(f"[topics] fetch_reddit XML malformado en {ruta}: {exc}")
+        return []
+
+    out: list[dict[str, Any]] = []
+    for entrada in _hijos(root, "entry"):
+        cuerpo = _historia_plana(_texto(_hijo(entrada, "content")))
+        if not cuerpo or cuerpo in ("[deleted]", "[removed]"):
+            continue
+        if len(cuerpo.split()) < min_palabras:
+            continue
+        link = _hijo(entrada, "link")
+        fecha = _hijo(entrada, "published") or _hijo(entrada, "updated")
+        out.append({
+            "titulo": _texto(_hijo(entrada, "title")),
+            "resumen": cuerpo,
+            "url": (link.get("href") if link is not None else None) or None,
+            "publicado_en": _texto(fecha) or None,
+        })
+    return out
 
 
 def guardar(cx, account_id: int, items: list[dict[str, Any]], fuente: str) -> int:

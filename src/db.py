@@ -27,6 +27,8 @@ TABLES: dict[str, set[str]] = {
         "fuentes_imagen", "estilos_json", "voz", "formatos", "logo_path", "posting_slots",
         # Fase 3 (spec 2026-08-21): perfil extendido.
         "descripcion", "sitio_web", "hashtags_default", "prompts_json",
+        # Motor de video (spec 2026-10-01): preset de voz/personaje/CTA.
+        "video_json",
     },
     "bands": {
         "nombre", "ig_handle", "tipo", "category_ig", "spotify_id", "ciudad", "activa",
@@ -72,6 +74,8 @@ TABLES: dict[str, set[str]] = {
         "intentos",
         # Planes de contenido masivo (spec 2026-08-28).
         "plan_id",
+        # Motor de video (spec 2026-10-01): contrato del reel narrado.
+        "video_json",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -230,6 +234,9 @@ _MIGRATIONS = {
         "intentos": "INTEGER NOT NULL DEFAULT 0",
         # Planes de contenido masivo (spec 2026-08-28): agrupación de piezas.
         "plan_id": "INTEGER",
+        # Motor de video (spec 2026-10-01): contrato del reel narrado (guion,
+        # voz, fondos, ruta del mp4). Equivalente de slideshow_json para video.
+        "video_json": "TEXT",
     },
     "ig_posts": {
         # Multi-cuenta Fase A: ver nota en bands.account_id arriba.
@@ -264,6 +271,9 @@ _MIGRATIONS = {
         "sitio_web": "TEXT",
         "hashtags_default": "TEXT",  # JSON: lista de hashtags fijos de la marca
         "prompts_json": "TEXT",      # JSON: caption_extra/por_formato/hashtags para el LLM
+        # Motor de video (spec 2026-10-01): JSON del VideoPreset de la marca
+        # (voz, personaje, CTA, fondos). Vacío = defaults de video_model.
+        "video_json": "TEXT",
     },
     "users": {
         # Login con contraseña (sin correo/dominio todavía): scrypt
@@ -314,7 +324,8 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         tg_message_id      TEXT,
         intentos           INTEGER NOT NULL DEFAULT 0,
         plan_id            INTEGER,
-        CHECK (tipo   IN ('meme','anuncio','slideshow')),
+        video_json         TEXT,
+        CHECK (tipo   IN ('meme','anuncio','slideshow','video')),
         CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
 """
@@ -325,7 +336,7 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "formato_patron", "aprobacion", "caption", "imagen_url", "evento_ids",
     "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
     "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
-    "intentos", "plan_id",
+    "intentos", "plan_id", "video_json",
 )
 
 
@@ -335,18 +346,19 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     SQLite no soporta ALTER de un CHECK ya creado: hay que reconstruir la
     tabla (procedimiento oficial de sqlite.org "Making Other Kinds Of Table
     Schema Changes", incluye el PRAGMA foreign_key_check antes del commit).
-    Idempotente: solo corre si el CHECK viejo (sin 'slideshow' o sin
-    'programado') sigue en sqlite_master; en DBs nuevas ya sale de schema.sql
-    con el CHECK correcto y esto es un no-op.
+    Idempotente: solo corre si el CHECK viejo (sin 'slideshow', sin 'video' o
+    sin 'programado') sigue en sqlite_master; en DBs nuevas ya sale de
+    schema.sql con el CHECK correcto y esto es un no-op.
     """
     row = cx.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='content_queue'"
     ).fetchone()
-    # OJO: no basta con buscar "slideshow"/"programado" a secas — la columna
-    # slideshow_json (agregada arriba vía ALTER TABLE ADD COLUMN) ya deja esa
-    # subcadena en el sql guardado aunque el CHECK siga viejo. Hay que buscar
-    # el literal exacto de cada CHECK IN (...).
-    if row is None or ("'slideshow'" in row[0] and "'programado'" in row[0]):
+    # OJO: no basta con buscar "slideshow"/"video"/"programado" a secas — las
+    # columnas slideshow_json/video_json (agregadas arriba vía ALTER TABLE ADD
+    # COLUMN) ya dejan esas subcadenas en el sql guardado aunque el CHECK siga
+    # viejo. Hay que buscar el literal exacto de cada CHECK IN (...).
+    if row is None or all(lit in row[0] for lit in
+                          ("'slideshow'", "'video'", "'programado'")):
         return
 
     # Columnas de la tabla VIEJA (ya con todo lo que _MIGRATIONS le haya

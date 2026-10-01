@@ -109,7 +109,12 @@ def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> boo
     if cur.rowcount == 0:
         return False
     try:
-        if urls is not None:
+        if fila.get("tipo") == "video":
+            # Reel: la URL del mp4 vive en imagen_url (string plano) igual que
+            # una imagen single — el motor de video la deja ahí al encolar.
+            media_id = ig.publish_reel(fila.get("imagen_url") or "", caption,
+                                       creds=creds)
+        elif urls is not None:
             media_id = ig.publish_carousel(urls, caption, creds=creds)
         else:
             media_id = ig.publish(fila.get("imagen_url") or "", caption, creds=creds)

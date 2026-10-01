@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstadoBadge } from "@/components/estado-badge";
 import { QueueDrawer } from "@/components/queue-drawer";
-import { primeraImagen, contarImagenes } from "@/lib/imagenes";
+import { miniatura, contarImagenes } from "@/lib/imagenes";
 import { formatearFecha } from "@/lib/fecha";
 import { ESTADOS, ESTADO_LABELS, esEstado, type Estado } from "@/lib/estados";
 import { temaLimpio } from "@/lib/formatos";
@@ -275,7 +275,7 @@ function LibraryContent() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => {
-          const thumb = primeraImagen(item.imagen_url);
+          const thumb = miniatura(item.imagen_url);
           const n = contarImagenes(item.imagen_url);
           const seleccionada = sel.has(item.id);
           return (

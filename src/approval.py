@@ -294,10 +294,13 @@ def _urls_de_imagen(imagen_url: str) -> list[str]:
 
 def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
                       *, regenerable: bool = False,
-                      account_slug: str = "gdlscene", cx=None) -> None:
+                      account_slug: str = "gdlscene", cx=None,
+                      es_video: bool = False) -> None:
     """Manda la propuesta a Telegram con botones Aprobar/Rechazar (y 🔄/🎨 si
     es un meme individual regenerable).
 
+    - Video (`es_video=True`): sendVideo con caption + botones (el reel se ve
+      en el chat, que es el punto de la aprobación).
     - Carrusel (>=2 URLs): sendMediaGroup con las fotos, luego sendMessage con
       caption + botones (Telegram no permite botones en media groups).
     - Single (1 URL): sendPhoto con caption + botones.
@@ -326,7 +329,23 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
     botones = {"inline_keyboard": construir_botones(queue_id, regenerable=regenerable)}
     urls = _urls_de_imagen(imagen_url)
 
-    if len(urls) >= 2:
+    if es_video and urls:
+        r = requests.post(
+            f"{base_url}/sendVideo",
+            data={
+                "chat_id": chat_id,
+                "video": urls[0],
+                "caption": caption[:1000],
+                "reply_markup": json.dumps(botones),
+            },
+            # Telegram descarga el mp4 desde Cloudinary antes de contestar:
+            # con los 20 s de las fotos se iba a timeout en reels largos.
+            timeout=120,
+        )
+        r.raise_for_status()
+        final = r
+
+    elif len(urls) >= 2:
         # Enviar fotos como álbum
         media = [{"type": "photo", "media": u} for u in urls[:10]]
         r = requests.post(

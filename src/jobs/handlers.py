@@ -19,6 +19,7 @@ from src import (
     compose,
     db,
     generate_slideshow,
+    generate_video,
     host,
     ingest_ig,
     jobs,
@@ -29,8 +30,14 @@ from src import (
     slideshow_compile,
     slideshow_model,
     topics,
+    video_model,
+    video_render,
 )
 from src import fuentes as fuentes_mod
+
+# Espera entre subreddits de una misma fuente: Reddit responde 429 a la 2ª
+# petición seguida desde la misma IP (verificado en vivo).
+_ESPERA_ENTRE_SUBREDDITS = 8.0
 
 
 def _marca_de(cx: sqlite3.Connection, account_id: int) -> str:
@@ -210,8 +217,41 @@ def sourcing_newsapi_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[
         _sellar_ultimo_run(cx, source_id, error)
 
 
-_SHORTCODE_RE = re.compile(r"[^A-Za-z0-9_-]")
+def sourcing_reddit_fetch(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {source_id}. Baja historias narrables del RSS de cada subreddit.
 
+    Gemelo de `sourcing_rss_fetch` (incluido el sellado de `ultimo_run` en
+    `finally`, H3) pero con `fetch_reddit`: el `resumen` que guarda es la
+    historia COMPLETA, no un resumen de 500 chars, porque de ahí sale el
+    cuerpo narrado del video.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    source_id = payload["source_id"]
+    fuente = _fuente_de(cx, job["account_id"], source_id, "info")
+    cfg = fuente["config"]
+    min_palabras = cfg.get("min_palabras", 60)
+
+    nuevos = 0
+    error: str | None = None
+    try:
+        for i, ruta in enumerate(cfg.get("rutas", [])):
+            # Reddit tira 429 a la SEGUNDA ruta si van seguidas desde la misma
+            # IP (verificado en vivo: 1ª ruta 200, 2ª y 3ª 429 persistente).
+            # La espera entre rutas es lo que hace utilizable una fuente con
+            # varios subreddits.
+            if i:
+                time.sleep(_ESPERA_ENTRE_SUBREDDITS)
+            try:
+                items = topics.fetch_reddit(ruta, min_palabras=min_palabras)
+                nuevos += topics.guardar(cx, job["account_id"], items, "reddit")
+            except Exception as exc:  # noqa: BLE001 — un subreddit roto no tumba los demás
+                error = str(exc)
+        return {"nuevos": nuevos}
+    finally:
+        _sellar_ultimo_run(cx, source_id, error)
+
+
+_SHORTCODE_RE = re.compile(r"[^A-Za-z0-9_-]")
 
 def sourcing_ig_scrape(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     """payload: {source_id}. Descarga hasta `max_por_cuenta` fotos por cada @cuenta
@@ -352,6 +392,16 @@ def _refrescar_fuentes_info(cx: sqlite3.Connection, account_id: int, slug: str) 
                                                  idioma=cfg.get("idioma", "es"),
                                                  pais=cfg.get("pais"), estricto=True)
                     topics.guardar(cx, account_id, items, "newsapi")
+            elif fuente["provider"] == "reddit":
+                for i, ruta in enumerate(cfg.get("rutas", [])):
+                    if i:
+                        time.sleep(_ESPERA_ENTRE_SUBREDDITS)
+                    try:
+                        items = topics.fetch_reddit(
+                            ruta, min_palabras=cfg.get("min_palabras", 60))
+                        topics.guardar(cx, account_id, items, "reddit")
+                    except Exception as exc:  # noqa: BLE001 — un subreddit roto no tumba los demás
+                        error = _redactar(slug, str(exc))
         except Exception as exc:  # noqa: BLE001 — best-effort total
             error = _redactar(slug, str(exc))
         _sellar_ultimo_run(cx, fuente["id"], error)
@@ -500,12 +550,77 @@ def lote_enviar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     return {"enviadas": enviadas, "fallidas": len(errores), "errores": errores[:10]}
 
 
+def generar_video(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {topic_id?, titulo?, cuerpo?, sin_llm?, bg_video?}."""
+    payload = json.loads(job["payload_json"] or "{}")
+    qid = generate_video.generar(
+        cx,
+        marca=_marca_de(cx, job["account_id"]),
+        topic_id=payload.get("topic_id"),
+        titulo=payload.get("titulo"),
+        cuerpo=payload.get("cuerpo"),
+        usar_llm=not payload.get("sin_llm", False),
+        bg_video=payload.get("bg_video"),
+        progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg),
+        creado_por=job.get("creado_por"),
+        notificar_telegram=payload.get("notificar_telegram", True),
+    )
+    db.update(cx, "jobs", job["id"], queue_id=qid)
+    return {"queue_id": qid}
+
+
+def rerender_video(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {queue_id}. Re-renderiza el mp4 desde el `video_json` guardado
+    (editado en el portal) SIN volver a llamar al LLM, lo sube y actualiza
+    `imagen_url`. El estado de la fila no cambia.
+
+    Gemelo de `rerender_slideshow`: el punto es corregir el guion o el preset
+    a mano y volver a ver la pieza sin regenerar la historia.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    queue_id = payload["queue_id"]
+    fila = db.get(cx, "content_queue", queue_id)
+    if fila is None:
+        raise ValueError(f"No existe content_queue.id={queue_id}")
+    if not fila.get("video_json"):
+        raise ValueError(f"La fila {queue_id} no tiene video_json (no es un video)")
+
+    video = video_model.desde_json(fila["video_json"])
+    errores = video_model.validar(video)
+    if errores:
+        raise ValueError(f"Contrato de video inválido: {'; '.join(errores)}")
+
+    preset = video.preset
+    personaje = config._resolve(preset.personaje_path) if preset.personaje_path else None
+    if personaje is not None and not personaje.exists():
+        personaje = None
+
+    ts = int(time.time())
+    generate_video.OUT_DIR.mkdir(exist_ok=True)
+    mp4 = generate_video.OUT_DIR / f"reel-q{queue_id}-{ts}.mp4"
+    video.duracion_s = video_render.render(
+        video, mp4, personaje=personaje,
+        progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg))
+    video.video_path = str(mp4)
+
+    jobs.progresar(cx, job["id"], 92, "subiendo")
+    url = host.upload_video(str(mp4), public_id=f"reel{ts}")
+    db.update(cx, "content_queue", queue_id, imagen_url=url,
+              video_json=video_model.a_json(video))
+    db.update(cx, "jobs", job["id"], queue_id=queue_id)
+    jobs.progresar(cx, job["id"], 100, "listo")
+    return {"queue_id": queue_id, "url": url}
+
+
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
     "slideshow.rerender": rerender_slideshow,
+    "video.generar": generar_video,
+    "video.rerender": rerender_video,
     "sourcing.rss_fetch": sourcing_rss_fetch,
     "sourcing.newsapi_fetch": sourcing_newsapi_fetch,
+    "sourcing.reddit_fetch": sourcing_reddit_fetch,
     "sourcing.ig_scrape": sourcing_ig_scrape,
     "preset.preview": preset_preview,
     "plan.proponer_temas": plan_proponer_temas,

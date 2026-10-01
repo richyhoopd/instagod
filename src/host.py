@@ -1,7 +1,8 @@
-"""Hosting público de imágenes en Cloudinary.
+"""Hosting público de media en Cloudinary.
 
-Instagram Graph API exige un `image_url` público al publicar; subimos el PNG
-compuesto a Cloudinary y devolvemos su URL `https://res.cloudinary.com/...`.
+Instagram Graph API exige una URL pública al publicar (`image_url` para
+imágenes, `video_url` para Reels); subimos el archivo local a Cloudinary y
+devolvemos su URL `https://res.cloudinary.com/...`.
 """
 from __future__ import annotations
 
@@ -13,6 +14,14 @@ import cloudinary.uploader
 import config
 
 _configured = False
+# Reels de 60 s pesan decenas de MB. La subida síncrona de un archivo así se
+# queda colgada sin error ni tráfico (verificado en vivo: 10 min, 0% CPU y
+# cero conexiones abiertas con mp4 de ~60 MB), así que el umbral va bajo y
+# casi todo reel entra por upload_large (chunked, con reintento por trozo).
+_CHUNK_UMBRAL = 20 * 1024 * 1024
+_CHUNK_SIZE = 6 * 1024 * 1024
+# Sin timeout explícito el SDK espera para siempre: mejor fallar y reintentar.
+_TIMEOUT_S = 600
 
 
 def _ensure_config() -> None:
@@ -47,3 +56,27 @@ def upload(image_path: str | Path, public_id: str | None = None) -> str:
         format="jpg",
     )
     return result["secure_url"]
+
+
+def upload_video(video_path: str | Path, public_id: str | None = None) -> str:
+    """Sube el mp4 y devuelve la URL pública (secure_url) para `video_url`.
+
+    `resource_type="video"` (no "image": Cloudinary rechaza el mp4 como
+    imagen) y SIN `format=`: el mp4 que produce `video_render` ya cumple el
+    perfil de Reels (H.264/AAC, yuv420p, faststart) y transcodificar otra vez
+    solo degrada. Archivos grandes van por `upload_large` (chunked), porque la
+    subida síncrona se corta con reels largos.
+    """
+    _ensure_config()
+    ruta = Path(video_path)
+    opciones = dict(folder="gdlscene", public_id=public_id, overwrite=True,
+                    resource_type="video", timeout=_TIMEOUT_S)
+    if ruta.stat().st_size > _CHUNK_UMBRAL:
+        result = cloudinary.uploader.upload_large(
+            str(ruta), chunk_size=_CHUNK_SIZE, **opciones)
+    else:
+        result = cloudinary.uploader.upload(str(ruta), **opciones)
+    url = (result or {}).get("secure_url")
+    if not url:
+        raise RuntimeError(f"Cloudinary no devolvió secure_url para {ruta.name}")
+    return url

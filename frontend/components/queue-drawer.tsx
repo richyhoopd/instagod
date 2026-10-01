@@ -31,7 +31,7 @@ import { SlideEditor, slidesDe } from "@/components/slide-editor";
 import { ApiError, get } from "@/lib/api";
 import { formatearFecha } from "@/lib/fecha";
 import { temaLimpio } from "@/lib/formatos";
-import { listaImagenes } from "@/lib/imagenes";
+import { listaImagenes, esVideo, miniatura, primeraImagen } from "@/lib/imagenes";
 import {
   useAprobar,
   useEditarQueue,
@@ -50,6 +50,7 @@ const TIPO_LABEL: Record<string, string> = {
   slideshow: "Carrusel",
   anuncio: "Anuncio",
   meme: "Meme",
+  video: "Reel",
 };
 
 export function QueueDrawer({
@@ -205,7 +206,17 @@ export function QueueDrawer({
           </div>
         ) : (
           <div className="space-y-4">
-            <ImageCarousel imagenes={listaImagenes(item.imagen_url)} onIndexChange={setSlideIdx} />
+            {esVideo(item.imagen_url) ? (
+              <video
+                src={primeraImagen(item.imagen_url) ?? undefined}
+                poster={miniatura(item.imagen_url) ?? undefined}
+                controls
+                playsInline
+                className="max-h-[60vh] w-full rounded-md bg-black object-contain"
+              />
+            ) : (
+              <ImageCarousel imagenes={listaImagenes(item.imagen_url)} onIndexChange={setSlideIdx} />
+            )}
 
             {item.tipo === "slideshow" && puedeEditar && slidesDe(item.slides_data) && (
               <div className="space-y-2">
