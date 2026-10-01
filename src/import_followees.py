@@ -52,6 +52,35 @@ def listar_following(session, user_id: str, limite: int | None = None) -> list[d
         time.sleep(1.5)  # paginación: pausa corta entre páginas
 
 
+_FOLLOWERS_URL = "https://www.instagram.com/api/v1/friendships/{uid}/followers/"
+
+
+def listar_followers(session, user_id: str, limite: int | None = None) -> list[dict[str, Any]]:
+    """Seguidores de `user_id`, paginando con next_max_id, hasta `limite`.
+
+    Mismo estilo que `listar_following`. El tope importa: hay cuentas con cientos
+    de miles de seguidores y recorrerlas completas quema la cookie.
+    """
+    usuarios: list[dict[str, Any]] = []
+    max_id = ""
+    while True:
+        params = {"count": str(_PAGE), "search_surface": "follow_list_page"}
+        if max_id:
+            params["max_id"] = max_id
+        resp = session.get(_FOLLOWERS_URL.format(uid=user_id), params=params, timeout=30)
+        if resp.status_code in (401, 429):
+            raise IngestRateLimited(f"HTTP {resp.status_code} listando followers")
+        resp.raise_for_status()
+        data = resp.json()
+        usuarios.extend(data.get("users", []))
+        if limite and len(usuarios) >= limite:
+            return usuarios[:limite]
+        max_id = data.get("next_max_id") or ""
+        if not max_id:
+            return usuarios
+        time.sleep(1.5)  # paginación: pausa corta entre páginas
+
+
 def _listar_con_pool(cuenta: str, limite: int | None) -> list[dict[str, Any]]:
     """Lista el following usando el pool rotatorio: al quemarse una cuenta, rota."""
     rot = SesionRotatoria()
