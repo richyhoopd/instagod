@@ -34,10 +34,18 @@ _PATRONES_OCUPADO = (r"python.*src\.pipeline", r"python.*bot\.py")
 
 
 def _proceso_activo() -> bool:
-    return any(
-        subprocess.run(["pgrep", "-f", p], capture_output=True).returncode == 0
-        for p in _PATRONES_OCUPADO
-    )
+    # Dentro del contenedor no hay `pgrep` (la imagen no trae procps) y tampoco
+    # conviven el pipeline ni bot.py: sin la herramienta no hay traslape que
+    # evitar, así que seguimos. Antes el FileNotFoundError mataba la corrida
+    # entera y la cola de contenido se secó del 23 al 30-ago-2026.
+    for patron in _PATRONES_OCUPADO:
+        try:
+            if subprocess.run(["pgrep", "-f", patron],
+                              capture_output=True).returncode == 0:
+                return True
+        except FileNotFoundError:
+            return False
+    return False
 
 
 # Señales de que un caption ANUNCIA evento/release (para el monitor de completitud).

@@ -131,3 +131,16 @@ def test_monitor_escapados_cuenta_posts_sin_evento(tmp_path) -> None:
     from datetime import datetime
     assert novedades._monitor_escapados(cx, hoy=datetime(2026, 6, 9)) == 1
     cx.close()
+
+
+def test_proceso_activo_sin_pgrep_no_truena(monkeypatch):
+    """En el contenedor no existe `pgrep` (la imagen no trae procps).
+
+    Antes esto tiraba FileNotFoundError y el cron diario de novedades moría
+    entero: la cola de contenido se secó del 23 al 30-ago-2026.
+    """
+    def _sin_pgrep(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "pgrep")
+
+    monkeypatch.setattr(novedades.subprocess, "run", _sin_pgrep)
+    assert novedades._proceso_activo() is False
