@@ -82,6 +82,56 @@ def crear_slideshow(slug: str, datos: NuevoSlideshow, user: dict = Depends(usuar
     return {"job_id": job_id}
 
 
+class NuevoVideo(BaseModel):
+    """Reel narrado: o un topic de la marca, o una historia escrita a mano."""
+    topic_id: int | None = None
+    titulo: str | None = Field(None, max_length=300)
+    cuerpo: str | None = Field(None, max_length=20000)
+    sin_llm: bool = False
+
+
+# Mínimo de palabras que `video_model.validar` exige al guion. Sin LLM el
+# cuerpo se narra tal cual, así que se revisa al encolar y no en el worker.
+_PALABRAS_MIN_GUION = 20
+
+
+@router.post("/videos", status_code=202)
+def crear_video(slug: str, datos: NuevoVideo, user: dict = Depends(usuario_actual),
+                cx=Depends(get_cx)) -> dict:
+    fila, _ = marca_para(slug, cx, user)
+    titulo = (datos.titulo or "").strip()
+    cuerpo = (datos.cuerpo or "").strip()
+
+    if datos.topic_id is not None:
+        if titulo or cuerpo:
+            raise ApiError(422, "validacion",
+                           "Da un topic_id o una historia escrita, no ambos", "topic_id")
+        topic = _topic_de_marca(cx, fila["id"], datos.topic_id)
+        if topic["descartado"]:
+            raise ApiError(422, "validacion", "Ese tema ya fue descartado", "topic_id")
+        # El motor narra el `resumen` del topic; sin él falla al final en el worker.
+        if not (topic.get("resumen") or "").strip():
+            raise ApiError(422, "validacion", "Ese tema no tiene historia que narrar", "topic_id")
+        cuerpo = topic["resumen"]
+        payload: dict = {"topic_id": datos.topic_id}
+    else:
+        if not titulo:
+            raise ApiError(422, "validacion", "titulo es requerido si no se da topic_id", "titulo")
+        if not cuerpo:
+            raise ApiError(422, "validacion", "cuerpo es requerido si no se da topic_id", "cuerpo")
+        payload = {"titulo": titulo, "cuerpo": cuerpo}
+
+    if datos.sin_llm:
+        if len(cuerpo.split()) < _PALABRAS_MIN_GUION:
+            raise ApiError(422, "validacion",
+                           f"Sin LLM la historia se narra tal cual: mínimo "
+                           f"{_PALABRAS_MIN_GUION} palabras", "cuerpo")
+        payload["sin_llm"] = True
+
+    job_id = jobs.crear(cx, "video.generar", fila["id"], payload, creado_por=user["id"])
+    return {"job_id": job_id}
+
+
 @router.get("/jobs")
 def listar_jobs(slug: str, estado: str | None = None, user: dict = Depends(usuario_actual),
                 cx=Depends(get_cx)) -> list[dict]:

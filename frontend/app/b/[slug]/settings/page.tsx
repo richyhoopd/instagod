@@ -1,6 +1,7 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { Suspense } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBrand } from "@/hooks/use-brands";
@@ -10,10 +11,16 @@ import { TabEstilos } from "./_components/tab-estilos";
 import { TabFuentes } from "./_components/tab-fuentes";
 import { TabConexiones } from "./_components/tab-conexiones";
 import { TabHorarios } from "./_components/tab-horarios";
+import { TabVideo } from "./_components/tab-video";
 
-export default function SettingsPage() {
+const TABS = ["perfil", "voz", "estilos", "fuentes", "conexiones", "horarios", "video"];
+
+function Ajustes() {
   const { slug } = useParams<{ slug: string }>();
   const { data: marca, isLoading } = useBrand(slug);
+  // ?tab=video: el wizard de reels enlaza directo aquí cuando falta el preset.
+  const tabParam = useSearchParams().get("tab");
+  const tabInicial = tabParam && TABS.includes(tabParam) ? tabParam : "perfil";
 
   if (isLoading || !marca) {
     return (
@@ -40,7 +47,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <Tabs defaultValue="perfil">
+      <Tabs defaultValue={tabInicial}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="perfil">Perfil</TabsTrigger>
           <TabsTrigger value="voz">Voz</TabsTrigger>
@@ -48,6 +55,7 @@ export default function SettingsPage() {
           <TabsTrigger value="fuentes">Fuentes</TabsTrigger>
           <TabsTrigger value="conexiones">Conexiones</TabsTrigger>
           <TabsTrigger value="horarios">Horarios</TabsTrigger>
+          <TabsTrigger value="video">Video</TabsTrigger>
         </TabsList>
 
         <TabsContent value="perfil">
@@ -68,7 +76,18 @@ export default function SettingsPage() {
         <TabsContent value="horarios">
           <TabHorarios marca={marca} />
         </TabsContent>
+        <TabsContent value="video">
+          <TabVideo slug={slug} puedeEditar={puedeEditar} />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-64 w-full max-w-2xl" />}>
+      <Ajustes />
+    </Suspense>
   );
 }

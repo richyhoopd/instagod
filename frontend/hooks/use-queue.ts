@@ -6,7 +6,7 @@ import type { Estado } from "@/lib/estados";
 
 export interface QueueItem {
   id: number;
-  tipo: "meme" | "anuncio" | "slideshow";
+  tipo: "meme" | "anuncio" | "slideshow" | "video";
   estado: Estado;
   caption: string | null;
   imagen_url: string | null;

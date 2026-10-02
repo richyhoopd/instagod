@@ -83,3 +83,18 @@ export function useCrearPost(slug: string) {
     mutationFn: (datos: NuevoPost) => post<{ job_id: number }>(`/brands/${slug}/posts`, datos),
   });
 }
+
+// POST /brands/{slug}/videos (api/routers/trabajos.py:crear_video): o un
+// topic_id, o titulo + cuerpo; nunca ambos.
+export interface NuevoVideo {
+  topic_id?: number;
+  titulo?: string;
+  cuerpo?: string;
+  sin_llm?: boolean;
+}
+
+export function useCrearVideo(slug: string) {
+  return useMutation({
+    mutationFn: (datos: NuevoVideo) => post<{ job_id: number }>(`/brands/${slug}/videos`, datos),
+  });
+}

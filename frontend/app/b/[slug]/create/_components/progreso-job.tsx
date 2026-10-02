@@ -6,11 +6,14 @@ import { Button } from "@/components/ui/button";
 import { EstadoBadge } from "@/components/estado-badge";
 import { useJob } from "@/hooks/use-job";
 import { ResultadoCarrusel } from "./resultado-carrusel";
+import { ResultadoReel } from "./resultado-reel";
 
-const ESTADO_LABEL: Record<string, string> = {
-  cola: "En cola",
-  corriendo: "Generando el carrusel...",
-};
+// Nombre de la pieza en los textos, según el tipo de job.
+function piezaDe(tipo: string): string {
+  if (tipo === "video.generar") return "el reel";
+  if (tipo.startsWith("post")) return "el post";
+  return "el carrusel";
+}
 
 export function ProgresoJob({
   slug,
@@ -22,7 +25,8 @@ export function ProgresoJob({
   slug: string;
   jobId: number;
   onNuevoJob: (jobId: number) => void;
-  onReintentarError: () => void;
+  // Vuelve a encolar con los mismos parámetros del wizard.
+  onReintentarError: () => void | Promise<void>;
   onVolver: () => void;
 }) {
   const { data: job, isLoading } = useJob(slug, jobId);
@@ -38,6 +42,14 @@ export function ProgresoJob({
     );
   }
 
+  const pieza = piezaDe(job.tipo);
+
+  if (job.estado === "ok" && job.queue_id && job.tipo === "video.generar") {
+    return (
+      <ResultadoReel slug={slug} qid={job.queue_id} onOtraVersion={async () => onReintentarError()} />
+    );
+  }
+
   if (job.estado === "ok" && job.queue_id) {
     return <ResultadoCarrusel slug={slug} qid={job.queue_id} onRegenerar={onNuevoJob} />;
   }
@@ -50,7 +62,7 @@ export function ProgresoJob({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
             <AlertTriangle className="size-4" />
-            {job.estado === "cancelado" ? "Trabajo cancelado" : "Error al generar el carrusel"}
+            {job.estado === "cancelado" ? "Trabajo cancelado" : `Error al generar ${pieza}`}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -77,7 +89,7 @@ export function ProgresoJob({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          {ESTADO_LABEL[job.estado] ?? job.estado}
+          {job.estado === "cola" ? "En cola" : `Generando ${pieza}...`}
           <EstadoBadge estado="generando" />
         </CardTitle>
       </CardHeader>

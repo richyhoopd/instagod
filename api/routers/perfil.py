@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse
@@ -11,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 import config
 from api.deps import get_cx, marca_para, usuario_actual
 from api.errors import ApiError, no_encontrado
-from src import db, jobs, marcas, slideshow_script
+from src import db, jobs, marcas, slideshow_script, video_model
 
 router = APIRouter(prefix="/brands/{slug}", tags=["perfil"])
 
@@ -284,3 +285,125 @@ def archivo_logo(slug: str, user: dict = Depends(usuario_actual), cx=Depends(get
         headers["Content-Disposition"] = "attachment; filename=logo.svg"
         headers["Content-Security-Policy"] = "default-src 'none'"
     return FileResponse(logo, headers=headers)
+
+
+# ---------- preset de video (reels) y personaje ----------
+
+_MAX_PERSONAJE = 5 * 1024 * 1024
+_FIRMA_PNG = b"\x89PNG\r\n\x1a\n"
+_HEX_RE = r"^#[0-9A-Fa-f]{6}$"
+
+
+class VideoPresetIn(BaseModel):
+    """Lo editable desde Ajustes → Video. Todo opcional: lo que no venga se
+    conserva del preset guardado (o del default del motor). Ni la cadena de
+    procesado de voz ni `personaje_path` se editan aquí."""
+    voz: str | None = None
+    cta_hablado: str | None = Field(None, max_length=300)
+    cta_texto: str | None = Field(None, max_length=120)
+    cta_marca: str | None = Field(None, max_length=60)
+    etiqueta_tarjeta: str | None = Field(None, max_length=60)
+    autor_tarjeta: str | None = Field(None, max_length=60)
+    color_acento: str | None = Field(None, pattern=_HEX_RE)
+    color_fondo: str | None = Field(None, pattern=_HEX_RE)
+    fondos: list[str] | None = None
+    palabras_subtitulo: int | None = Field(None, ge=1, le=6)
+    palabras_min: int | None = Field(None, ge=20, le=400)
+    palabras_max: int | None = Field(None, ge=20, le=400)
+    max_duracion_s: float | None = Field(None, gt=0, le=180)
+
+    @field_validator("voz")
+    @classmethod
+    def _valida_voz(cls, v):
+        if v is not None and v not in video_model.VOCES:
+            raise ValueError(f"Voz no soportada: {v}")
+        return v
+
+    @field_validator("fondos")
+    @classmethod
+    def _valida_fondos(cls, v):
+        if v is None:
+            return v
+        if not v:
+            raise ValueError("Elige al menos un fondo")
+        malos = [f for f in v if f not in video_model.FONDOS]
+        if malos:
+            raise ValueError(f"Fondo(s) inexistente(s): {', '.join(malos)}")
+        return list(dict.fromkeys(v))
+
+
+def _personaje_archivo(slug: str):
+    return BRANDS_DIR / slug / "personaje.png"
+
+
+def _vista_video(fila: dict) -> dict:
+    preset = video_model.preset_desde(fila.get("video_json"))
+    return {"configurado": bool((fila.get("video_json") or "").strip()),
+            "tiene_personaje": bool(preset.personaje_path)
+            and _personaje_archivo(fila["slug"]).is_file(),
+            "preset": asdict(preset),
+            "voces": list(video_model.VOCES), "fondos": list(video_model.FONDOS)}
+
+
+def _guardar_preset(cx, fila: dict, preset: video_model.VideoPreset) -> dict:
+    db.update(cx, "accounts", fila["id"],
+              video_json=json.dumps(asdict(preset), ensure_ascii=False))
+    return _vista_video(db.get(cx, "accounts", fila["id"]))
+
+
+@router.get("/video")
+def ver_video(slug: str, user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
+    fila, _ = marca_para(slug, cx, user)
+    return _vista_video(fila)
+
+
+@router.put("/video")
+def guardar_video(slug: str, datos: VideoPresetIn, user: dict = Depends(usuario_actual),
+                  cx=Depends(get_cx)) -> dict:
+    fila, _ = marca_para(slug, cx, user, minimo="manager")
+    preset = video_model.preset_desde(fila.get("video_json"))
+    for campo, valor in datos.model_dump(exclude_none=True).items():
+        setattr(preset, campo, valor.strip() if isinstance(valor, str) else valor)
+    if preset.palabras_min >= preset.palabras_max:
+        raise ApiError(422, "validacion",
+                       "El mínimo de palabras debe ser menor que el máximo", "palabras_min")
+    return _guardar_preset(cx, fila, preset)
+
+
+@router.post("/video/personaje")
+def subir_personaje(slug: str, archivo: UploadFile = File(...),
+                    user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
+    # Síncrono por la misma razón que subir_logo (sqlite3 y el threadpool).
+    fila, _ = marca_para(slug, cx, user, minimo="manager")
+    contenido = _leer_con_tope(archivo, _MAX_PERSONAJE)
+    # El render necesita transparencia: solo PNG, y se revisa la firma, no la extensión.
+    if not contenido.startswith(_FIRMA_PNG):
+        raise ApiError(422, "validacion", "El personaje debe ser un PNG (con transparencia)",
+                       "archivo")
+    dest = _personaje_archivo(fila["slug"])
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(contenido)
+    preset = video_model.preset_desde(fila.get("video_json"))
+    preset.personaje_path = f"data/brands/{fila['slug']}/personaje.png"
+    return _guardar_preset(cx, fila, preset)
+
+
+@router.delete("/video/personaje", status_code=204)
+def quitar_personaje(slug: str, user: dict = Depends(usuario_actual),
+                     cx=Depends(get_cx)) -> None:
+    fila, _ = marca_para(slug, cx, user, minimo="manager")
+    _personaje_archivo(fila["slug"]).unlink(missing_ok=True)
+    preset = video_model.preset_desde(fila.get("video_json"))
+    preset.personaje_path = None
+    _guardar_preset(cx, fila, preset)
+
+
+@router.get("/files/personaje")
+def archivo_personaje(slug: str, user: dict = Depends(usuario_actual),
+                      cx=Depends(get_cx)) -> FileResponse:
+    fila, _ = marca_para(slug, cx, user)
+    ruta = _personaje_archivo(fila["slug"])
+    if not ruta.is_file():
+        raise no_encontrado("el personaje de la marca")
+    return FileResponse(ruta, media_type="image/png",
+                        headers={"X-Content-Type-Options": "nosniff"})

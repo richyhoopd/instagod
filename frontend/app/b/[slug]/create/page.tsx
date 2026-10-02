@@ -9,7 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
 import { useBrand } from "@/hooks/use-brands";
 import { useTopics, type Topic } from "@/hooks/use-topics";
-import { useCrearSlideshow, useCrearPost } from "@/hooks/use-job";
+import { useCrearSlideshow, useCrearPost, useCrearVideo } from "@/hooks/use-job";
+import { useVideoConfig } from "@/hooks/use-video-preset";
 import { useEstadoFuentes } from "@/hooks/use-sources";
 import { useTemplates } from "@/hooks/use-templates";
 import { ASPECT_DEFAULT, aspectLabel, formatoLabel, formatosDeMarca } from "@/lib/formatos";
@@ -25,12 +26,20 @@ import { PasoSlides } from "./_components/paso-slides";
 import { PasoPlantilla } from "./_components/paso-plantilla";
 import { PasoCampos } from "./_components/paso-campos";
 import { ProgresoJob } from "./_components/progreso-job";
+import {
+  PasoHistoria,
+  PALABRAS_MIN_SIN_LLM,
+  contarPalabras,
+  type ModoHistoria,
+} from "./_components/paso-historia";
 
-// El primer paso siempre es "¿Carrusel o post simple?". A partir de ahí el
+// El primer paso siempre es "¿Carrusel, post simple o reel?". A partir de ahí el
 // camino del carrusel sigue exactamente como antes (solo recorrido desde el
 // paso 2 en vez del 1); el de post simple es plantilla → tema → campos.
 const PASOS_CARRUSEL = ["Tipo", "Tema", "Formato", "Estilo", "Fuentes", "Slides"];
 const PASOS_POST = ["Tipo", "Diseño", "Tema", "Campos"];
+// Reel: historia → generar (ProgresoJob) → resultado (ResultadoReel).
+const PASOS_REEL = ["Tipo", "Historia"];
 
 function CreateWizard() {
   const { slug } = useParams<{ slug: string }>();
@@ -59,6 +68,12 @@ function CreateWizard() {
   const [templateId, setTemplateId] = useState<number | undefined>(undefined);
   const [campos, setCampos] = useState<Record<string, unknown>>({});
   const [jobId, setJobId] = useState<number | null>(null);
+  const [modoHistoria, setModoHistoria] = useState<ModoHistoria>(
+    Number.isFinite(topicIdInicial) && topicIdInicial > 0 ? "tema" : "manual"
+  );
+  const [tituloReel, setTituloReel] = useState("");
+  const [cuerpoReel, setCuerpoReel] = useState("");
+  const [sinLlm, setSinLlm] = useState(false);
 
   const formatos = useMemo(() => formatosDeMarca(marca?.formatos), [marca]);
   const estilos = useMemo(() => estilosDeMarca(marca?.estilos_json), [marca]);
@@ -66,7 +81,9 @@ function CreateWizard() {
   const fuentesActivas = fuentesSel ?? fuentesDisponibles;
 
   const esPost = tipoPieza === "post";
-  const pasosActivos = esPost ? PASOS_POST : PASOS_CARRUSEL;
+  const esReel = tipoPieza === "reel";
+  const pasosActivos = esReel ? PASOS_REEL : esPost ? PASOS_POST : PASOS_CARRUSEL;
+  const { data: videoConfig } = useVideoConfig(esReel ? slug : "");
   const totalPasos = pasosActivos.length;
 
   // Si llegamos con ?topic=id, precarga el tema cuando el listado de temas
@@ -79,6 +96,7 @@ function CreateWizard() {
 
   const crear = useCrearSlideshow(slug);
   const crearPost = useCrearPost(slug);
+  const crearVideo = useCrearVideo(slug);
 
   const plantillaSeleccionada = plantillas?.find((p) => p.id === templateId);
 
@@ -119,7 +137,21 @@ function CreateWizard() {
     }
   }
 
+  async function onGenerarReel() {
+    try {
+      const res = await crearVideo.mutateAsync(
+        modoHistoria === "tema"
+          ? { topic_id: topicId, sin_llm: sinLlm || undefined }
+          : { titulo: tituloReel.trim(), cuerpo: cuerpoReel.trim(), sin_llm: sinLlm || undefined }
+      );
+      setJobId(res.job_id);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.detalle : "No se pudo iniciar la generación");
+    }
+  }
+
   function onGenerar() {
+    if (esReel) return onGenerarReel();
     return esPost ? onGenerarPost() : onGenerarCarrusel();
   }
 
@@ -134,7 +166,7 @@ function CreateWizard() {
     return <Skeleton className="h-96 w-full" />;
   }
 
-  const titulo = esPost ? "Crear post" : "Crear carrusel";
+  const titulo = esReel ? "Crear reel" : esPost ? "Crear post" : "Crear carrusel";
 
   if (jobId !== null) {
     return (
@@ -152,6 +184,14 @@ function CreateWizard() {
   }
 
   const temaValido = tema.trim().length >= 3;
+  const topicReel = topics?.find((t) => t.id === topicId && t.resumen?.trim());
+  const historiaValida =
+    modoHistoria === "tema"
+      ? !!topicReel &&
+        (!sinLlm || contarPalabras(topicReel.resumen ?? "") >= PALABRAS_MIN_SIN_LLM)
+      : tituloReel.trim().length > 0 &&
+        cuerpoReel.trim().length > 0 &&
+        (!sinLlm || contarPalabras(cuerpoReel) >= PALABRAS_MIN_SIN_LLM);
 
   // Qué paso concreto es "paso" según el camino elegido: ambos comparten el
   // paso 1 (Tipo); de ahí se bifurcan.
@@ -169,6 +209,25 @@ function CreateWizard() {
       <WizardSteps paso={paso} pasos={pasosActivos} />
 
       {paso === 1 && <PasoTipo valor={tipoPieza} onChange={setTipoPieza} />}
+
+      {esReel && paso === 2 && (
+        <PasoHistoria
+          slug={slug}
+          videoConfig={videoConfig}
+          modo={modoHistoria}
+          onModoChange={setModoHistoria}
+          topics={topics}
+          topicsLoading={topicsLoading}
+          topicId={topicId}
+          onTopicSelect={(t) => setTopicId(t.id)}
+          titulo={tituloReel}
+          onTituloChange={setTituloReel}
+          cuerpo={cuerpoReel}
+          onCuerpoChange={setCuerpoReel}
+          sinLlm={sinLlm}
+          onSinLlmChange={setSinLlm}
+        />
+      )}
 
       {esPost && paso === 2 && (
         <PasoPlantilla
@@ -200,7 +259,7 @@ function CreateWizard() {
         />
       )}
 
-      {!esPost && paso === 2 && (
+      {!esPost && !esReel && paso === 2 && (
         <PasoTema
           tema={tema}
           onTemaChange={setTema}
@@ -212,7 +271,7 @@ function CreateWizard() {
           onTopicSelect={onTopicSelect}
         />
       )}
-      {!esPost && paso === 3 && (
+      {!esPost && !esReel && paso === 3 && (
         <PasoFormato
           formatos={formatos}
           seleccionado={formato}
@@ -221,10 +280,10 @@ function CreateWizard() {
           onAspectChange={setAspect}
         />
       )}
-      {!esPost && paso === 4 && (
+      {!esPost && !esReel && paso === 4 && (
         <PasoEstilo slug={slug} estilos={estilos} seleccionado={estilo} onChange={setEstilo} />
       )}
-      {!esPost && paso === 5 && (
+      {!esPost && !esReel && paso === 5 && (
         <PasoFuentes
           disponibles={fuentesDisponibles}
           activas={fuentesActivas}
@@ -232,7 +291,7 @@ function CreateWizard() {
           onToggle={onToggleFuente}
         />
       )}
-      {!esPost && paso === 6 && (
+      {!esPost && !esReel && paso === 6 && (
         <div className="space-y-5">
           <PasoSlides n={nSlides} onChange={setNSlides} />
           <div className="rounded-lg border bg-muted/30 p-4 text-sm">
@@ -276,11 +335,17 @@ function CreateWizard() {
         ) : (
           <Button
             disabled={
-              !temaValido || (esPost && !templateId) || crear.isPending || crearPost.isPending
+              (esReel ? !historiaValida : !temaValido) ||
+              (esPost && !templateId) ||
+              crear.isPending ||
+              crearPost.isPending ||
+              crearVideo.isPending
             }
             onClick={onGenerar}
           >
-            {(crear.isPending || crearPost.isPending) && <Loader2 className="animate-spin" />}
+            {(crear.isPending || crearPost.isPending || crearVideo.isPending) && (
+              <Loader2 className="animate-spin" />
+            )}
             Generar
           </Button>
         )}

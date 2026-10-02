@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 
-export type TipoPieza = "carrusel" | "post";
+export type TipoPieza = "carrusel" | "post" | "reel";
 
 const OPCIONES: { valor: TipoPieza; titulo: string; descripcion: string }[] = [
   {
@@ -14,6 +14,11 @@ const OPCIONES: { valor: TipoPieza; titulo: string; descripcion: string }[] = [
     valor: "post",
     titulo: "Post simple",
     descripcion: "Una sola imagen a partir de un diseño de la marca.",
+  },
+  {
+    valor: "reel",
+    titulo: "Reel",
+    descripcion: "Video vertical narrado a partir de una historia.",
   },
 ];
 
@@ -27,7 +32,7 @@ export function PasoTipo({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">¿Qué quieres crear?</p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {OPCIONES.map((o) => {
           const activo = valor === o.valor;
           return (
