@@ -262,6 +262,7 @@ SLIDESHOW_FUENTES = {
     "Poppins-SemiBold": "Poppins-SemiBold.ttf",
     "Tinos-Bold": "Tinos-Bold.ttf",
     "Tinos-Regular": "Tinos-Regular.ttf",
+    "Tinos-Italic": "Tinos-Italic.ttf",
     "Erode-Semibold": "erode-600.woff2",
     "Erode-Bold": "erode-700.woff2",
     "Marcellus": "Marcellus-latin.woff2",
@@ -269,6 +270,12 @@ SLIDESHOW_FUENTES = {
 }
 # Temperatura del guion de slides (más bajo que memes: estructura > locura).
 SLIDESHOW_TEMPERATURE = float(_get("SLIDESHOW_TEMPERATURE", "1.0") or "1.0")
+
+# H2: bloquea todo request saliente al renderizar una plantilla. Apagado por
+# decisión explícita (spec, decisión 11). Se enciende el día que una marca de
+# un tercero pueda escribir plantillas.
+TEMPLATE_RENDER_SANDBOX = (_get("TEMPLATE_RENDER_SANDBOX", "0") or "0") not in (
+    "0", "", "false", "False")
 # Formatos editoriales del motor (presets de instrucciones; el motor es genérico).
 SLIDESHOW_FORMATOS = {
     "listicle": (

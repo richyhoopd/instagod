@@ -26,6 +26,8 @@ from src import (
     marcas,
     plan_temas,
     planes,
+    plantillas,
+    posts,
     send_plan,
     slideshow_compile,
     slideshow_model,
@@ -34,6 +36,10 @@ from src import (
     video_render,
 )
 from src import fuentes as fuentes_mod
+from src.image_sources import BRANDS_DIR
+from src.plantillas import contrato as contrato_mod
+from src.plantillas import disenador, fuentes_tipograficas, layout, preview
+from src.plantillas import render as plantillas_render
 
 # Espera entre subreddits de una misma fuente: Reddit responde 429 a la 2ª
 # petición seguida desde la misma IP (verificado en vivo).
@@ -156,6 +162,37 @@ def rerender_slideshow(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str,
             for i, p in enumerate(pngs)]
 
     db.update(cx, "content_queue", queue_id, imagen_url=json.dumps(urls))
+    db.update(cx, "jobs", job["id"], queue_id=queue_id)
+    return {"queue_id": queue_id}
+
+
+def generar_post(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Genera una pieza de una sola imagen desde una plantilla de la marca."""
+    payload = json.loads(job["payload_json"] or "{}")
+    marca = marcas.cargar(cx, _marca_de(cx, job["account_id"]))
+    jobs.progresar(cx, job["id"], 15, "redactando")
+    qid = posts.crear_post(
+        cx, marca,
+        template_id=payload["template_id"],
+        tema=payload.get("tema") or "",
+        entidad_id=payload.get("entidad_id"),
+        campos_manuales=payload.get("campos"),
+        imagen_manual=payload.get("imagen"),
+        creado_por=job.get("creado_por"),
+    )
+    jobs.progresar(cx, job["id"], 90, "listo")
+    db.update(cx, "jobs", job["id"], queue_id=qid)
+    return {"queue_id": qid}
+
+
+def rerender_post(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Vuelve a dibujar una pieza con sus campos actuales. Sin LLM."""
+    payload = json.loads(job["payload_json"] or "{}")
+    marca = marcas.cargar(cx, _marca_de(cx, job["account_id"]))
+    queue_id = payload["queue_id"]
+    jobs.progresar(cx, job["id"], 30, "dibujando")
+    posts.rerender(cx, marca, queue_id)
+    jobs.progresar(cx, job["id"], 90, "listo")
     db.update(cx, "jobs", job["id"], queue_id=queue_id)
     return {"queue_id": queue_id}
 
@@ -353,6 +390,98 @@ def preset_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
     dest = dest_dir / f"{nombre}.png"
     shutil.copyfile(png, dest)
     return {"path": str(dest)}
+
+
+def template_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Foto de cómo queda un diseño con datos de muestra, sin guardarlo.
+
+    El editor lo usa para el botón de vista previa: compila el layout que
+    tiene en pantalla, lo renderiza con Chromium y devuelve el PNG. Nada de
+    esto toca la plantilla guardada.
+
+    payload: {layout, contrato, aspecto}. `template_id` (si el editor lo
+    manda) no se usa: la vista previa se arma entera a partir del layout que
+    llega, nunca de lo que ya esté guardado en `brand_templates`.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    contrato_dict = payload["contrato"]
+    slug = _marca_de(cx, job["account_id"])
+    m = marcas.cargar_por_id(cx, job["account_id"])
+    jobs.progresar(cx, job["id"], 20, "Armando el diseño")
+
+    fuentes = fuentes_tipograficas.catalogo(cx, job["account_id"])
+    html = layout.a_html(payload["layout"], contrato_dict, fuentes=fuentes)
+    campos = preview.campos_de_muestra(contrato_dict)
+    jobs.progresar(cx, job["id"], 50, "Tomando la foto")
+
+    # `plantilla` es una fila sintética: nunca se guarda, solo le presta a
+    # `plantillas.render.render` la forma que espera (evita reconstruir a mano
+    # el mismo armado de contexto + Jinja + Chromium que ya hace ese módulo).
+    plantilla = {"html": html, "contrato_json": json.dumps(contrato_dict, ensure_ascii=False)}
+    dest_dir = config.BASE_DIR / "data" / "previews" / slug
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    nombre = f"edit_{job['id']}"
+    destino = dest_dir / f"{nombre}.png"
+    plantillas_render.render(cx, m, plantilla, campos, out_path=destino)
+
+    jobs.progresar(cx, job["id"], 100, "Listo")
+    return {"url": f"/brands/{slug}/files/previews/{nombre}.png"}
+
+
+def _stickers_de(cx: sqlite3.Connection, account_id: int) -> list[str]:
+    """Nombres de las fotos de la marca, para ofrecérselos al LLM como 'archivo'.
+
+    Corre en el worker, sin `user`: no puede llamar al endpoint `GET /photos`
+    (exige `Depends(usuario_actual)`). Lista la misma carpeta que ese
+    endpoint por dentro — el permiso ya se comprobó al encolar el job.
+    """
+    slug = _marca_de(cx, account_id)
+    carpeta = BRANDS_DIR / slug / "fotos"
+    if not carpeta.is_dir():
+        return []
+    return sorted(p.name for p in carpeta.iterdir() if p.is_file())
+
+
+def template_disenar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Le pide un diseño al modelo y devuelve las capas, sin guardarlas.
+
+    Guardar es decisión de la persona: el chat propone, el editor dispone.
+
+    payload: {template_id, instruccion, aspecto}. Con `template_id` el
+    diseño existente de ESA marca (job["account_id"], nunca el que venga del
+    payload) se manda como base para que el modelo lo modifique en vez de
+    partir de cero.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    slug = _marca_de(cx, job["account_id"])
+    marca = db.get(cx, "accounts", job["account_id"])
+    jobs.progresar(cx, job["id"], 20, "Pensando el diseño")
+
+    base = None
+    contrato_dict = None
+    if payload.get("template_id"):
+        fila = plantillas.obtener(cx, payload["template_id"])
+        if fila is None or fila["account_id"] != job["account_id"]:
+            raise ValueError("ese diseño no existe en esta marca")
+        base = plantillas.layout_de(fila)
+        contrato_dict = plantillas.contrato_de(fila)
+    if not contrato_dict:
+        contrato_dict = {"aspecto": payload["aspecto"],
+                         "base": list(contrato_mod.CAMPOS_BASE), "extras": []}
+
+    try:
+        # El contrato manda el aspecto y `_prompt` indexa ASPECTOS con él: un
+        # aspecto inventado tiene que ser un error legible, no un KeyError
+        # crudo dentro del worker (el defecto que la vista previa ya tapó).
+        contrato_mod.validar(contrato_dict)
+        propuesta = disenador.disenar(
+            marca=marca, contrato=contrato_dict, instruccion=payload["instruccion"],
+            base=base, familias=fuentes_tipograficas.familias(cx, job["account_id"]),
+            stickers=_stickers_de(cx, job["account_id"]))
+    except contrato_mod.ContratoInvalido as exc:
+        raise ValueError(_redactar(slug, str(exc))) from exc
+    jobs.progresar(cx, job["id"], 100, "Listo")
+    return {"layout": propuesta, "mensaje": "Diseño propuesto"}
 
 
 def _redactar(slug: str, msg: str, tope: int = 300) -> str:
@@ -623,7 +752,11 @@ HANDLERS = {
     "sourcing.reddit_fetch": sourcing_reddit_fetch,
     "sourcing.ig_scrape": sourcing_ig_scrape,
     "preset.preview": preset_preview,
+    "template.preview": template_preview,
+    "template.disenar": template_disenar,
     "plan.proponer_temas": plan_proponer_temas,
     "plan.generar": plan_generar,
     "lote.enviar": lote_enviar,
+    "post.generar": generar_post,
+    "post.rerender": rerender_post,
 }

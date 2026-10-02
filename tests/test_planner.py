@@ -154,10 +154,23 @@ def test_pick_replacement_sin_candidatas_devuelve_none(tmp_path) -> None:
 # ---------- FIX A: plan_month solo agenda slots FUTUROS ----------
 
 def test_plan_month_salta_slots_pasados(tmp_path, monkeypatch) -> None:
-    """Estando a 10-jul, plan_month(2026,7) NO crea posts de los días 1..10 pasados."""
+    """Estando a 10-jul, plan_month(2026,7) NO crea posts de los días 1..10 pasados.
+
+    OJO: fija POSTING_SLOTS/POSTS_PER_DAY en vez de heredar los de config real
+    (.env). El test asume que "ahora" (15:00) deja al menos un slot MÁS TARDE
+    ese mismo día 10; si el .env real solo define slots hasta las 15:00 (como
+    ocurre hoy: POSTING_SLOTS=11:00,15:00), "ahora" cae exactamente en el último
+    slot del día y la aserción de "día 10: solo > 15:00" no tiene ningún slot que
+    la satisfaga — no porque el planner falle, sino porque no existe un slot
+    después de las 15:00 ese día. Congelar también los slots hace el test
+    determinista sin importar qué tenga el .env de turno.
+    """
     from datetime import datetime as _dt
 
+    import config
     from src import planner
+    monkeypatch.setattr(config, "POSTING_SLOTS", ["11:00", "15:00", "20:00"])
+    monkeypatch.setattr(config, "POSTS_PER_DAY", 3)
     db_path = tmp_path / "t.db"
     cx = db.connect(db_path)
     db.init_db(cx)

@@ -128,9 +128,13 @@ def generar_y_enviar(slug: str, *, dry_run: bool = False) -> int | None:
             cx, tipo="anuncio", caption=caption, imagen_url=imagen,
             tema_semilla=f"colab {slug}")
         cx.commit()
+        # cx debe seguir abierta aquí: enviar_a_telegram persiste
+        # tg_chat_id/tg_message_id en esta misma fila (si se cierra antes,
+        # esos IDs quedan NULL y notificar_resolucion no puede editar el
+        # mensaje al aprobar/rechazar).
+        approval.enviar_a_telegram(caption, imagen, qid, cx=cx)
     finally:
         cx.close()
-    approval.enviar_a_telegram(caption, imagen, qid)
     print(f"\n✅ Enviado a Telegram (queue_id={qid}). Apruébalo y se publica de inmediato.")
     return qid
 

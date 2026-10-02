@@ -22,10 +22,14 @@ from src import db
 # tumbar también el comentario -- 'meme' | 'anuncio' | 'slideshow' — sqlite
 # guarda el DDL verbatim en sqlite_master.sql, comentario incluido, y el
 # guard de _migrar_check_tipo_queue busca el literal 'slideshow' en ESE texto.
+# OJO (H1, 2026-08-30): este fixture se DERIVA de schema.sql por coincidencia
+# EXACTA de dos cadenas. Cada vez que se ensanche el CHECK(tipo) hay que
+# actualizar los dos .replace() de abajo, o el assert de módulo revienta en
+# tiempo de colección y la suite entera se cae. Ya pasó al agregar 'post'.
 _OLD_SCHEMA = (
     db.SCHEMA_PATH.read_text(encoding="utf-8")
-    .replace("-- 'meme'|'anuncio'|'slideshow'|'video'", "-- 'meme' | 'anuncio'")
-    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow','video')),",
+    .replace("-- 'meme'|'anuncio'|'slideshow'|'video'|'post'", "-- 'meme' | 'anuncio'")
+    .replace("CHECK (tipo   IN ('meme','anuncio','slideshow','video','post')),",
              "CHECK (tipo   IN ('meme','anuncio')),")
 )
 # El guard de _migrar_check_tipo_queue mira el DDL que sqlite guarda en
@@ -33,17 +37,19 @@ _OLD_SCHEMA = (
 # NO entran). Así que el assert se hace sobre ESE bloque, no sobre el archivo
 # entero: el encabezado del archivo sí menciona 'video'/'slideshow' en prosa.
 _DDL_QUEUE_VIEJO = _OLD_SCHEMA.split("CREATE TABLE IF NOT EXISTS content_queue", 1)[1].split(");", 1)[0]
-for _lit in ("'slideshow'", "'video'"):
+for _lit in ("'slideshow'", "'video'", "'post'"):
     assert _lit not in _DDL_QUEUE_VIEJO, (
         f"el reemplazo del schema viejo no tumbó {_lit} del DDL de "
         "content_queue (¿cambió el formato en schema.sql?)"
     )
 
 # Columnas que _MIGRATIONS["content_queue"] agrega vía ALTER, tal como
-# estaban ANTES de estas migraciones (todo excepto slideshow_json y
-# video_json, que son exactamente las columnas nuevas de cada tarea).
+# estaban ANTES de estas migraciones (todo excepto las columnas nuevas de
+# cada tarea: slideshow_json, video_json y las de plantillas H1).
+_COLS_NUEVAS = ("slideshow_json", "video_json", "template_id",
+                "template_version", "entity_id", "campos_json", "aspecto")
 _OLD_MIGRATED_COLS = {c: ddl for c, ddl in db._MIGRATIONS["content_queue"].items()
-                      if c not in ("slideshow_json", "video_json")}
+                      if c not in _COLS_NUEVAS}
 
 
 def _preparar_db_vieja(path) -> None:

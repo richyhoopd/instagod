@@ -99,7 +99,7 @@ def _generar_y_enviar(cx, fila: dict[str, Any]) -> int:
     qid = approval.encolar_pendiente(
         cx, tipo="meme", caption=cap_final, imagen_url=url,
         band_id=fila["band_id"], photo_id=fila["photo_id"], template=template)
-    approval.enviar_a_telegram(cap_final, url, qid, regenerable=True)
+    approval.enviar_a_telegram(cap_final, url, qid, regenerable=True, cx=cx)
     return qid
 
 

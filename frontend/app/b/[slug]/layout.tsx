@@ -9,6 +9,7 @@ import {
   Layers,
   LayoutDashboard,
   Library,
+  Palette,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const NAV = [
   { segment: "lotes", label: "Lotes", icon: Layers, soloManager: false, soloGdlscene: true },
   { segment: "create", label: "Crear", icon: Sparkles, soloManager: false, soloGdlscene: false },
   { segment: "library", label: "Biblioteca", icon: Library, soloManager: false, soloGdlscene: false },
+  { segment: "templates", label: "Diseños", icon: Palette, soloManager: true, soloGdlscene: false },
   { segment: "settings", label: "Ajustes", icon: Settings, soloManager: true, soloGdlscene: false },
 ] as const;
 

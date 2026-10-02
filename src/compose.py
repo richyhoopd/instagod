@@ -24,6 +24,10 @@ OUT_DIR = config.BASE_DIR / "out"
 WIDTH, HEIGHT = 1080, 1350
 DEFAULT_HANDLE = "@gdlscene"
 
+# H2: el post simple soporta 4:5 (feed) y 9:16 (stories). El default es el
+# tamaño histórico, así que ningún llamador viejo cambia de comportamiento.
+ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (WIDTH, HEIGHT), "9:16": (1080, 1920)}
+
 # Plantillas disponibles → archivo HTML. La key es la que se elige desde el bot.
 TEMPLATES = {
     "clasica": "meme.html",      # foto arriba, titular serif negro sobre blanco
@@ -138,7 +142,9 @@ def compose(
 
 
 def _screenshot_card(html: str, *, out_path: str | Path | None = None,
-                     row_id: Any = None, prefix: str = "meme") -> Path:
+                     row_id: Any = None, prefix: str = "meme",
+                     ancho: int = WIDTH, alto: int = HEIGHT,
+                     sandbox: bool = False) -> Path:
     """HTML (con un nodo .card) → PNG vía Chromium headless. Motor compartido."""
     if out_path is None:
         OUT_DIR.mkdir(exist_ok=True)
@@ -158,13 +164,30 @@ def _screenshot_card(html: str, *, out_path: str | Path | None = None,
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch()
-            page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=1)
+            contexto = browser.new_context(viewport={"width": ancho, "height": alto},
+                                            device_scale_factor=1)
+            if sandbox:
+                # Solo file:// y data:. Impide que una plantilla generada por un LLM
+                # saque datos del servidor. Apagado por default (config), ver
+                # decisión 11 del spec.
+                contexto.route(
+                    "**",
+                    lambda ruta: ruta.continue_()
+                    if ruta.request.url.startswith(("file:", "data:"))
+                    else ruta.abort(),
+                )
+            page = contexto.new_page()
             page.goto(Path(html_tmp).as_uri(), wait_until="networkidle")
-            # Espera a que el script de auto-ajuste del titular termine.
-            try:
-                page.wait_for_function("window.__captionFitted === true", timeout=5000)
-            except Exception:
-                pass  # si falla el fit, igual renderiza con el tamaño base
+            # El auto-fit es de las plantillas de gdlscene: un script que al
+            # terminar pone window.__captionFitted = true. Una plantilla nueva
+            # no tiene por qué traerlo, y esperarlo costaría 5s de timeout por
+            # render. Si el HTML no lo menciona, no hay nada que esperar.
+            if "__captionFitted" in html:
+                try:
+                    page.wait_for_function("window.__captionFitted === true",
+                                           timeout=5000)
+                except Exception:
+                    pass  # si falla el fit, igual renderiza con el tamaño base
             card = page.locator(".card")
             card.screenshot(path=str(out_path))
             browser.close()
@@ -185,6 +208,26 @@ def render_card(template_file: str, ctx: dict[str, Any], *,
     tpl = _env.get_template(template_file)
     html = tpl.render(fonts_dir=FONTS_DIR.as_uri(), **ctx)
     return _screenshot_card(html, out_path=out_path, row_id=row_id, prefix=prefix)
+
+
+def render_html(html: str, *, aspecto: str = "4:5", out_path=None,
+                row_id=None, prefix: str = "post",
+                sandbox: bool | None = None) -> Path:
+    """Renderiza HTML YA resuelto (viene de brand_templates, no de un archivo).
+
+    El HTML entra tal cual: quien lo llama ya corrió Jinja sobre él. Comparte
+    todo el pipeline con el camino viejo, incluido el wait de
+    window.__captionFitted, para que una plantilla migrada a la DB produzca el
+    mismo PNG que producía como archivo.
+    """
+    if aspecto not in ASPECTOS:
+        raise ValueError(f"aspecto desconocido: {aspecto!r}")
+    ancho, alto = ASPECTOS[aspecto]
+    if sandbox is None:
+        sandbox = config.TEMPLATE_RENDER_SANDBOX
+    return _screenshot_card(html, out_path=out_path, row_id=row_id,
+                            prefix=prefix, ancho=ancho, alto=alto,
+                            sandbox=sandbox)
 
 
 if __name__ == "__main__":

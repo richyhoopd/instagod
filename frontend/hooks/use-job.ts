@@ -15,6 +15,10 @@ export interface Job {
   queue_id: number | null;
   created_at: string;
   finished_at: string | null;
+  // Cadena JSON con lo que devolvió el handler (src/jobs/__init__.py:106).
+  // Solo GET /jobs/{jid} la trae; la lista GET /jobs la filtra. Se parsea
+  // con el helper resultadoDeJob de use-disenos.ts, nunca a pelo.
+  resultado_json: string | null;
 }
 
 const TERMINALES: readonly JobEstado[] = ["ok", "error", "cancelado"];
@@ -63,5 +67,19 @@ export function useCrearSlideshow(slug: string) {
   return useMutation({
     mutationFn: (datos: NuevoSlideshow) =>
       post<{ job_id: number }>(`/brands/${slug}/slideshows`, datos),
+  });
+}
+
+export interface NuevoPost {
+  template_id: number;
+  tema: string;
+  entidad_id?: number;
+  campos?: Record<string, unknown>;
+  imagen?: string;
+}
+
+export function useCrearPost(slug: string) {
+  return useMutation({
+    mutationFn: (datos: NuevoPost) => post<{ job_id: number }>(`/brands/${slug}/posts`, datos),
   });
 }

@@ -81,6 +81,118 @@ def test_send_plan_no_reenvia_lo_ya_pendiente(tmp_path, monkeypatch) -> None:
     assert enviados == []                       # nada que reenviar
 
 
+def test_send_plan_persiste_tg_ids_para_editar_luego(tmp_path, monkeypatch) -> None:
+    """Bug real: `_componer_y_enviar` llamaba `approval.enviar_a_telegram` SIN
+    `cx`, así que `tg_chat_id`/`tg_message_id` quedaban NULL en la fila del
+    plan. Sin esos IDs, `approval.notificar_resolucion` (usada por el
+    publisher y por /cola al aprobar/rechazar desde el portal) no puede
+    editar ni responder el mensaje original de Telegram: la tarjeta se queda
+    con los botones visibles y alguien la puede volver a aprobar.
+
+    Aquí NO se mockea `enviar_a_telegram` completo (como hace
+    `_mock_pipeline`): se deja correr la función real y solo se mockea
+    `requests.post`, igual que en test_aprobar_sin_sheet.py, para que el
+    guardado real en `content_queue` quede expuesto."""
+    import requests
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok-gdl")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+
+    db_path = tmp_path / "t.db"
+    cx = db.connect(db_path)
+    db.init_db(cx)
+    _, _, qid = _seed_borrador(cx)
+    cx.close()
+
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+
+    from src import send_plan
+    monkeypatch.setattr(send_plan, "_PAUSA_ENVIO_S", 0)
+    monkeypatch.setattr(send_plan.caption_mod, "generate_caption", lambda **k: "TITULAR")
+    monkeypatch.setattr(send_plan.compose_mod, "random_template", lambda: "clasica")
+    monkeypatch.setattr(send_plan.compose_mod, "compose", lambda **k: "/tmp/out.png")
+    monkeypatch.setattr(send_plan.host, "upload", lambda p, public_id=None: "http://img/x.png")
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 77, "chat": {"id": -555}}}
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp())
+
+    rc = send_plan.main("2026-07")
+    assert rc == 0
+
+    cx = orig(db_path)
+    fila = db.get(cx, "content_queue", qid)
+    cx.close()
+    assert fila["tg_chat_id"] == "-555"
+    assert fila["tg_message_id"] == "77"
+
+
+def test_notificar_resolucion_encuentra_mensaje_enviado_por_send_plan(
+        tmp_path, monkeypatch) -> None:
+    """Con los IDs persistidos (fix aplicado), `notificar_resolucion` sí
+    encuentra el mensaje original y lo edita — el camino que usan
+    `publisher.py` y `/cola` al aprobar/rechazar desde el portal."""
+    import requests
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok-gdl")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+
+    db_path = tmp_path / "t.db"
+    cx = db.connect(db_path)
+    db.init_db(cx)
+    _, _, qid = _seed_borrador(cx)
+    cx.close()
+
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+
+    from src import send_plan
+    monkeypatch.setattr(send_plan, "_PAUSA_ENVIO_S", 0)
+    monkeypatch.setattr(send_plan.caption_mod, "generate_caption", lambda **k: "TITULAR")
+    monkeypatch.setattr(send_plan.compose_mod, "random_template", lambda: "clasica")
+    monkeypatch.setattr(send_plan.compose_mod, "compose", lambda **k: "/tmp/out.png")
+    monkeypatch.setattr(send_plan.host, "upload", lambda p, public_id=None: "http://img/x.png")
+
+    class _RespEnvio:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 77, "chat": {"id": -555}}}
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _RespEnvio())
+    rc = send_plan.main("2026-07")
+    assert rc == 0
+
+    llamadas = []
+
+    class _RespResolucion:
+        def raise_for_status(self):
+            pass
+
+    def _post_resolucion(url, data=None, timeout=None):
+        llamadas.append((url, data))
+        return _RespResolucion()
+
+    monkeypatch.setattr(requests, "post", _post_resolucion)
+
+    from src import approval
+    cx = orig(db_path)
+    ok = approval.notificar_resolucion(cx, qid, "✅ Aprobado")
+    cx.close()
+
+    assert ok is True
+    assert len(llamadas) == 2   # editMessageReplyMarkup + sendMessage (reply)
+    assert llamadas[0][1]["chat_id"] == "-555"
+    assert llamadas[0][1]["message_id"] == "77"
+
+
 def test_borradores_del_mes_filtra_tipo_y_mes(tmp_path) -> None:
     from src import send_plan
     cx = db.connect(tmp_path / "t.db")

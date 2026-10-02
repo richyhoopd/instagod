@@ -1,11 +1,9 @@
 import { cn } from "@/lib/utils";
 
-const PASOS = ["Tema", "Formato", "Estilo", "Fuentes", "Slides"];
-
-export function WizardSteps({ paso }: { paso: number }) {
+export function WizardSteps({ paso, pasos }: { paso: number; pasos: string[] }) {
   return (
     <ol className="flex flex-wrap gap-2">
-      {PASOS.map((label, i) => {
+      {pasos.map((label, i) => {
         const n = i + 1;
         const activo = n === paso;
         const hecho = n < paso;

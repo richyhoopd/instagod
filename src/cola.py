@@ -11,7 +11,8 @@ import json
 from datetime import datetime
 from typing import Any
 
-from src import db
+from src import db, plantillas
+from src.plantillas import contrato
 
 # Estados derivados que ve el portal (no son la columna `status` cruda: se
 # calculan a partir de status + aprobacion + error, ver `estado_de`).
@@ -29,6 +30,12 @@ ESTADOS = (
 # revivir una fila atorada por el publisher (marcador "[publicando]" de un
 # crash a medias, o topada en MAX_INTENTOS) — sin esto quedaría sin salida.
 _EDITABLES = ("pendiente", "programado", "error")
+# Estados desde los que se puede editar los campos de un post (Task 7, H2).
+# Suma "borrador" a _EDITABLES SIN tocarla: un post recién generado por
+# post.generar queda en status='borrador' (origen != 'api' hasta que exista
+# ese flujo) y es exactamente ahí donde un no-técnico corrige a mano antes de
+# que algo lo apruebe. reprogramar/editar_caption/eliminar no cambian.
+_EDITABLES_CAMPOS = _EDITABLES + ("borrador",)
 # Estados desde los que se puede descartar (→ status='descartado').
 _ELIMINABLES = ("pendiente", "rechazado", "error")
 # status crudos que ocupan un slot de la malla (mismos que scheduler._taken_db).
@@ -195,6 +202,40 @@ def _resolver_image_url(cx, fila: dict[str, Any], valor: str | None,
     if not url_segura(valor):
         raise ValueError("url")
     return valor
+
+
+def editar_campos(cx, queue_id: int, campos: dict[str, Any]) -> None:
+    """Reemplaza los valores de un post y los valida contra su contrato.
+
+    Gemelo de editar_slides. NO re-renderiza: eso lo encola el router como
+    job post.rerender, igual que el camino de slideshows.
+    """
+    fila = db.get(cx, "content_queue", queue_id)
+    if fila is None:
+        raise ValueError("estado")
+    if estado_de(fila) not in _EDITABLES_CAMPOS:
+        raise ValueError("estado")
+    if fila["tipo"] != "post":
+        raise ValueError("tipo")
+
+    tpl = plantillas.obtener(cx, fila["template_id"])
+    if tpl is None:
+        raise ValueError("tipo")
+    ct = plantillas.contrato_de(tpl)
+
+    limpios = dict(campos)
+    if "imagen" in limpios and limpios["imagen"]:
+        actuales = json.loads(fila["campos_json"]) if fila["campos_json"] else {}
+        limpios["imagen"] = _resolver_image_url(cx, fila, limpios["imagen"],
+                                                actuales.get("imagen"))
+
+    errores = contrato.validar_campos(limpios, ct)
+    if errores:
+        raise ValueError("campos: " + "; ".join(errores))
+
+    db.update(cx, "content_queue", queue_id,
+              campos_json=json.dumps(limpios, ensure_ascii=False),
+              caption=limpios.get("titular"))
 
 
 def editar_slides(cx, queue_id: int, slides: list[dict[str, Any]]) -> None:
