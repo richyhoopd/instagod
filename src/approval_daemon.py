@@ -82,6 +82,16 @@ def _aprobar_sync(qid: int) -> dict:
         cx.close()
 
 
+def _es_killswitch(qid: int) -> bool:
+    """La pieza ya va programada (lote killswitch): sus botones solo la matan."""
+    cx = db.connect()
+    try:
+        fila = db.get(cx, "content_queue", qid) or {}
+        return fila.get("status") == "programado" and fila.get("aprobacion") == "aprobado"
+    finally:
+        cx.close()
+
+
 def _rechazar_sync(qid: int) -> None:
     cx = db.connect()
     try:
@@ -129,7 +139,8 @@ async def on_recomponer(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     teclado = InlineKeyboardMarkup(
         [[InlineKeyboardButton(b["text"], callback_data=b["callback_data"]) for b in fila]
-         for fila in approval.construir_botones(qid, regenerable=True)])
+         for fila in approval.construir_botones(qid, regenerable=True,
+                                                killswitch=_es_killswitch(qid))])
     await query.edit_message_media(
         media=InputMediaPhoto(media=url, caption=cap[:1024]), reply_markup=teclado)
 
@@ -156,8 +167,13 @@ async def on_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             texto = f"✅ Aprobado — se publica el {_pretty(slot.isoformat())}"
         await _resolver_msg(query, texto)
     else:
-        await asyncio.to_thread(_rechazar_sync, qid)
-        await _resolver_msg(query, "❌ Rechazado")
+        try:
+            await asyncio.to_thread(_rechazar_sync, qid)
+        except approval.PiezaPublicada:
+            await query.message.reply_text(
+                f"⚠️ queue {qid} ya se publicó — bórrala directo en Instagram.")
+            return
+        await _resolver_msg(query, "❌ Rechazado — no se publica")
 
 
 def marcas_con_bot(lista, creds_de=None):

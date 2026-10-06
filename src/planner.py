@@ -23,7 +23,7 @@ import argparse
 import calendar
 import sys
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Callable
 
 import pytz
 
@@ -96,7 +96,8 @@ def scores_engagement(cx, account_id: int = 1) -> dict[int, float]:
 
 
 def seleccionar(cx, max_posts: int, ahora: "datetime | None" = None,
-                criterio: str = "impacto") -> list[dict[str, Any]]:
+                criterio: str = "impacto",
+                cap: Callable[[dict], int] | None = None) -> list[dict[str, Any]]:
     """Elige (banda, foto) hasta `max_posts`, con topes. Función testeable.
 
     `criterio`:
@@ -138,7 +139,7 @@ def seleccionar(cx, max_posts: int, ahora: "datetime | None" = None,
     for f in fotos:
         bid = f["band_id"]
         meta.setdefault(bid, f)
-        cupo = _cap(f["prioridad"])
+        cupo = cap(f) if cap else _cap(f["prioridad"])
         bucket = por_banda.setdefault(bid, [])
         if len(bucket) < cupo:
             bucket.append(f)
@@ -430,7 +431,116 @@ def plan_month(year: int, month: int, *, replan: bool = False,
             cx.close()
 
 
+def top_performers(cx, factor: float = 1.0) -> set[int]:
+    """Bandas que performean muy bien EN NUESTRA CUENTA: ER > mediana·factor,
+    con al menos 2 posts medidos (mismo umbral que ig_insights.band_stats)."""
+    import statistics
+
+    from src import ig_insights
+    stats = [s for s in ig_insights.band_stats(cx)
+             if s["n_posts"] >= 2 and s["er"] is not None]
+    if not stats:
+        return set()
+    corte = statistics.median(s["er"] for s in stats) * factor
+    return {s["band_id"] for s in stats if s["er"] > corte}
+
+
+def _slots_rango(desde: date, dias: int) -> list[datetime]:
+    """Slots de la malla (POSTING_SLOTS/POSTS_PER_DAY) de `desde` por `dias` días."""
+    tz = pytz.timezone(config.TIMEZONE)
+    horas = sorted(time(int(h), int(m)) for h, m in
+                   (x.split(":") for x in (config.POSTING_SLOTS or ["19:00"])))
+    horas = horas[: max(1, config.POSTS_PER_DAY)]
+    return [tz.localize(datetime.combine(desde + timedelta(days=d), h))
+            for d in range(dias) for h in horas]
+
+
+def ordenar_lote(normales: list[dict], tops: dict[int, list[dict]],
+                 n_slots: int) -> list[dict]:
+    """Arma el orden de publicación del lote. PURO.
+
+    El lote se parte en dos mitades (≈ un mes cada una). Cada top performer
+    lleva a lo más UNA pieza por mitad (≤2 en el lote, nunca 2 en la misma
+    mitad) y sus piezas se reparten parejo dentro de la mitad en vez de
+    amontonarse al inicio. Las normales (1 por banda) rellenan en orden de
+    ranking.
+    """
+    mitades = [n_slots // 2 + n_slots % 2, n_slots // 2]
+    tops_por_mitad: list[list[dict]] = [[], []]
+    for fotos in tops.values():
+        for i, f in enumerate(fotos[:2]):
+            tops_por_mitad[i].append(f)
+    cola = list(normales)
+    out: list[dict] = []
+    for m, tam in enumerate(mitades):
+        t = tops_por_mitad[m][:tam]
+        resto = tam - len(t)
+        relleno, cola = cola[:resto], cola[resto:]
+        bloque: list[dict | None] = [None] * tam
+        if t:
+            paso = tam / len(t)
+            for i, f in enumerate(t):
+                bloque[int(i * paso + paso / 2)] = f
+        it = iter(relleno)
+        bloque = [b if b is not None else next(it, None) for b in bloque]
+        out.extend(b for b in bloque if b is not None)
+    return out
+
+
+def plan_lote(desde: date, dias: int = 61, *, criterio: str = "engagement",
+              top_factor: float = 1.0, cx=None) -> dict[str, Any]:
+    """Lote de `dias` días a la malla vigente: 1 pieza por banda; solo las top
+    performers (ver `top_performers`) llevan hasta 2, una por mes.
+
+    Inserta borradores tipo meme (fecha = slot) listos para
+    `send_plan --killswitch`. No toca lo que ya haya en la cola: limpiarla es
+    un paso aparte y explícito.
+    """
+    propia = cx is None
+    cx = cx or db.connect()
+    try:
+        db.init_db(cx)
+        ahora = datetime.now(pytz.timezone(config.TIMEZONE))
+        slots = [s for s in _slots_rango(desde, dias) if s > ahora]
+        tops = top_performers(cx, top_factor)
+        candidatas = seleccionar(cx, 10 ** 6, ahora=ahora, criterio=criterio,
+                                 cap=lambda f: 2 if f["band_id"] in tops else 1)
+        por_top: dict[int, list[dict]] = {}
+        normales: list[dict] = []
+        for f in candidatas:  # round-robin: la ronda 1 trae el ranking completo
+            if f["band_id"] in tops:
+                por_top.setdefault(f["band_id"], []).append(f)
+            else:
+                normales.append(f)
+        orden = ordenar_lote(normales, por_top, len(slots))
+        for f, slot in zip(orden, slots):
+            db.insert(cx, "content_queue", tipo="meme", band_id=f["band_id"],
+                      photo_id=f["photo_id"], tema_semilla=None,
+                      status=db.QUEUE_BORRADOR, scheduled_datetime=slot.isoformat())
+        res = {"posts": min(len(orden), len(slots)), "slots": len(slots),
+               "bandas": len({f["band_id"] for f in orden[:len(slots)]}),
+               "tops": sorted(tops),
+               "desde": slots[0].isoformat() if slots else None,
+               "hasta": slots[len(orden[:len(slots)]) - 1].isoformat() if orden and slots else None}
+        print(f"✅ Lote: {res['posts']} posts / {res['slots']} slots, "
+              f"{res['bandas']} bandas, {len(tops)} top performers, "
+              f"{res['desde']} → {res['hasta']}")
+        return res
+    finally:
+        if propia:
+            cx.close()
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "lote":
+        lp = argparse.ArgumentParser(description="Lote de N días (1 por banda; top ≤2)")
+        lp.add_argument("cmd")
+        lp.add_argument("--desde", required=True, help="YYYY-MM-DD")
+        lp.add_argument("--dias", type=int, default=61)
+        lp.add_argument("--top-factor", type=float, default=1.0)
+        la = lp.parse_args()
+        plan_lote(date.fromisoformat(la.desde), la.dias, top_factor=la.top_factor)
+        sys.exit(0)
     parser = argparse.ArgumentParser(description="Planificador mensual de contenido")
     parser.add_argument("--mes", help="YYYY-MM (default: próximo mes)")
     parser.add_argument("--replan", action="store_true", help="rehacer el borrador del mes")

@@ -226,3 +226,41 @@ def test_aprobar_pieza_inexistente_no_revienta_con_typeerror(tmp_path) -> None:
     cx = _cx(tmp_path)
     with pytest.raises(approval.PiezaDescartada):
         approval.aprobar(cx, 999999)
+
+
+def test_botones_killswitch_solo_matar() -> None:
+    from src import approval
+    filas = approval.construir_botones(7, regenerable=True, killswitch=True)
+    datos = [b["callback_data"] for f in filas for b in f]
+    assert "rechazar:7" in datos and "aprobar:7" not in datos
+    assert "regenerar:7" in datos
+
+
+def test_rechazar_no_toca_lo_ya_publicado(tmp_path) -> None:
+    import pytest
+
+    from src import approval, db
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    qid = db.insert(cx, "content_queue", tipo="meme", status=db.QUEUE_PUBLICADO,
+                    aprobacion="aprobado", ig_media_id="123")
+    with pytest.raises(approval.PiezaPublicada):
+        approval.rechazar(cx, qid)
+    assert db.get(cx, "content_queue", qid)["status"] == db.QUEUE_PUBLICADO
+    viva = db.insert(cx, "content_queue", tipo="meme", status="programado",
+                     aprobacion="aprobado", scheduled_datetime="2026-11-01T11:00:00-06:00")
+    approval.rechazar(cx, viva)
+    assert db.get(cx, "content_queue", viva)["status"] == db.QUEUE_DESCARTADO
+    cx.close()
+
+
+def test_aprobar_idempotente_no_mueve_fecha(tmp_path) -> None:
+    from src import approval, db
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    qid = db.insert(cx, "content_queue", tipo="meme", status="programado",
+                    aprobacion="aprobado", scheduled_datetime="2026-11-20T15:00:00-06:00")
+    slot = approval.aprobar(cx, qid)
+    assert slot.isoformat() == "2026-11-20T15:00:00-06:00"
+    assert db.get(cx, "content_queue", qid)["scheduled_datetime"] == "2026-11-20T15:00:00-06:00"
+    cx.close()

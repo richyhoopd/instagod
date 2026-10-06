@@ -35,6 +35,10 @@ def encolar_pendiente(cx, *, tipo: str, caption: str, imagen_url: str,
                      evento_ids=evento_ids)
 
 
+class PiezaPublicada(Exception):
+    """La pieza ya salió a Instagram: rechazarla ya no la detiene."""
+
+
 class PiezaDescartada(ValueError):
     """Se intentó aprobar una fila que ya salió del plan (status='descartado').
 
@@ -74,6 +78,13 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     if fila.get("status") == db.QUEUE_DESCARTADO:
         raise PiezaDescartada(
             f"queue {queue_id} está descartado: salió del plan, no se aprueba")
+    # Idempotente: en modo killswitch la pieza nace 'programado/aprobado' con la
+    # fecha del plan. Un ✅ (tarjeta vieja o doble tap) NO debe reasignarle slot:
+    # se respeta el que ya tiene.
+    if (fila.get("aprobacion") == "aprobado"
+            and fila.get("status") in ("programado", "en_sheet", "publicado")
+            and fila.get("scheduled_datetime")):
+        return datetime.fromisoformat(fila["scheduled_datetime"])
     from src import marcas as marcas_mod
     marca = marcas_mod.cargar_por_id(cx, fila.get("account_id") or 1)
     creds = _creds_de(marca.slug)
@@ -166,7 +177,14 @@ def _publicar_ahora() -> None:
 
 
 def rechazar(cx, queue_id: int, *, user_id: int | None = None) -> None:
-    """Rechaza: quien resuelve también queda registrado en `aprobado_por`."""
+    """Rechaza: quien resuelve también queda registrado en `aprobado_por`.
+
+    Es el killswitch: sobre una pieza 'programado' la saca del publisher. Una
+    pieza YA publicada no se toca (marcarla descartado mentiría: sigue en IG).
+    """
+    fila = db.get(cx, "content_queue", queue_id)
+    if fila and (fila.get("status") == db.QUEUE_PUBLICADO or fila.get("ig_media_id")):
+        raise PiezaPublicada(f"queue {queue_id} ya se publicó; bórrala en Instagram")
     db.update(cx, "content_queue", queue_id, aprobacion="rechazado", status="descartado",
               aprobado_por=user_id)
 
@@ -183,7 +201,8 @@ def _sheet_real(*, caption, imagen, scheduled, sheet_id=None,
 
 # --------- Telegram: helpers PUROS + envío (sin poller) ---------
 
-def construir_botones(queue_id: int, *, regenerable: bool = False) -> list[list[dict[str, str]]]:
+def construir_botones(queue_id: int, *, regenerable: bool = False,
+                      killswitch: bool = False) -> list[list[dict[str, str]]]:
     """Payload de teclado inline como dict puro. PURO/testeable.
 
     Devuelve el array `inline_keyboard` listo para reply_markup; el daemon lo
@@ -191,10 +210,14 @@ def construir_botones(queue_id: int, *, regenerable: bool = False) -> list[list[
     además 🔄/🎨 (regenerable=True); los carruseles/anuncios no (su imagen es
     determinista, no hay nada que regenerar).
     """
-    filas = [[
-        {"text": "✅ Aprobar", "callback_data": f"aprobar:{queue_id}"},
-        {"text": "❌ Rechazar", "callback_data": f"rechazar:{queue_id}"},
-    ]]
+    if killswitch:
+        # Ya va aprobada y programada: el único botón que decide es matarla.
+        filas = [[{"text": "❌ Matar (no publicar)", "callback_data": f"rechazar:{queue_id}"}]]
+    else:
+        filas = [[
+            {"text": "✅ Aprobar", "callback_data": f"aprobar:{queue_id}"},
+            {"text": "❌ Rechazar", "callback_data": f"rechazar:{queue_id}"},
+        ]]
     if regenerable:
         filas.append([
             {"text": "🔄 Regenerar", "callback_data": f"regenerar:{queue_id}"},
@@ -295,7 +318,7 @@ def _urls_de_imagen(imagen_url: str) -> list[str]:
 def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
                       *, regenerable: bool = False,
                       account_slug: str = "gdlscene", cx=None,
-                      es_video: bool = False) -> None:
+                      es_video: bool = False, killswitch: bool = False) -> None:
     """Manda la propuesta a Telegram con botones Aprobar/Rechazar (y 🔄/🎨 si
     es un meme individual regenerable).
 
@@ -326,7 +349,8 @@ def enviar_a_telegram(caption: str, imagen_url: str, queue_id: int,
         raise RuntimeError(
             f"Falta TELEGRAM_CHAT_ID__{account_slug.upper()} en el .env")
     base_url = f"https://api.telegram.org/bot{token}"
-    botones = {"inline_keyboard": construir_botones(queue_id, regenerable=regenerable)}
+    botones = {"inline_keyboard": construir_botones(queue_id, regenerable=regenerable,
+                                                      killswitch=killswitch)}
     urls = _urls_de_imagen(imagen_url)
 
     if es_video and urls:

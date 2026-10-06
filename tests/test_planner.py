@@ -297,3 +297,33 @@ def test_criterio_engagement_respeta_topes_y_round_robin(tmp_path) -> None:
         cuenta[f["band_id"]] += 1
     assert cuenta[p1] == 5 and cuenta[p2] == 2 and cuenta[p3] == 1
     cx.close()
+
+
+def test_ordenar_lote_top_max_uno_por_mitad_y_normales_una_vez() -> None:
+    from src.planner import ordenar_lote
+    normales = [{"band_id": 100 + i, "photo_id": i} for i in range(20)]
+    tops = {1: [{"band_id": 1, "photo_id": 901}, {"band_id": 1, "photo_id": 902},
+                {"band_id": 1, "photo_id": 903}],
+            2: [{"band_id": 2, "photo_id": 904}]}
+    orden = ordenar_lote(normales, tops, 12)
+    assert len(orden) == 12
+    mitad1, mitad2 = orden[:6], orden[6:]
+    for m in (mitad1, mitad2):
+        ids = [f["band_id"] for f in m]
+        assert len(ids) == len(set(ids))  # nadie repite dentro de una mitad
+    assert [f["band_id"] for f in orden].count(1) == 2  # top: ≤2 en el lote
+    assert [f["band_id"] for f in orden].count(2) == 1
+    normales_usadas = [f["band_id"] for f in orden if f["band_id"] >= 100]
+    assert len(normales_usadas) == len(set(normales_usadas))  # 1 por banda
+    assert orden[0]["band_id"] != 1 or orden[1]["band_id"] != 2  # tops repartidos
+
+
+def test_seleccionar_respeta_cap_custom(tmp_path) -> None:
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    a = _seed(cx, "A", 1, 1000, 4)
+    b = _seed(cx, "B", 1, 1000, 4)
+    sel = seleccionar(cx, max_posts=100, cap=lambda f: 2 if f["band_id"] == a else 1)
+    ids = [f["band_id"] for f in sel]
+    assert ids.count(a) == 2 and ids.count(b) == 1
+    cx.close()

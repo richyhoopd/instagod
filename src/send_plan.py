@@ -38,7 +38,7 @@ def borradores_del_mes(cx, mes: str) -> list[dict[str, Any]]:
     (aprobacion='pendiente') o resuelto. tipo='meme' evita tocar carruseles.
     """
     return db.rows(cx, """
-        SELECT q.id AS qid, q.tema_semilla, q.photo_id,
+        SELECT q.id AS qid, q.tema_semilla, q.photo_id, q.scheduled_datetime,
                b.id AS band_id, b.nombre, b.tipo, b.ig_handle,
                p.path AS foto_path
           FROM content_queue q
@@ -50,7 +50,7 @@ def borradores_del_mes(cx, mes: str) -> list[dict[str, Any]]:
     """, (db.QUEUE_BORRADOR, mes))
 
 
-def _componer_y_enviar(cx, fila: dict[str, Any]) -> int:
+def _componer_y_enviar(cx, fila: dict[str, Any], *, killswitch: bool = False) -> int:
     """Caption + meme + Cloudinary + marcar pendiente + Telegram. Devuelve queue_id.
 
     Reusa la misma composición del flujo de memes (caption.generate_caption +
@@ -68,6 +68,19 @@ def _componer_y_enviar(cx, fila: dict[str, Any]) -> int:
                               template=template, row_id=f"plan{fila['qid']}")
     url = host.upload(str(png), public_id=f"plan_{fila['qid']}")
     cap_final = cap + (f"\n\n@{fila['ig_handle']}" if fila.get("ig_handle") else "")
+    if killswitch:
+        # Telegram como killswitch: la pieza nace aprobada y programada en SU
+        # fecha del plan (no se llama a approval.aprobar, que reasigna slot).
+        # Si Ricardo no hace nada, se publica; ❌ la saca del publisher.
+        db.update(cx, "content_queue", fila["qid"],
+                  caption=cap_final, imagen_url=url, template=template,
+                  aprobacion="aprobado", status="programado", error=None, intentos=0)
+        if fila.get("photo_id"):
+            db.update(cx, "photos", fila["photo_id"], usada=1)
+        aviso = f"🟢 Programado {fila['scheduled_datetime'][:16].replace('T', ' ')}\n\n"
+        approval.enviar_a_telegram(aviso + cap_final, url, fila["qid"], regenerable=True,
+                                   cx=cx, killswitch=True)
+        return fila["qid"]
     db.update(cx, "content_queue", fila["qid"],
               caption=cap_final, imagen_url=url, template=template,
               aprobacion="pendiente")
@@ -75,7 +88,7 @@ def _componer_y_enviar(cx, fila: dict[str, Any]) -> int:
     return fila["qid"]
 
 
-def main(mes: str, dry_run: bool = False) -> int:
+def main(mes: str, dry_run: bool = False, killswitch: bool = False) -> int:
     cx = db.connect()
     try:
         db.init_db(cx)
@@ -93,7 +106,7 @@ def main(mes: str, dry_run: bool = False) -> int:
         ok, mal = 0, 0
         for i, f in enumerate(filas, 1):
             try:
-                qid = _componer_y_enviar(cx, f)
+                qid = _componer_y_enviar(cx, f, killswitch=killswitch)
                 ok += 1
                 print(f"  [{i}/{len(filas)}] ✅ {f['nombre']} → queue {qid} enviado")
             except Exception as exc:  # un meme fallido no tumba el lote
@@ -111,8 +124,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Envío async del plan mensual (compatible con daemon)")
     parser.add_argument("--mes", required=True, help="YYYY-MM")
     parser.add_argument("--dry-run", action="store_true", help="solo listar la selección")
+    parser.add_argument("--killswitch", action="store_true",
+                        help="todo nace aprobado y programado; Telegram solo sirve para matar")
     args = parser.parse_args()
     try:
-        sys.exit(main(args.mes, args.dry_run))
+        sys.exit(main(args.mes, args.dry_run, args.killswitch))
     except KeyboardInterrupt:
         sys.exit("\nEnvío interrumpido.")

@@ -203,3 +203,28 @@ def test_borradores_del_mes_filtra_tipo_y_mes(tmp_path) -> None:
     filas = send_plan.borradores_del_mes(cx, "2026-07")
     cx.close()
     assert [f["qid"] for f in filas] == [qid_meme]
+
+
+def test_send_plan_killswitch_nace_programado_con_su_fecha(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "t.db"
+    cx = db.connect(db_path)
+    db.init_db(cx)
+    _, pid, qid = _seed_borrador(cx)
+    cx.close()
+    orig = db.connect
+    monkeypatch.setattr(db, "connect", lambda *a, **k: orig(db_path))
+    send_plan, enviados = _mock_pipeline(monkeypatch)
+
+    assert send_plan.main("2026-07", killswitch=True) == 0
+
+    cap, _, q, kw = enviados[0]
+    assert q == qid and kw.get("killswitch") is True
+    assert cap.startswith("🟢 Programado 2026-07-15 19:00")
+    cx = orig(db_path)
+    fila = db.get(cx, "content_queue", qid)
+    foto = db.get(cx, "photos", pid)
+    cx.close()
+    assert fila["status"] == "programado" and fila["aprobacion"] == "aprobado"
+    assert fila["scheduled_datetime"] == "2026-07-15T19:00:00"   # fecha del plan intacta
+    assert fila["caption"] == "TITULAR\n\n@kabala"              # sin el aviso de Telegram
+    assert foto["usada"] == 1
