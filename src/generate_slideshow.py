@@ -109,9 +109,16 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     orden_fuentes = list(fuentes)
     if imagenes_preferidas:
         providers = {**providers, "entidad": image_sources.ListaProvider(imagenes_preferidas)}
-        orden_fuentes = ["entidad"] + [f for f in orden_fuentes if f != "entidad"]
+        # Solo fotos del item: una foto de otro lugar en la ficha de una
+        # propiedad engaña. Si faltan, se repiten las del item.
+        orden_fuentes = ["entidad"]
     imagenes = image_sources.resolver(
         hints, orden_fuentes, cx=cx, slug=m.slug, providers=providers)
+    if imagenes_preferidas:
+        propias = [i for i in imagenes if i is not None]
+        if propias:
+            imagenes = [i if i is not None else propias[k % len(propias)]
+                        for k, i in enumerate(imagenes)]
     sin_imagen = sum(1 for i in imagenes if i is None)
     if sin_imagen:
         print(f"[slideshow] {sin_imagen}/{len(imagenes)} slides sin imagen "

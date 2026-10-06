@@ -315,3 +315,23 @@ def test_916_manda_zip(monkeypatch, tmp_path) -> None:
     qid = gs.generar(cx, "café", aspect="9:16")
     assert len(docs) == 1 and docs[0].name == f"gdlscene_q{qid}_9x16.zip"
     assert len(zipfile.ZipFile(docs[0]).namelist()) == 3
+
+
+def test_con_fotos_de_entidad_solo_usa_esas_y_las_repite(monkeypatch, tmp_path) -> None:
+    """Ficha de una propiedad: nunca fotos de otro lugar; si faltan, se repiten."""
+    from src import marcas_seed
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    marcas_seed.sembrar(cx)
+    vistas = {}
+
+    def _resolver_spy(hints, fuentes, **kw):
+        vistas["f"] = fuentes
+        return [_Img("/e/1.jpg", "entidad"), _Img("/e/2.jpg", "entidad"), None]
+
+    monkeypatch.setattr(gs.image_sources, "resolver", _resolver_spy)
+    qid = gs.generar(cx, "casa", marca="melaquecapital",
+                     imagenes_preferidas=["https://x/1.jpg", "https://x/2.jpg"])
+    contrato = json_mod.loads(db_mod.get(cx, "content_queue", qid)["slideshow_json"])
+    assert vistas["f"] == ["entidad"]
+    assert [s["image_urls"] for s in contrato["slides"]] == [["/e/1.jpg"], ["/e/2.jpg"], ["/e/1.jpg"]]
+    assert {s["source"] for s in contrato["slides"]} == {"entidad"}

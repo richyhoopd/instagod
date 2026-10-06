@@ -316,8 +316,8 @@ class ListaProvider:
     """Imágenes fijas de una entidad del feed (media del item), en orden.
 
     Ignora el hint: el resolver toma la primera no usada, así que cada slide
-    recibe la siguiente foto del item. Si se acaban, la cascada sigue con las
-    demás fuentes de la marca.
+    recibe la siguiente foto del item. Si se acaban, generate_slideshow repite
+    las del item (no cae a otras fuentes de la marca).
     """
 
     nombre = "entidad"
