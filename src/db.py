@@ -139,6 +139,12 @@ TABLES: dict[str, set[str]] = {
         "contrato_json", "layout_json", "preview_path", "llm_meta",
     },
     "brand_fonts": {"account_id", "familia", "archivo"},
+    "brand_feeds": {"account_id", "url", "intervalo_min", "cursor",
+                    "ultimo_intento", "ultimo_ok", "ultimo_error",
+                    "fallas_seguidas", "activa"},
+    "brand_recipes": {"account_id", "slug", "item_types", "formato",
+                      "n_slides", "estilo", "formato_guion", "prompt", "peso",
+                      "cooldown_dias", "activa"},
 }
 
 # Estados de content_queue (espejo del CHECK en schema.sql).

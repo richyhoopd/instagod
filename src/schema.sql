@@ -562,3 +562,49 @@ CREATE TABLE IF NOT EXISTS brand_fonts (
     creado_en  TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (account_id, familia)
 );
+
+-- Feeds de contenido por marca (spec 2026-10-06 feeds/recetas, contrato v1).
+-- instagod hace pull de `url?since=<cursor>`; el token opcional vive en
+-- brand_secrets (clave FEED_TOKEN), nunca aquí.
+CREATE TABLE IF NOT EXISTS brand_feeds (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id       INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    url              TEXT    NOT NULL,
+    intervalo_min    INTEGER NOT NULL DEFAULT 360,
+    cursor           TEXT,
+    ultimo_intento   TEXT,
+    ultimo_ok        TEXT,
+    ultimo_error     TEXT,
+    fallas_seguidas  INTEGER NOT NULL DEFAULT 0,
+    activa           INTEGER NOT NULL DEFAULT 1,
+    creado_en        TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, url),
+    CHECK (activa IN (0,1)),
+    CHECK (intervalo_min >= 15)
+);
+CREATE INDEX IF NOT EXISTS idx_feeds_cuenta ON brand_feeds(account_id);
+
+-- Recetas: cómo convertir una entidad (property, lot, post…) en una pieza.
+-- `prompt` es Jinja con `{{ item }}` (la entidad con sus atributos).
+CREATE TABLE IF NOT EXISTS brand_recipes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    slug           TEXT    NOT NULL,
+    item_types     TEXT    NOT NULL DEFAULT '[]',
+    formato        TEXT    NOT NULL DEFAULT 'carrusel 4:5',
+    n_slides       INTEGER NOT NULL DEFAULT 6,
+    estilo         TEXT,
+    formato_guion  TEXT,
+    prompt         TEXT    NOT NULL,
+    peso           INTEGER NOT NULL DEFAULT 1,
+    cooldown_dias  INTEGER NOT NULL DEFAULT 30,
+    activa         INTEGER NOT NULL DEFAULT 1,
+    creado_en      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, slug),
+    CHECK (formato IN ('post','carrusel 4:5','carrusel 9:16')),
+    CHECK (activa IN (0,1)),
+    CHECK (peso >= 0),
+    CHECK (cooldown_dias >= 0),
+    CHECK (n_slides BETWEEN 1 AND 10)
+);
+CREATE INDEX IF NOT EXISTS idx_recipes_cuenta ON brand_recipes(account_id, activa);
