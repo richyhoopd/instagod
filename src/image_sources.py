@@ -312,6 +312,28 @@ class CarpetaProvider:
         return [ImagenCandidata(str(p), "carpeta") for p in con_match[:n]]
 
 
+class ListaProvider:
+    """Imágenes fijas de una entidad del feed (media del item), en orden.
+
+    Ignora el hint: el resolver toma la primera no usada, así que cada slide
+    recibe la siguiente foto del item. Si se acaban, la cascada sigue con las
+    demás fuentes de la marca.
+    """
+
+    nombre = "entidad"
+
+    def __init__(self, urls: list[str]):
+        self.urls = [u for u in urls if u]
+
+    def buscar(self, hint: str, n: int = 3) -> list[ImagenCandidata]:
+        out = []
+        for u in self.urls:
+            ruta = _descargar_cache(u)
+            if ruta:
+                out.append(ImagenCandidata(str(ruta), "entidad"))
+        return out
+
+
 def providers_default(cx=None, slug: str | None = None,
                        creds: dict | None = None) -> dict:
     """Providers disponibles. banco/covers requieren DB; carpeta requiere slug

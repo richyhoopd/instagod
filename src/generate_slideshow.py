@@ -17,6 +17,7 @@ import time
 import config
 from src import (
     approval,
+    cifras,
     compose,
     db,
     host,
@@ -28,12 +29,23 @@ from src import (
 from src import fuentes as fuentes_mod
 
 
+class CifrasFueraDeFacts(RuntimeError):
+    """El guion citó cifras que no están en `facts`, aun tras regenerar una vez.
+    La pieza se descarta (no se encola)."""
+
+
 def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = None,
             estilo: str | None = None, fuentes: tuple[str, ...] | None = None,
             n_slides: int = 6, aspect: str = "4:5", contexto: str | None = None,
             dry_run: bool = False, progreso=None, creado_por: int | None = None,
             topic_id: int | None = None,
-            notificar_telegram: bool = True) -> int | None:
+            notificar_telegram: bool = True,
+            hechos: dict | None = None,
+            no_verificados: list[str] | None = None,
+            entity_id: int | None = None,
+            receta: str | None = None,
+            imagenes_preferidas: list[str] | None = None,
+            extra_brief: dict | None = None) -> int | None:
     """Genera el set con el PERFIL de la marca; queue_id o None en dry-run.
 
     `progreso`: callback opcional `(pct: int, msg: str) -> None` (p. ej.
@@ -42,6 +54,13 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     (Fase 2); si se da, marca la fila de `content_queue` con `origen='api'`.
     `topic_id`: fila de `topic_suggestions` que originó el tema (Fase 3); si
     se da, se marca `usado_en_queue_id` al encolar (tolerante si ya no existe).
+
+    Recetas (spec 2026-10-06): con `hechos` (los `facts` del item) toda cifra
+    del guion debe estar ahí; si no, se regenera UNA vez con la lista de
+    cifras prohibidas y si vuelve a fallar se levanta CifrasFueraDeFacts.
+    `no_verificados` mencionados → ⚠️ en la tarjeta de Telegram.
+    `imagenes_preferidas`: URLs de la media del item, antes que la cascada.
+    Aspecto 9:16 → además manda un ZIP de PNGs al Telegram de la marca.
     """
     from src import marcas as marcas_mod
 
@@ -67,12 +86,32 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     guion = slideshow_script.generar_guion(tema, formato=formato,
                                            n_slides=n_slides,
                                            contexto=contexto_full)
+    advertencias: list[str] = []
+    if hechos is not None:
+        fuera = cifras.cifras_fuera(cifras.textos_de_guion(guion), hechos)
+        if fuera:
+            _reportar(25, "regenerando: cifras fuera de facts")
+            guion = slideshow_script.generar_guion(
+                tema, formato=formato, n_slides=n_slides, contexto=contexto_full,
+                feedback=("Estas cifras NO están en los datos verificados y no "
+                          f"pueden aparecer: {', '.join(fuera)}. Cita solo cifras "
+                          "de FACTS, tal cual; si no hay cifra, no pongas número."))
+            fuera = cifras.cifras_fuera(cifras.textos_de_guion(guion), hechos)
+            if fuera:
+                raise CifrasFueraDeFacts(
+                    f"cifras fuera de facts tras regenerar, se descarta: {fuera}")
+        advertencias = cifras.menciones_no_verificadas(
+            cifras.textos_de_guion(guion), hechos, no_verificados)
     hints = [sl["image_hint"] for sl in guion["slides"]]
     _reportar(40, "imágenes")
+    providers = image_sources.providers_default(
+        cx, slug=m.slug, creds=config.account_creds(m.slug))
+    orden_fuentes = list(fuentes)
+    if imagenes_preferidas:
+        providers = {**providers, "entidad": image_sources.ListaProvider(imagenes_preferidas)}
+        orden_fuentes = ["entidad"] + [f for f in orden_fuentes if f != "entidad"]
     imagenes = image_sources.resolver(
-        hints, list(fuentes), cx=cx, slug=m.slug,
-        providers=image_sources.providers_default(
-            cx, slug=m.slug, creds=config.account_creds(m.slug)))
+        hints, orden_fuentes, cx=cx, slug=m.slug, providers=providers)
     sin_imagen = sum(1 for i in imagenes if i is None)
     if sin_imagen:
         print(f"[slideshow] {sin_imagen}/{len(imagenes)} slides sin imagen "
@@ -81,6 +120,9 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
              "fuentes": list(fuentes), "n_slides": n_slides,
              "contexto": contexto, "aspect": aspect, "marca": m.slug,
              "notificar_telegram": notificar_telegram}
+    if receta or entity_id is not None:
+        brief.update({"receta": receta, "entity_id": entity_id,
+                      "advertencias": advertencias, **(extra_brief or {})})
     show = slideshow_compile.compilar(guion, estilo=estilo, imagenes=imagenes,
                                       aspect_ratio=aspect, brief=brief,
                                       formato=formato, account_slug=m.slug,
@@ -117,6 +159,11 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
         imagen_url=json.dumps(urls), template=estilo,
         tema_semilla=f"slideshow {formato}: {tema}", account_id=m.id)
     campos_extra = {"creado_por": creado_por, "origen": "api"} if creado_por is not None else {}
+    if entity_id is not None:
+        campos_extra["entity_id"] = entity_id
+    if receta:
+        # Marca de receta para el cooldown del planeador (src/recetas.py).
+        campos_extra["formato_patron"] = f"receta:{receta}"
     db.update(cx, "content_queue", qid,
               slideshow_json=slideshow_model.a_json(show), **campos_extra)
     if topic_id is not None:
@@ -125,14 +172,41 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
         except ValueError:
             pass
     if notificar_telegram:
-        approval.enviar_a_telegram(show.caption, json.dumps(urls), qid,
+        caption_tg = show.caption
+        if advertencias:
+            caption_tg = ("⚠️ Menciona datos SIN VERIFICAR: "
+                          f"{', '.join(advertencias)}\n\n{show.caption}")
+        approval.enviar_a_telegram(caption_tg, json.dumps(urls), qid,
                                    account_slug=m.slug, cx=cx)
+        if aspect == "9:16":
+            zip_916(pngs, qid, m.slug)
         print(f"[slideshow] q{qid} ({m.slug}) enviado a Telegram ({len(urls)} slides)")
     else:
         # Piezas de un plan (spec 2026-08-28): la curación vive en el portal.
         print(f"[slideshow] q{qid} ({m.slug}) encolado sin Telegram ({len(urls)} slides)")
     _reportar(100, "listo")
     return qid
+
+
+def zip_916(pngs, qid: int, slug: str) -> str | None:
+    """Empaqueta los PNG 9:16 (TikTok, temporal) y los manda al Telegram de la
+    marca como documento. Devuelve la ruta del ZIP; nunca levanta."""
+    import zipfile
+    from pathlib import Path
+
+    from src import avisos_marca
+    try:
+        destino = config.BASE_DIR / "data" / "exports" / f"{slug}_q{qid}_9x16.zip"
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
+            for i, p in enumerate(pngs, 1):
+                z.write(p, arcname=f"{slug}_q{qid}_{i:02d}.png")
+        avisos_marca.enviar_documento(
+            slug, destino, caption=f"q{qid} · PNG 9:16 para TikTok (subir a mano)")
+        return str(destino)
+    except Exception as e:  # noqa: BLE001 — el ZIP es un extra, no tumba la pieza
+        print(f"[slideshow] ZIP 9:16 de q{qid} falló: {e}")
+        return None
 
 
 def main() -> None:

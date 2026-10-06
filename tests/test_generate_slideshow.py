@@ -251,3 +251,67 @@ def test_notificar_telegram_false_no_envia(monkeypatch, tmp_path) -> None:
     assert fila["aprobacion"] == "pendiente" and fila["origen"] == "api"
     brief = json.loads(fila["slideshow_json"])["brief"]
     assert brief["notificar_telegram"] is False
+
+
+# ------------------------------------------- recetas: cifras contra facts
+
+def _guion_con(texto):
+    g = _guion()
+    g["slides"][1]["text"] = texto
+    return g
+
+
+def test_cifra_fuera_de_facts_regenera_una_vez_y_pasa(monkeypatch, tmp_path) -> None:
+    cx, _, enviados = _preparar(monkeypatch, tmp_path)
+    llamadas = []
+
+    def _guion_spy(tema, **kw):
+        llamadas.append(kw.get("feedback"))
+        return _guion_con("A 5 minutos del mar" if len(llamadas) == 1 else "Mide 300 m2")
+
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", _guion_spy)
+    qid = gs.generar(cx, "lote", hechos={"m2": 300}, entity_id=9, receta="ficha-carrusel")
+    assert len(llamadas) == 2 and llamadas[0] is None and "5" in llamadas[1]
+    fila = db.get(cx, "content_queue", qid)
+    assert fila["entity_id"] == 9 and fila["formato_patron"] == "receta:ficha-carrusel"
+    assert not enviados[0][0].startswith("⚠️")
+
+
+def test_cifra_fuera_dos_veces_descarta(monkeypatch, tmp_path) -> None:
+    import pytest
+    cx, subidas, enviados = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: _guion_con("Desde 2 millones"))
+    with pytest.raises(gs.CifrasFueraDeFacts):
+        gs.generar(cx, "lote", hechos={"precio": "$1,450,000 MXN"})
+    assert subidas == [] and enviados == []
+    assert db.rows(cx, "SELECT * FROM content_queue") == []
+
+
+def test_mencion_no_verificada_pone_alerta_en_tarjeta(monkeypatch, tmp_path) -> None:
+    cx, _, enviados = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: _guion_con("Régimen ejidal, 300 m2"))
+    gs.generar(cx, "lote", hechos={"m2": 300, "regimen": "ejidal"},
+               no_verificados=["regimen"])
+    assert enviados[0][0].startswith("⚠️ Menciona datos SIN VERIFICAR: regimen")
+
+
+def test_sin_hechos_no_valida_cifras(monkeypatch, tmp_path) -> None:
+    cx, _, enviados = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: _guion_con("Top 10 discos de 1999"))
+    assert gs.generar(cx, "discos") is not None
+
+
+def test_916_manda_zip(monkeypatch, tmp_path) -> None:
+    import zipfile
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.config, "BASE_DIR", tmp_path)
+    docs = []
+    from src import avisos_marca
+    monkeypatch.setattr(avisos_marca, "enviar_documento",
+                        lambda slug, ruta, caption="": docs.append(ruta) or True)
+    qid = gs.generar(cx, "café", aspect="9:16")
+    assert len(docs) == 1 and docs[0].name == f"gdlscene_q{qid}_9x16.zip"
+    assert len(zipfile.ZipFile(docs[0]).namelist()) == 3
