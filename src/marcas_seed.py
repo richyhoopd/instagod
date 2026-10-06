@@ -309,6 +309,8 @@ def sembrar(cx) -> None:
     _sembrar_fuentes_shitbook(cx, por_slug["shitbook"])
     _fusionar_estilos(cx, por_slug["pensionmas"], ESTILOS_PENSIONMAS)
     _fusionar_estilos(cx, por_slug["melaquecapital"], ESTILOS_MELAQUECAPITAL)
+    from src import recetas
+    recetas.sembrar(cx, por_slug["melaquecapital"], recetas.SEMILLA_MELAQUECAPITAL)
     print("Seeds de marca aplicados "
           "(gdlscene + pensionmas + melaquecapital + shitbook).")
 
