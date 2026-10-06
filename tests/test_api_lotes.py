@@ -74,15 +74,43 @@ def test_segundo_lote_del_mismo_mes_pide_replan(api_cliente):
     assert descartadas > 0
 
 
-def test_otra_marca_no_tiene_lotes(api_cliente):
+def test_otra_marca_sin_recetas_no_planea(api_cliente):
+    """Ya no hay 422 fijo por no ser gdlscene: sin recetas → 422 sin_recetas;
+    la lista de lotes de memes queda vacía y la curación de memes sigue vedada."""
     client, cx, H = api_cliente
     aid = db.insert(cx, "accounts", slug="pensionmas", ig_handle="pm",
                     nombre="Pensión+", ciudad="GDL")
     uid = H.usuario("pm@x.mx", marcas=[(aid, "editor")])
     H.login(uid)
     r = client.post("/brands/pensionmas/lotes", json={"mes": "2026-10"})
-    assert r.status_code == 422 and r.json()["error"] == "no_aplica"
-    assert client.get("/brands/pensionmas/lotes").status_code == 422
+    assert r.status_code == 422 and r.json()["error"] == "sin_recetas"
+    assert client.get("/brands/pensionmas/lotes").json() == []
+    assert client.patch("/brands/pensionmas/lotes/piezas/1",
+                        json={"tema_semilla": "x"}).status_code == 422
+
+
+def test_marca_con_recetas_planea_sin_tocar_memes(api_cliente):
+    from src import entidades, recetas
+    client, cx, H = api_cliente
+    aid = db.insert(cx, "accounts", slug="melaquecapital", ig_handle="mc",
+                    nombre="MWRS", ciudad="Melaque")
+    recetas.sembrar(cx, aid, recetas.SEMILLA_MELAQUECAPITAL)
+    for i in range(3):
+        entidades.crear(cx, aid, f"Lote {i}", "lot", slug=f"lote-{i}")
+    uid = H.usuario("mc@x.mx", marcas=[(aid, "editor")])
+    H.login(uid)
+    r = client.post("/brands/melaquecapital/lotes",
+                    json={"mes": _mes_futuro(), "piezas": 4})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["estrategia"] == "recetas" and len(body["plan"]) == 4
+    assert all(p["receta"] for p in body["plan"]) and body["jobs"] == []
+    assert db.rows(cx, "SELECT COUNT(*) n FROM content_queue")[0]["n"] == 0
+    r = client.post("/brands/melaquecapital/lotes",
+                    json={"mes": _mes_futuro(), "piezas": 2, "generar": True})
+    assert len(r.json()["jobs"]) == 2
+    tipos = {j["tipo"] for j in db.rows(cx, "SELECT tipo FROM jobs")}
+    assert tipos == {"receta.generar"}
 
 
 def test_sin_permiso_sobre_la_marca(api_cliente):

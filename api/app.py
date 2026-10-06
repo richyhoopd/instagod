@@ -15,6 +15,7 @@ from api.routers import (
     auth,
     brands,
     cola,
+    feeds_api,
     fuentes_api,
     lotes,
     perfil,
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(fuentes_api.router)
     app.include_router(planes.router)
     app.include_router(lotes.router)
+    app.include_router(feeds_api.router)
     return app
 
 

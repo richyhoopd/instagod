@@ -34,6 +34,10 @@ class NuevoLote(BaseModel):
     mes: str = Field(min_length=7, max_length=7)
     criterio: Literal["impacto", "engagement"] = "impacto"
     replan: bool = False
+    # Solo marcas de recetas (no gdlscene): cuántas piezas en el mes y si se
+    # encolan ya los `receta.generar` (False = solo devuelve el plan).
+    piezas: int = Field(12, ge=1, le=124)
+    generar: bool = False
 
 
 class EditarPieza(BaseModel):
@@ -102,6 +106,9 @@ def _reemplazo(nueva: dict | None) -> dict | None:
 def listar_lotes(slug: str, user: dict = Depends(usuario_actual),
                  cx=Depends(get_cx)) -> list[dict]:
     """Meses que tienen borrador por curar, del más reciente al más viejo."""
+    marca, _ = marca_para(slug, cx, user)
+    if marca["slug"] != "gdlscene":
+        return []  # marcas de recetas: sus piezas viven en la cola normal
     fila = _gdlscene(slug, cx, user)
     meses = db.rows(cx, """
         SELECT substr(scheduled_datetime,1,7) AS mes, COUNT(*) AS piezas
@@ -150,6 +157,9 @@ def crear_lote(slug: str, datos: NuevoLote, user: dict = Depends(usuario_actual)
     `replan` NO borra: marca el borrador previo como descartado, que es lo que
     hace que `seleccionar` traiga fotos distintas (ver `planner.plan_month`).
     """
+    marca, _ = marca_para(slug, cx, user)
+    if marca["slug"] != "gdlscene":
+        return _lote_recetas(cx, marca, _mes_valido(datos.mes), datos, user)
     fila = _gdlscene(slug, cx, user)
     mes = _mes_valido(datos.mes)
     if _job_vivo(cx, fila["id"], mes):
@@ -162,6 +172,20 @@ def crear_lote(slug: str, datos: NuevoLote, user: dict = Depends(usuario_actual)
                         "piezas. Marca 'rehacer' para tirarlo y planear de nuevo.",
                         "replan")
     return {"mes": mes, "resumen": resumen, "piezas": _piezas(cx, mes)}
+
+
+def _lote_recetas(cx, marca: dict, mes: str, datos: NuevoLote, user: dict) -> dict:
+    """Marcas con catálogo (feed + recetas): receta por peso, entidad fuera de cooldown."""
+    from src import marcas, recetas
+    if not recetas.listar(cx, marca["id"]):
+        raise ApiError(422, "sin_recetas",
+                       "La marca no tiene recetas activas (corre el seed de marcas)")
+    slots = recetas.slots_mes(marcas.slots_de(marcas.cargar(cx, marca["slug"])),
+                              int(mes[:4]), int(mes[5:]), datos.piezas)
+    plan = recetas.planear(cx, marca["id"], slots)
+    jobs_ids = (recetas.encolar_plan(cx, marca["id"], plan, creado_por=user.get("id"))
+                if datos.generar else [])
+    return {"mes": mes, "estrategia": "recetas", "plan": plan, "jobs": jobs_ids}
 
 
 # ------------------------------------------------------------------- curación
