@@ -78,3 +78,12 @@ def test_round_trip_json() -> None:
 def test_source_carpeta_es_valido() -> None:
     """El banco propio por marca (image_sources.CarpetaProvider) es un source legal."""
     assert "carpeta" in sm.SOURCES
+
+
+def test_source_entidad_es_valido() -> None:
+    """Fotos de la entidad del feed (generate_slideshow, provider "entidad") pasan el contrato."""
+    assert "entidad" in sm.SOURCES
+    s = sm.Slideshow(title="t", slides=[sm.Slide(image_urls=["https://x/a.jpg"],
+                                                  text_items=[sm.TextItem(text="hola")],
+                                                  source="entidad")])
+    assert not [e for e in sm.validar(s) if "source" in e]
