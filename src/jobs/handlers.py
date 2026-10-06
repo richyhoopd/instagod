@@ -741,6 +741,36 @@ def rerender_video(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
     return {"queue_id": queue_id, "url": url}
 
 
+# ------------------------------------------------------------- feeds y recetas
+
+def feeds_sync(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {feed_id}. Las fallas del feed NO truenan el job: quedan en
+    brand_feeds (fallas_seguidas/ultimo_error) y avisan a la 3a."""
+    from src import feeds
+    payload = json.loads(job["payload_json"] or "{}")
+    feed = db.get(cx, "brand_feeds", int(payload["feed_id"]))
+    if feed is None or feed["account_id"] != job["account_id"]:
+        raise ValueError("el feed no existe o no es de esta marca")
+    jobs.progresar(cx, job["id"], 10, "descargando")
+    res = feeds.sincronizar(cx, feed["id"])
+    jobs.progresar(cx, job["id"], 100, "listo" if res["ok"] else "falló")
+    return res
+
+
+def receta_generar(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {receta, entidad_id, scheduled_datetime?}."""
+    from src import recetas
+    payload = json.loads(job["payload_json"] or "{}")
+    qid = recetas.generar_desde_entidad(
+        cx, job["account_id"], payload["receta"], int(payload["entidad_id"]),
+        progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg),
+        creado_por=job.get("creado_por"),
+        scheduled_datetime=payload.get("scheduled_datetime"))
+    if qid is not None:
+        db.update(cx, "jobs", job["id"], queue_id=qid)
+    return {"queue_id": qid}
+
+
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
@@ -759,4 +789,6 @@ HANDLERS = {
     "lote.enviar": lote_enviar,
     "post.generar": generar_post,
     "post.rerender": rerender_post,
+    "feeds.sync": feeds_sync,
+    "receta.generar": receta_generar,
 }

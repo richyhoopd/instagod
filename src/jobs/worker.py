@@ -145,6 +145,11 @@ def main(once: bool = False) -> None:
                 encolar_fuentes_vencidas(cx)
             except Exception as e:  # noqa: BLE001 — un fallo de scheduling no debe tumbar el loop
                 print(f"[worker] encolar_fuentes_vencidas falló: {e}", file=sys.stderr)
+            try:
+                from src import feeds
+                feeds.encolar_vencidos(cx)
+            except Exception as e:  # noqa: BLE001 — igual: el scheduling no tumba el loop
+                print(f"[worker] feeds.encolar_vencidos falló: {e}", file=sys.stderr)
             job = jobs.tomar(cx, worker_id, max_global=max_global)
             if job is None:
                 if once:
