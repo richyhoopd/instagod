@@ -1,4 +1,4 @@
-import type { Span } from "./escena";
+import { MAX_SPANS, type Span } from "./escena";
 
 // Los offsets de `Span` (desde/hasta) son PUNTOS DE CÓDIGO, igual que el slicing
 // de str en Python (src/plantillas/escena.py). NO son unidades UTF-16: "😀" mide
@@ -56,15 +56,32 @@ export function trozos(texto: string, spans: Span[] = []): Trozo[] {
 // entre el prefijo y el sufijo comunes (en code points, para no partir pares
 // sustitutos). Regla D11: lo insertado hereda color solo si cae estrictamente
 // dentro de un span.
-export function ajustarSpans(antes: string, despues: string, spans: Span[]): Span[] {
+//
+// `cursor` (code points, en `despues`, tras la edición) desambigua letras
+// repetidas: lo editado termina en el cursor, así que el sufijo común se fija
+// ahí. Si no es consistente con los textos, se ignora.
+export function ajustarSpans(antes: string, despues: string, spans: Span[], cursor?: number): Span[] {
   if (antes === despues) return spans;
   const a = Array.from(antes);
   const d = Array.from(despues);
   const max = Math.min(a.length, d.length);
+  let s = -1;
+  if (cursor !== undefined && Number.isInteger(cursor) && cursor >= 0 && cursor <= d.length) {
+    const fijo = d.length - cursor;
+    if (fijo <= max && fijo <= a.length) {
+      let ok = true;
+      for (let i = 0; i < fijo; i++) if (a[a.length - 1 - i] !== d[d.length - 1 - i]) ok = false;
+      if (ok) s = fijo;
+    }
+  }
   let p = 0;
-  while (p < max && a[p] === d[p]) p++;
-  let s = 0;
-  while (s < max - p && a[a.length - 1 - s] === d[d.length - 1 - s]) s++;
+  if (s >= 0) {
+    while (p < max - s && a[p] === d[p]) p++;
+  } else {
+    while (p < max && a[p] === d[p]) p++;
+    s = 0;
+    while (s < max - p && a[a.length - 1 - s] === d[d.length - 1 - s]) s++;
+  }
   const finA = a.length - s;
   const finD = d.length - s;
   const delta = finD - finA;
@@ -79,7 +96,19 @@ export function ajustarSpans(antes: string, despues: string, spans: Span[]): Spa
     .filter((sp) => sp.hasta > sp.desde);
 }
 
-export function pintarSpan(spans: Span[], desde: number, hasta: number, color: string | null): Span[] {
+// `largo` (code points del texto) recorta el rango. Si el resultado pasaría de
+// MAX_SPANS se rechaza el pintado y se devuelve `spans` tal cual.
+export function pintarSpan(
+  spans: Span[],
+  desde: number,
+  hasta: number,
+  color: string | null,
+  largo?: number,
+): Span[] {
+  if (largo !== undefined) {
+    desde = Math.max(desde, 0);
+    hasta = Math.min(hasta, largo);
+  }
   if (hasta <= desde) return spans;
   const out: Span[] = [];
   for (const s of spans) {
@@ -98,5 +127,5 @@ export function pintarSpan(spans: Span[], desde: number, hasta: number, color: s
     if (u && u.hasta === s.desde && u.color === s.color) u.hasta = s.hasta;
     else unidos.push({ ...s });
   }
-  return unidos;
+  return unidos.length > MAX_SPANS && unidos.length > spans.length ? spans : unidos;
 }

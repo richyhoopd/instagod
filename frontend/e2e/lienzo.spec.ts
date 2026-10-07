@@ -87,3 +87,17 @@ test("redimensionar una capa desde la esquina", async ({ page }) => {
   expect(t.h).toBeLessThan(410);
   expect((await estado(page)).pasado).toBe(1);
 });
+
+test("doble clic edita el texto y Escape lo guarda en un paso", async ({ page }) => {
+  await page.locator('#marco .capa[data-id="titulo"]').dblclick();
+  const ta = page.locator("[data-editor-texto]");
+  await expect(ta).toBeFocused();
+  await ta.fill("Hola Guadalajara");
+  await ta.press("Escape");
+
+  await expect(ta).toHaveCount(0);
+  await expect.poll(async () => (await capa(page, "titulo")).texto).toBe("Hola Guadalajara");
+  const e = await estado(page);
+  expect(e.editando).toBeNull();
+  expect(e.pasado).toBe(1);
+});

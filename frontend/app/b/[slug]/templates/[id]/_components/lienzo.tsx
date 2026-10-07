@@ -10,6 +10,7 @@ import { normalizarAngulo, ocultasEfectivas, type Escena, type Op } from "@/lib/
 import { alternar, encuadre, raicesSeleccionables, zoomEnPunto } from "@/lib/vista";
 import { useEditor } from "@/stores/editor";
 import { Escenario, fondoCss } from "./capa-vista";
+import { EditorTexto } from "./editor-texto";
 
 type Props = { slug: string; colorMarca: string; ajustarAlCargar?: boolean };
 type Gesto = { t?: number[]; w?: number; h?: number; rot?: number };
@@ -117,6 +118,7 @@ export function Lienzo({ slug, colorMarca, ajustarAlCargar = true }: Props) {
 
   if (!escena) return null;
   const { w: W, h: H } = escena.lienzo;
+  const capaEditada = editandoTexto ? escena.capas.find((c) => c.id === editandoTexto) : undefined;
 
   return (
     <div className="relative h-full w-full">
@@ -146,6 +148,9 @@ export function Lienzo({ slug, colorMarca, ajustarAlCargar = true }: Props) {
           }}
         >
           <Escenario escena={escena} slug={slug} colorMarca={colorMarca} editandoTexto={editandoTexto} />
+          {capaEditada?.tipo === "text" && (
+            <EditorTexto key={capaEditada.id} capa={capaEditada} tokens={escena.tokens} colorMarca={colorMarca} zoom={zoom} />
+          )}
         </div>
 
         <Moveable

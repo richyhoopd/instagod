@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_SPANS } from "../escena";
 import { ajustarSpans, codePointAUtf16, pintarSpan, trozos, utf16ACodePoint } from "../spans";
 
 const S = (desde: number, hasta: number, color = "#f00") => ({ desde, hasta, color });
@@ -41,6 +42,15 @@ describe("ajustarSpans", () => {
   it("sin cambio devuelve lo mismo", () => {
     const spans = [S(0, 4)];
     expect(ajustarSpans("Hola", "Hola", spans)).toBe(spans);
+  });
+  it("con cursor desambigua la letra repetida en el borde izquierdo", () => {
+    // "aa" + "a" tecleada al inicio (cursor 1): el span "a" (0-1) se recorre.
+    expect(ajustarSpans("aa", "aaa", [S(0, 1)])).toEqual([S(0, 1)]);
+    expect(ajustarSpans("aa", "aaa", [S(0, 1)], 1)).toEqual([S(1, 2)]);
+  });
+  it("un cursor inconsistente se ignora", () => {
+    expect(ajustarSpans("Hola mundo", "Hola muXndo", [S(5, 10)], 0)).toEqual([S(5, 11)]);
+    expect(ajustarSpans("Hola mundo", "Hola muXndo", [S(5, 10)], 99)).toEqual([S(5, 11)]);
   });
 });
 
@@ -156,5 +166,19 @@ describe("spans en code points", () => {
   });
   it("pintarSpan opera en code points sin importar el texto", () => {
     expect(pintarSpan([S(0, 6)], 1, 2, null)).toEqual([S(0, 1), S(2, 6)]);
+  });
+});
+
+describe("pintarSpan límites", () => {
+  it("no pasa de MAX_SPANS: rechaza el pintado y deja lo que había", () => {
+    const spans = Array.from({ length: MAX_SPANS }, (_, i) => S(i * 2, i * 2 + 1));
+    // Pintar un hueco entre dos tramos de otro color crearía el 51.
+    expect(pintarSpan(spans, 1, 2, "token:otro", 200)).toBe(spans);
+    // Pintar sobre uno existente no crece.
+    expect(pintarSpan(spans, 0, 1, "token:otro", 200)).toHaveLength(MAX_SPANS);
+  });
+  it("recorta al largo del texto", () => {
+    expect(pintarSpan([], 2, 99, "token:a", 5)).toEqual([{ desde: 2, hasta: 5, color: "token:a" }]);
+    expect(pintarSpan([], 7, 9, "token:a", 5)).toEqual([]);
   });
 });

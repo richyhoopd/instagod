@@ -85,11 +85,18 @@ export const useEditor = create<EstadoEditor>()((set, get) => {
   // Un paso de deshacer = un juego de parches de immer. Toda acción que cambia
   // la escena pasa por aquí.
   function registrar(receta: Receta, etiqueta: string) {
-    const { escena, pasado, revision, seleccion } = get();
+    const { escena, pasado, revision, seleccion, editandoTexto } = get();
     if (!escena) return;
     const [nueva, adelante, atras] = produceWithPatches(escena, receta);
     if (adelante.length === 0) return;
+    // La capa en edición ya no existe o cambió de padre (se borró, se agrupó):
+    // el editor de texto se desmonta sin confirmar, así que se cierra aquí.
+    const sigue =
+      editandoTexto !== null &&
+      nueva.capas.some((c) => c.id === editandoTexto && c.tipo === "text") &&
+      padreDe(nueva, editandoTexto) === padreDe(escena, editandoTexto);
     set({
+      editandoTexto: sigue ? editandoTexto : null,
       escena: nueva,
       pasado: [...pasado, { etiqueta, adelante, atras }].slice(-LIMITE_HISTORIA),
       futuro: [],

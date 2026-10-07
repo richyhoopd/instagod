@@ -148,4 +148,23 @@ describe("store del editor", () => {
     ed().deshacer();
     expect(ed().editandoTexto).toBeNull();
   });
+
+  it("borrar la capa en edición cierra la edición de texto", () => {
+    ed().editarTexto("titulo");
+    ed().aplicar([{ op: "del", capa: "titulo" }], "Borrar");
+    expect(ed().editandoTexto).toBeNull();
+  });
+
+  it("agrupar la capa en edición cierra la edición de texto", () => {
+    ed().seleccionar(["titulo", "marca"]);
+    ed().editarTexto("titulo");
+    ed().agrupar();
+    expect(ed().editandoTexto).toBeNull();
+  });
+
+  it("editar otra capa no cierra la edición de texto", () => {
+    ed().editarTexto("titulo");
+    ed().aplicar([{ op: "set", capa: "titulo", ruta: "x", valor: 5 }], "Mover");
+    expect(ed().editandoTexto).toBe("titulo");
+  });
 });
