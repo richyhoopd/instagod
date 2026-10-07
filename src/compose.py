@@ -10,6 +10,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pytz
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -81,7 +82,9 @@ def _to_src(value: str | None) -> str:
     if not value:
         return ""
     if value.startswith(("http://", "https://", "data:", "file://")):
-        return value
+        # La URL acaba dentro de url('...') o style="...": se codifica lo que
+        # podría cerrar la comilla o el paréntesis. Lo ya codificado (%) no se toca.
+        return quote(value, safe=":/?#[]@!$&*+,;=%~.-_")
     return config._resolve(value).resolve().as_uri()
 
 
