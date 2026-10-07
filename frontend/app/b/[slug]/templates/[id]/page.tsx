@@ -35,16 +35,17 @@ export default function DisenoPage() {
   const sembrado = useRef<number | null>(null);
   const diseno = disenoQuery.data;
   useEffect(() => {
-    if (!diseno?.layout || !diseno.editable || sembrado.current === diseno.id) return;
+    if (!diseno?.layout || !diseno.editable || diseno.id !== disenoId || sembrado.current === diseno.id) return;
     sembrado.current = diseno.id;
     useEditor.getState().cargar(diseno.layout);
-  }, [diseno]);
+  }, [diseno, disenoId]);
 
   // Solo en un diseño editable con escena cargada; uno de solo lectura nunca
   // siembra el store, así que tampoco guarda ni acepta atajos que lo muten.
   const activo = !!diseno?.editable && diseno.layout !== null && diseno.estado === "borrador" && listo;
-  const { guardando, error, guardarAhora } = useAutoguardado({
+  const { guardando, error, guardarAhora, restaurar } = useAutoguardado({
     activo,
+    clave: disenoId,
     guardar: (escena, mensaje) =>
       guardarMut.mutateAsync(mensaje ? { layout: escena, mensaje } : { layout: escena }),
   });
@@ -52,22 +53,24 @@ export default function DisenoPage() {
 
   // Al salir del editor el store queda vacío para el siguiente diseño. Va
   // después del autoguardado a propósito: los cleanups corren en orden y su
-  // flush debe leer el store antes de que se vacíe. En StrictMode el efecto
-  // corre dos veces; `sembrado` en null deja resembrar.
+  // flush debe leer el store antes de que se vacíe. Depende del id: si cambia
+  // sin remontar, la escena A no puede quedar en el store del diseño B. En
+  // StrictMode el efecto corre dos veces; `sembrado` en null deja resembrar.
   useEffect(
     () => () => {
       sembrado.current = null;
       useEditor.getState().vaciar();
     },
-    [],
+    [disenoId],
   );
   const [activando, setActivando] = useState(false);
 
   async function activar() {
     setActivando(true);
     try {
-      if (useEditor.getState().sucio) await guardarAhora();
-      if (useEditor.getState().sucio) {
+      // El resultado del guardado, no `sucio`: la persona puede seguir
+      // editando mientras se guarda y eso no es un fallo.
+      if (!(await guardarAhora())) {
         toast.error("No se pudo guardar antes de activar.");
         return;
       }
@@ -173,6 +176,7 @@ export default function DisenoPage() {
               id={disenoId}
               versionActual={diseno.version_actual}
               ocupado={guardando}
+              proteger={restaurar}
               onRestaurado={(d) => {
                 if (d.layout) useEditor.getState().cargar(d.layout);
               }}

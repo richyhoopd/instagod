@@ -44,6 +44,21 @@ describe("useAtajos", () => {
     expect(capa("titulo").y).toBe(206);
   });
 
+  it("⌘D mantenido: el repeat no duplica pero sí se bloquea en el navegador", () => {
+    st().seleccionar(["titulo"]);
+    const n = st().escena!.capas.length;
+    tecla("d", { metaKey: true });
+    expect(st().escena!.capas.length).toBe(n + 1);
+    const noBloqueado = tecla("d", { metaKey: true, repeat: true });
+    expect(noBloqueado).toBe(false);
+    expect(st().escena!.capas.length).toBe(n + 1);
+  });
+
+  it("⌘D repetido sin selección no se bloquea", () => {
+    st().seleccionar([]);
+    expect(tecla("d", { metaKey: true, repeat: true })).toBe(true);
+  });
+
   it("Escape quita la selección", () => {
     st().seleccionar(["titulo"]);
     tecla("Escape");

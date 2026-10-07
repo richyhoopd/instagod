@@ -172,7 +172,7 @@ describe("useAutoguardado", () => {
     editar(110);
     await avanzar(2000);
     expect(guardar).toHaveBeenCalledTimes(1);
-    let encolado!: Promise<void>;
+    let encolado!: Promise<boolean>;
     act(() => {
       encolado = result.current.guardarAhora("Hito");
     });
@@ -232,5 +232,113 @@ describe("useAutoguardado", () => {
     primero.resolver();
     await avanzar(0);
     expect(st()).toBe(antes);
+  });
+
+  it("guardarAhora resuelve true si guardó o no había nada y false si falló", async () => {
+    const guardar = vi.fn<Guardar>().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("500"));
+    const { result } = montar(guardar);
+    let r!: boolean;
+    await act(async () => {
+      r = await result.current.guardarAhora();
+    });
+    expect(r).toBe(true);
+    editar(90);
+    await act(async () => {
+      r = await result.current.guardarAhora();
+    });
+    expect(guardar).toHaveBeenCalledTimes(1);
+    expect(r).toBe(true);
+    editar(91);
+    await act(async () => {
+      r = await result.current.guardarAhora();
+    });
+    expect(r).toBe(false);
+  });
+
+  describe("restaurar", () => {
+    it("vuelca lo pendiente antes de la acción y no guarda mientras corre", async () => {
+      const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+      const { result } = montar(guardar);
+      editar(90);
+      const orden: string[] = [];
+      guardar.mockImplementation(async () => void orden.push("patch"));
+      const revert = diferido();
+      let fin!: Promise<string>;
+      act(() => {
+        fin = result.current.restaurar(async () => {
+          orden.push("revert-inicio");
+          await revert.promesa;
+          orden.push("revert-fin");
+          return "ok";
+        });
+      });
+      await avanzar(0);
+      expect(orden).toEqual(["patch", "revert-inicio"]);
+      // Edita durante el revert: ni el timer ni nada debe guardar.
+      editar(120);
+      await avanzar(10_000);
+      expect(guardar).toHaveBeenCalledTimes(1);
+      revert.resolver();
+      await avanzar(0);
+      await expect(fin).resolves.toBe("ok");
+      // La escena restaurada reemplaza la UI; el PATCH viejo no la ensucia.
+      act(() => st().cargar(structuredClone(base)));
+      await avanzar(10_000);
+      expect(guardar).toHaveBeenCalledTimes(1);
+      expect(st().sucio).toBe(false);
+    });
+
+    it("espera un guardado en vuelo antes de la acción", async () => {
+      const enVuelo = diferido();
+      const guardar = vi.fn<Guardar>().mockReturnValueOnce(enVuelo.promesa).mockResolvedValue(undefined);
+      const { result } = montar(guardar);
+      editar(110);
+      await avanzar(2000);
+      expect(guardar).toHaveBeenCalledTimes(1);
+      const accion = vi.fn(async () => 1);
+      act(() => void result.current.restaurar(accion));
+      await avanzar(0);
+      expect(accion).not.toHaveBeenCalled();
+      enVuelo.resolver();
+      await avanzar(0);
+      expect(accion).toHaveBeenCalledTimes(1);
+    });
+
+    it("si la acción falla, reanuda el autoguardado de lo editado entre tanto", async () => {
+      const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+      const { result } = montar(guardar);
+      const revert = diferido();
+      let fin!: Promise<unknown>;
+      act(() => {
+        fin = result.current.restaurar(() => revert.promesa);
+      });
+      fin.catch(() => {});
+      await avanzar(0);
+      editar(130);
+      await avanzar(5000);
+      expect(guardar).not.toHaveBeenCalled();
+      revert.rechazar(new Error("500"));
+      await avanzar(0);
+      await expect(fin).rejects.toThrow("500");
+      await avanzar(2000);
+      expect(guardar).toHaveBeenCalledTimes(1);
+      expect(xGuardada(guardar, 0)).toBe(130);
+    });
+  });
+
+  it("al cambiar la clave hace flush de la escena vieja con el guardar viejo", async () => {
+    const guardarA = vi.fn<Guardar>().mockResolvedValue(undefined);
+    const guardarB = vi.fn<Guardar>().mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      (p: { clave: number; guardar: Guardar }) => useAutoguardado({ activo: true, guardar: p.guardar, clave: p.clave }),
+      { initialProps: { clave: 1, guardar: guardarA } },
+    );
+    editar(95);
+    rerender({ clave: 2, guardar: guardarB });
+    st().vaciar();
+    await avanzar(0);
+    expect(guardarA).toHaveBeenCalledTimes(1);
+    expect(xGuardada(guardarA, 0)).toBe(95);
+    expect(guardarB).not.toHaveBeenCalled();
   });
 });

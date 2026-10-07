@@ -62,6 +62,14 @@ function huella(s: EstadoEditor): [unknown, unknown, string] {
   return [s.escena, s.portapapeles, s.seleccion.join("\0")];
 }
 
+// ¿La primera pulsación habría hecho algo? Sin eso no se bloquea el nativo.
+function habriaActuado(tecla: string, s: EstadoEditor): boolean {
+  if (tecla === "z") return s.pasado.length > 0 || s.futuro.length > 0;
+  if (tecla === "y") return s.futuro.length > 0;
+  if (tecla === "v") return s.portapapeles.length > 0;
+  return s.seleccion.length > 0;
+}
+
 export function useAtajos(activo = true) {
   useEffect(() => {
     if (!activo) return;
@@ -71,7 +79,13 @@ export function useAtajos(activo = true) {
       if (ignorar(e, s)) return;
       const accion = accionDe(e);
       if (!accion) return;
-      if (e.repeat && (e.metaKey || e.ctrlKey) && SIN_REPETIR.has(e.key.toLowerCase())) return;
+      if (e.repeat && (e.metaKey || e.ctrlKey) && SIN_REPETIR.has(e.key.toLowerCase())) {
+        // La acción no se repite, pero el navegador tampoco debe recibir el
+        // atajo (⌘D abre "agregar marcador"). Solo si la primera pulsación
+        // habría hecho algo: sin selección ⌘D no actúa y no se bloquea.
+        if (habriaActuado(e.key.toLowerCase(), s)) e.preventDefault();
+        return;
+      }
       const antes = huella(s);
       accion(s);
       // Solo se bloquea el comportamiento nativo si la acción hizo algo: sin

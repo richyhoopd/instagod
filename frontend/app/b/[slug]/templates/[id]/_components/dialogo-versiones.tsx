@@ -77,12 +77,16 @@ export function DialogoVersiones({
   versionActual,
   ocupado,
   onRestaurado,
+  proteger,
 }: {
   slug: string;
   id: number;
   versionActual: number;
   ocupado: boolean;
   onRestaurado: (diseno: Diseno) => void;
+  // Envuelve el POST revert: la página vuelca el autoguardado pendiente antes
+  // y lo pausa mientras corre.
+  proteger?: (accion: () => Promise<Diseno>) => Promise<Diseno>;
 }) {
   const [abierto, setAbierto] = useState(false);
   const versiones = useVersiones(slug, id);
@@ -108,16 +112,17 @@ export function DialogoVersiones({
             versiones={versiones.data}
             versionActual={versionActual}
             ocupado={ocupado || revertir.isPending}
-            onRestaurar={(v) =>
-              revertir.mutate(v, {
-                onSuccess: (d) => {
+            onRestaurar={(v) => {
+              const revert = () => revertir.mutateAsync(v);
+              (proteger ? proteger(revert) : revert()).then(
+                (d) => {
                   onRestaurado(d);
                   setAbierto(false);
                   toast.success(`Versión ${v} restaurada`);
                 },
-                onError: () => toast.error("No se pudo restaurar la versión."),
-              })
-            }
+                () => toast.error("No se pudo restaurar la versión."),
+              );
+            }}
           />
         )}
       </DialogContent>
