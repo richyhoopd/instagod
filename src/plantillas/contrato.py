@@ -21,7 +21,7 @@ CAMPOS_BASE: tuple[str, ...] = ("titular", "imagen", "handle", "logo", "color_ma
 # `fotos_dir` es la carpeta de fotos y stickers de la marca: los diseños
 # visuales apuntan ahí por nombre de archivo, nunca por ruta absoluta, para
 # que el mismo diseño renderice igual en la laptop y en la VM.
-CAMPOS_SISTEMA: tuple[str, ...] = ("fonts_dir", "fotos_dir")
+CAMPOS_SISTEMA: tuple[str, ...] = ("fonts_dir", "fotos_dir", "assets_dir")
 TIPOS: tuple[str, ...] = ("texto", "texto_largo", "lista", "numero",
                           "imagen", "booleano")
 ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (1080, 1350), "9:16": (1080, 1920)}

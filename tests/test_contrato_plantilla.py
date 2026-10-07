@@ -99,3 +99,11 @@ def test_html_con_card_como_prefijo_se_rechaza() -> None:
     ct = _contrato_minimo()
     with pytest.raises(c.ContratoInvalido, match="marco"):
         c.validar_html('<div class="card-top">{{ titular }}</div>', ct)
+
+
+def test_assets_dir_es_variable_de_sistema() -> None:
+    """La biblioteca de la marca se pide como {{ assets_dir }}/<archivo>."""
+    c.validar_html(
+        "<html><body><div class='card' "
+        "style=\"background:url('{{ assets_dir }}/a.png')\"></div></body></html>",
+        _contrato_minimo())

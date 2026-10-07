@@ -30,7 +30,8 @@ def _fuentes_de_marca(cx, account_id: int) -> list[dict[str, Any]]:
 
 
 def contexto(marca, campos: dict[str, Any], *,
-             fonts_dir: str | None = None, fotos_dir: str | None = None) -> dict[str, Any]:
+             fonts_dir: str | None = None, fotos_dir: str | None = None,
+             assets_dir: str | None = None) -> dict[str, Any]:
     """Campos del contrato + el núcleo base inyectado desde la marca."""
     ctx = dict(campos)
     # OJO: lo vacío va como "" y nunca como None. _to_src(None) devuelve "",
@@ -43,6 +44,8 @@ def contexto(marca, campos: dict[str, Any], *,
     ctx["color_marca"] = marca.color_marca
     ctx["fonts_dir"] = fonts_dir or compose.FONTS_DIR.as_uri()
     ctx["fotos_dir"] = fotos_dir or (BRANDS_DIR / marca.slug / "fotos").as_uri()
+    # Biblioteca de la marca (plan 3): la escena v2 pide sus imágenes como assets/<archivo>.
+    ctx["assets_dir"] = assets_dir or (BRANDS_DIR / marca.slug / "assets").as_uri()
     return ctx
 
 
