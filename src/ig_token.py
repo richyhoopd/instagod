@@ -99,9 +99,18 @@ def aplicar_token(token: str, *, slug: str = "gdlscene", env_path=None,
     var = _var_token(slug)
     env_path = env_path or (config.BASE_DIR / ".env")
     set_key(str(env_path), var, token)
-    _run([_gh_bin(), "secret", "set", var, "--repo", _REPO_GH,
+    # DB primero: en la VM el cron corre en un contenedor efímero sin gh, y
+    # brand_secrets es lo único que sobrevive (y lo que el publisher lee).
+    en_db = _persistir_en_db(slug, token)
+    try:
+        gh = _gh_bin()
+    except RuntimeError:
+        if en_db:
+            print(f"[{slug}] sin gh: token persistido solo en brand_secrets.")
+            return
+        raise
+    _run([gh, "secret", "set", var, "--repo", _REPO_GH,
           "--body", token], check=True, capture_output=True, text=True, timeout=60)
-    _persistir_en_db(slug, token)
 
 
 def refrescar_y_aplicar(slug: str = "gdlscene") -> bool:
