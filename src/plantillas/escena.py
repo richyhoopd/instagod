@@ -96,9 +96,9 @@ def _booleano(d: dict[str, Any], clave: str, donde: str) -> None:
 
 def _color(valor: Any, colores: dict[str, str], donde: str) -> None:
     if isinstance(valor, str):
-        if _HEX.match(valor) or _RGBA.match(valor):
+        if _HEX.fullmatch(valor) or _RGBA.fullmatch(valor):
             return
-        m = _TOKEN.match(valor)
+        m = _TOKEN.fullmatch(valor)
         if m:
             if m.group(1) == "marca" or m.group(1) in colores:
                 return
@@ -108,19 +108,19 @@ def _color(valor: Any, colores: dict[str, str], donde: str) -> None:
 
 
 def _css_libre(valor: Any, regex: re.Pattern, donde: str, clave: str) -> None:
-    if (not isinstance(valor, str) or not regex.match(valor)
+    if (not isinstance(valor, str) or not regex.fullmatch(valor)
             or "url(" in valor.lower()):
         raise EscenaInvalida(f"{donde}: '{clave}' tiene un valor no permitido")
 
 
 def _src(valor: Any, donde: str, clave: str = "src") -> None:
-    if not isinstance(valor, str) or not _SRC.match(valor):
+    if not isinstance(valor, str) or not _SRC.fullmatch(valor):
         raise EscenaInvalida(
             f"{donde}: '{clave}' debe ser assets/<archivo> o fotos/<archivo>")
 
 
 def _familia(valor: Any, familias: set[str] | None, donde: str) -> None:
-    if not isinstance(valor, str) or not _FUENTE.match(valor):
+    if not isinstance(valor, str) or not _FUENTE.fullmatch(valor):
         raise EscenaInvalida(f"{donde}: falta la tipografía o tiene caracteres raros")
     if familias is not None and valor not in familias:
         raise EscenaInvalida(
@@ -172,7 +172,7 @@ def _validar_text(capa, estilo, colores, familias, donde) -> None:
         raise EscenaInvalida(f"{donde}: 'fontWeight' debe ser 100, 200, … 900")
     _num(estilo, "lineHeight", 0.8, 3.0, 1.2, donde)
     tracking = estilo.get("letterSpacing")
-    if tracking is not None and (not isinstance(tracking, str) or not _TRACKING.match(tracking)):
+    if tracking is not None and (not isinstance(tracking, str) or not _TRACKING.fullmatch(tracking)):
         raise EscenaInvalida(f"{donde}: 'letterSpacing' debe ser como -0.03em o 2px")
     _color(estilo.get("color", "#000000"), colores, donde)
     _uno_de(estilo, "textAlign", TEXT_ALIGN, "left", donde)
@@ -209,7 +209,7 @@ def _validar_image(capa, estilo, colores, familias, donde) -> None:
     _booleano(capa, "recorte", donde)
     _uno_de(capa, "ajuste", AJUSTES, "cover", donde)
     mascara = capa.get("mascara", "none")
-    if not isinstance(mascara, str) or not _MASCARA.match(mascara):
+    if not isinstance(mascara, str) or not _MASCARA.fullmatch(mascara):
         raise EscenaInvalida(f"{donde}: 'mascara' debe ser none, circle o rounded:N")
     _uno_de(estilo, "objectPosition", POSICIONES, "center", donde)
     _validar_visual(estilo, donde)
@@ -275,7 +275,7 @@ def _validar_capa(capa: dict[str, Any], colores: dict[str, str], declaradas: set
     if campo is not None:
         if tipo not in ("text", "image", "video"):
             raise EscenaInvalida(f"{donde}: solo texto, imagen y video se vinculan a un dato")
-        if campo not in declaradas:
+        if not isinstance(campo, str) or campo not in declaradas:
             raise EscenaInvalida(f"{donde}: el dato '{campo}' no está en el diseño")
     estilo = capa.get("estilo", {})
     if not isinstance(estilo, dict):
@@ -297,7 +297,7 @@ def validar(escena: dict[str, Any], contrato: dict[str, Any],
     if not isinstance(lienzo, dict):
         raise EscenaInvalida("falta el lienzo")
     formato = lienzo.get("formato")
-    if formato not in FORMATOS:
+    if not isinstance(formato, str) or formato not in FORMATOS:
         raise EscenaInvalida(f"formato desconocido {formato!r} (4x5, 1x1 o 9x16)")
     if ASPECTO_DE_FORMATO[formato] != contrato.get("aspecto"):
         raise EscenaInvalida(
@@ -311,9 +311,9 @@ def validar(escena: dict[str, Any], contrato: dict[str, Any],
     if not isinstance(colores, dict) or len(colores) > MAX_TOKENS:
         raise EscenaInvalida(f"tokens.colores debe ser un objeto de hasta {MAX_TOKENS}")
     for nombre, valor in colores.items():
-        if not isinstance(nombre, str) or not _ID.match(nombre) or nombre == "marca":
+        if not isinstance(nombre, str) or not _ID.fullmatch(nombre) or nombre == "marca":
             raise EscenaInvalida(f"token de color con nombre inválido: {nombre!r}")
-        if not isinstance(valor, str) or not (_HEX.match(valor) or _RGBA.match(valor)):
+        if not isinstance(valor, str) or not (_HEX.fullmatch(valor) or _RGBA.fullmatch(valor)):
             raise EscenaInvalida(f"el token de color '{nombre}' debe ser #rrggbb o rgba(...)")
     if tokens.get("fuente") is not None:
         _familia(tokens["fuente"], familias, "tokens")
@@ -336,7 +336,7 @@ def validar(escena: dict[str, Any], contrato: dict[str, Any],
         if not isinstance(capa, dict):
             raise EscenaInvalida("cada capa debe ser un objeto")
         cid = capa.get("id")
-        if not isinstance(cid, str) or not _ID.match(cid):
+        if not isinstance(cid, str) or not _ID.fullmatch(cid):
             raise EscenaInvalida(f"id de capa inválido: {cid!r}")
         if cid in ids:
             raise EscenaInvalida(f"id de capa repetido: '{cid}'")

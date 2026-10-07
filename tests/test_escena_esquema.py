@@ -137,6 +137,9 @@ def _rompe(mutar, mensaje: str) -> None:
     (lambda e: e["capas"].append({**copy.deepcopy(e["capas"][5]), "id": "g_otro",
                                   "hijos": ["c_logo"]}), "dos grupos"),
     (lambda e: e["capas"][1].update(fuente_asset={"autor": 3}), "fuente_asset"),
+    (lambda e: e["lienzo"].update(formato=["4x5"]), "formato"),
+    (lambda e: e["capas"][0].update(campo=["titular"]), "dato"),
+    (lambda e: e["capas"][1].update(src="assets/abc123.png\n"), "src"),
 ])
 def test_escenas_invalidas(mutar, mensaje):
     _rompe(mutar, mensaje)
