@@ -794,3 +794,79 @@ def a_html(escena: dict[str, Any], contrato: dict[str, Any],
   </div>{script}
 </body>
 </html>"""
+
+
+# ---------------------------------------------------------------------------
+# Reacomodo entre formatos
+# ---------------------------------------------------------------------------
+
+def _a_sangre(capa: dict[str, Any], ancho: int, alto: int) -> bool:
+    return (capa["x"] <= 0 and capa["y"] <= 0
+            and capa["x"] + capa["w"] >= ancho and capa["y"] + capa["h"] >= alto)
+
+
+def _caja_de_grupo(gid: str, por_id: dict[str, dict[str, Any]], hechos: set[str]) -> None:
+    """La caja de un grupo es la que envuelve a sus hijos (primero los grupos hijos)."""
+    if gid in hechos:
+        return
+    hechos.add(gid)                      # corta ciclos de grupos
+    grupo = por_id[gid]
+    hijos = []
+    for h in grupo.get("hijos", []):
+        if h not in por_id:
+            continue
+        if por_id[h]["tipo"] == "group":
+            _caja_de_grupo(h, por_id, hechos)
+        hijos.append(por_id[h])
+    if not hijos:
+        return
+    x0 = min(h["x"] for h in hijos)
+    y0 = min(h["y"] for h in hijos)
+    x1 = max(h["x"] + h["w"] for h in hijos)
+    y1 = max(h["y"] + h["h"] for h in hijos)
+    grupo.update(x=x0, y=y0, w=x1 - x0, h=y1 - y0)
+
+
+def reformatear(escena: dict[str, Any], formato: str) -> dict[str, Any]:
+    """La misma escena en otro formato, moviendo cada capa según su `anclaje`."""
+    if formato not in FORMATOS:
+        raise EscenaInvalida(f"formato desconocido {formato!r} (4x5, 1x1 o 9x16)")
+    if not isinstance(escena, dict):
+        raise EscenaInvalida("la escena debe ser un objeto")
+    nueva = copy.deepcopy(escena)
+    lienzo, capas = nueva.get("lienzo"), nueva.get("capas")
+    if not isinstance(lienzo, dict) or not isinstance(capas, list):
+        raise EscenaInvalida("la escena necesita `lienzo` (objeto) y `capas` (lista)")
+    try:
+        viejo_w, viejo_h = lienzo["w"], lienzo["h"]
+        for capa in capas:
+            for k in ("x", "y", "w", "h"):
+                if isinstance(capa[k], bool) or not isinstance(capa[k], (int, float)):
+                    raise TypeError(k)
+            capa["tipo"]
+        if any(isinstance(v, bool) or not isinstance(v, (int, float))
+               for v in (viejo_w, viejo_h)):
+            raise TypeError("lienzo")
+    except (KeyError, TypeError):
+        raise EscenaInvalida(
+            "lienzo.w/h y cada capa (x, y, w, h, tipo) deben existir y ser números") from None
+    ancho, alto = FORMATOS[formato]
+    dy = alto - viejo_h
+    for capa in capas:
+        if capa["tipo"] == "group":
+            continue
+        if _a_sangre(capa, viejo_w, viejo_h):
+            capa.update(x=0, y=0, w=ancho, h=alto)
+            continue
+        anclaje = capa.get("anclaje") or _anclaje_de(capa, viejo_w, viejo_h)
+        if anclaje == "bottom":
+            capa["y"] = capa["y"] + dy
+        elif anclaje == "center":
+            capa["y"] = capa["y"] + round(dy / 2)
+    por_id = {c["id"]: c for c in capas if isinstance(c.get("id"), str)}
+    hechos: set[str] = set()
+    for capa in capas:
+        if capa["tipo"] == "group" and capa.get("id") in por_id:
+            _caja_de_grupo(capa["id"], por_id, hechos)
+    lienzo.update(w=ancho, h=alto, formato=formato)
+    return nueva
