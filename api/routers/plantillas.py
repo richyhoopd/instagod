@@ -14,8 +14,8 @@ from api.routers.fuentes_api import listar_photos
 from src import compose, jobs, marcas, plantillas
 from src.image_sources import BRANDS_DIR
 from src.plantillas import contrato as contrato_mod
+from src.plantillas import escena as escena_mod
 from src.plantillas import fuentes_tipograficas, preview
-from src.plantillas import layout as layout_mod
 
 router = APIRouter(prefix="/brands/{slug}", tags=["posts"])
 
@@ -35,11 +35,15 @@ def _plantilla_de_marca(cx, account_id: int, template_id: int) -> dict:
 @router.get("/templates")
 def listar_templates(slug: str,
                      estado: str | None = Query(
-                         None, pattern="^(activa|borrador|archivada)$"),
+                         None, pattern="^(activa|borrador|archivada|todas)$"),
                      user: dict = Depends(usuario_actual),
                      cx=Depends(get_cx)) -> list[dict]:
     fila, _ = marca_para(slug, cx, user)
-    activas = plantillas.listar(cx, fila["id"], estado=estado or "activa")
+    # Sin parámetro sigue siendo «activas» (lo usa el creador de posts);
+    # el editor pide `todas` para su lista. `listar` filtra siempre por la
+    # cuenta de la marca, `todas` solo quita el filtro de estado.
+    filtro = None if estado == "todas" else (estado or "activa")
+    activas = plantillas.listar(cx, fila["id"], estado=filtro)
     return [
         {
             "id": t["id"],
@@ -109,7 +113,7 @@ def _vista(fila) -> dict[str, Any]:
         "estado": fila["estado"],
         "version_actual": fila["version_actual"],
         "contrato": plantillas.contrato_de(fila),
-        "layout": plantillas.layout_de(fila),
+        "layout": plantillas.escena_de(fila),
         "editable": plantillas.es_editable(fila),
     }
 
@@ -136,7 +140,7 @@ def crear_diseno(slug: str, cuerpo: DisenoNuevo, user: dict = Depends(usuario_ac
         "base": list(contrato_mod.CAMPOS_BASE),
         "extras": [],
     }
-    layout_dict = cuerpo.layout or layout_mod.vacio(cuerpo.aspecto)
+    layout_dict = cuerpo.layout or escena_mod.normalizar(None, cuerpo.aspecto)
     try:
         tid = plantillas.crear(cx, marca["id"], cuerpo.nombre, "",
                                contrato_dict, layout=layout_dict,
@@ -152,6 +156,12 @@ def guardar_diseno(slug: str, tid: int, cuerpo: DisenoGuardado,
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     fila = _plantilla_de_marca(cx, marca["id"], tid)
     contrato_dict = cuerpo.contrato or plantillas.contrato_de(fila)
+    formato = ((cuerpo.layout.get("lienzo") or {}).get("formato")
+               if cuerpo.layout.get("v") == 2 else None)
+    if cuerpo.contrato is None and formato in escena_mod.ASPECTO_DE_FORMATO:
+        # El editor cambia de formato sin mandar el contrato: el aspecto lo
+        # dicta el lienzo, y `nueva_version` lo copia a brand_templates.aspecto.
+        contrato_dict = {**contrato_dict, "aspecto": escena_mod.ASPECTO_DE_FORMATO[formato]}
     try:
         plantillas.nueva_version(cx, tid, "", contrato_dict,
                                  mensaje_usuario=cuerpo.mensaje,
@@ -175,10 +185,11 @@ def vista_previa(slug: str, cuerpo: VistaPrevia, user: dict = Depends(usuario_ac
     # pantalla al instante, no un trabajo que falla treinta segundos después.
     try:
         # El contrato primero, en el mismo orden que `plantillas._validado`:
-        # `layout.validar` no revisa el aspecto, y `a_html` lo indexa a pelo
-        # (`LIENZO[contrato["aspecto"]]`, src/plantillas/layout.py:371).
+        # `plantillas.validar_diseno` (v1 o v2) no revisa el aspecto, y
+        # `a_html` lo indexa a pelo (`LIENZO[contrato["aspecto"]]`,
+        # src/plantillas/layout.py:371).
         contrato_mod.validar(contrato_dict)
-        layout_mod.validar(
+        plantillas.validar_diseno(
             cuerpo.layout, contrato_dict,
             familias=fuentes_tipograficas.familias(cx, marca["id"]))
     except contrato_mod.ContratoInvalido as exc:
@@ -217,10 +228,10 @@ def duplicar_diseno(slug: str, tid: int, user: dict = Depends(usuario_actual),
                     cx=Depends(get_cx)) -> dict:
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     fila = _plantilla_de_marca(cx, marca["id"], tid)
-    layout_existente = plantillas.layout_de(fila)
+    layout_existente = plantillas.escena_de(fila)
     if layout_existente is None:
         # Legacy sin capas: la copia arranca un lienzo en blanco, editable.
-        layout_nuevo = layout_mod.vacio(fila["aspecto"])
+        layout_nuevo = escena_mod.normalizar(None, fila["aspecto"])
         nombre_nuevo = f"{fila['nombre']} (editable)"
     else:
         layout_nuevo = layout_existente

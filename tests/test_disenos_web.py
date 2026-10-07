@@ -10,7 +10,7 @@ import pytest
 
 from src import db, plantillas
 from src.plantillas import contrato as c
-from src.plantillas import layout
+from src.plantillas import escena, layout
 
 _HTML_LEGACY = """<!doctype html><html><head><style>
  .card { width:1080px; height:1350px; background:{{ color_marca }};
@@ -116,7 +116,7 @@ def test_revertir_recupera_la_version_anterior(cliente_manager, marca):
     cliente_manager.patch(f"/brands/{marca}/templates/{tid}", json={"layout": nuevo_layout})
     r = cliente_manager.post(f"/brands/{marca}/templates/{tid}/revert/1")
     assert r.status_code == 200
-    assert r.json()["layout"]["capas"][1]["tam"] == 64
+    assert r.json()["layout"]["capas"][1]["estilo"]["fontSize"] == 64
 
 
 def test_un_diseno_legacy_se_ve_pero_no_se_edita(cliente_manager, marca, plantilla_legacy):
@@ -275,3 +275,89 @@ def test_pedirle_un_diseno_partiendo_de_uno_ajeno_es_404(cliente_manager, marca,
         json={"instruccion": "hazlo más grande", "aspecto": "4:5",
               "template_id": diseno_ajeno})
     assert r.status_code == 404
+
+
+def test_crear_devuelve_escena_v2(cliente_manager, marca):
+    r = cliente_manager.post(f"/brands/{marca}/templates",
+                             json={"nombre": "N", "aspecto": "4:5"})
+    assert r.status_code == 201
+    assert r.json()["layout"]["v"] == 2
+    assert r.json()["layout"]["lienzo"]["formato"] == "4x5"
+
+
+def test_un_v1_guardado_se_devuelve_como_v2(cliente_manager, marca, cx):
+    tid = plantillas.crear(cx, 1, "Viejo", "", _ct(), layout=layout.vacio("4:5"))
+    r = cliente_manager.get(f"/brands/{marca}/templates/{tid}")
+    assert r.json()["layout"]["v"] == 2
+    assert plantillas.layout_de(plantillas.obtener(cx, tid))["v"] == 1   # BD intacta
+
+
+def test_guardar_v2_y_cambiar_de_formato(cliente_manager, marca, cx):
+    tid = cliente_manager.post(f"/brands/{marca}/templates",
+                               json={"nombre": "F", "aspecto": "4:5"}).json()["id"]
+    esc = cliente_manager.get(f"/brands/{marca}/templates/{tid}").json()["layout"]
+    esc = escena.reformatear(esc, "9x16")
+    r = cliente_manager.patch(f"/brands/{marca}/templates/{tid}", json={"layout": esc})
+    assert r.status_code == 200, r.text
+    assert r.json()["aspecto"] == "9:16"
+    assert r.json()["layout"]["lienzo"]["h"] == 1920
+    assert plantillas.layout_de(plantillas.obtener(cx, tid))["v"] == 2
+
+
+def test_guardar_v2_invalida_da_422(cliente_manager, marca):
+    tid = cliente_manager.post(f"/brands/{marca}/templates",
+                               json={"nombre": "M", "aspecto": "4:5"}).json()["id"]
+    esc = escena.normalizar(None, "4:5")
+    esc["capas"][1]["estilo"]["fontFamily"] = "Papyrus"
+    r = cliente_manager.patch(f"/brands/{marca}/templates/{tid}", json={"layout": esc})
+    assert r.status_code == 422
+    assert "tipograf" in r.json()["detail"].lower()
+
+
+def test_crear_en_1_1(cliente_manager, marca):
+    r = cliente_manager.post(f"/brands/{marca}/templates",
+                             json={"nombre": "Cuadro", "aspecto": "1:1"})
+    assert r.status_code == 201
+    assert r.json()["aspecto"] == "1:1"
+    assert r.json()["layout"]["lienzo"]["h"] == 1080
+
+
+def test_vista_previa_acepta_v2(cliente_manager, marca):
+    r = cliente_manager.post(f"/brands/{marca}/templates/preview",
+                             json={"layout": escena.normalizar(None, "4:5"), "aspecto": "4:5"})
+    assert r.status_code == 202
+    assert "job_id" in r.json()
+
+
+def test_vista_previa_v2_invalida_da_422(cliente_manager, marca):
+    esc = escena.normalizar(None, "4:5")
+    esc["capas"][1]["x"] = "a"
+    r = cliente_manager.post(f"/brands/{marca}/templates/preview",
+                             json={"layout": esc, "aspecto": "4:5"})
+    assert r.status_code == 422
+
+
+def test_listar_todas(cliente_manager, marca, cx, plantilla_legacy):
+    borrador = plantillas.crear(cx, 1, "Borrador", "", _ct(), layout=layout.vacio("4:5"))
+    ids_activas = {t["id"] for t in cliente_manager.get(f"/brands/{marca}/templates").json()}
+    ids_todas = {t["id"] for t in
+                 cliente_manager.get(f"/brands/{marca}/templates?estado=todas").json()}
+    assert plantilla_legacy in ids_activas and borrador not in ids_activas
+    assert {plantilla_legacy, borrador} <= ids_todas
+
+
+def test_listar_todas_no_trae_las_de_otra_marca(cliente_manager, marca, diseno_ajeno):
+    ids = {t["id"] for t in
+           cliente_manager.get(f"/brands/{marca}/templates?estado=todas").json()}
+    assert diseno_ajeno not in ids
+
+
+def test_listar_estado_invalido_da_422(cliente_manager, marca):
+    r = cliente_manager.get(f"/brands/{marca}/templates?estado=zzz")
+    assert r.status_code == 422
+
+
+def test_duplicar_guarda_v2(cliente_manager, marca, cx, plantilla_legacy):
+    r = cliente_manager.post(f"/brands/{marca}/templates/{plantilla_legacy}/duplicate")
+    nuevo = r.json()["id"]
+    assert plantillas.layout_de(plantillas.obtener(cx, nuevo))["v"] == 2
