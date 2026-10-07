@@ -289,9 +289,11 @@ def test_cifra_fuera_dos_veces_descarta(monkeypatch, tmp_path) -> None:
 
 
 def test_mencion_no_verificada_pone_alerta_en_tarjeta(monkeypatch, tmp_path) -> None:
+    """Nombrar el tema sin afirmar su valor pasa, pero con ⚠️ (afirmar
+    "ejidal" ya se rechaza: ver test_unverified_afirmado_*)."""
     cx, _, enviados = _preparar(monkeypatch, tmp_path)
     monkeypatch.setattr(gs.slideshow_script, "generar_guion",
-                        lambda tema, **kw: _guion_con("Régimen ejidal, 300 m2"))
+                        lambda tema, **kw: _guion_con("Régimen por confirmar, 300 m2"))
     gs.generar(cx, "lote", hechos={"m2": 300, "regimen": "ejidal"},
                no_verificados=["regimen"])
     assert enviados[0][0].startswith("⚠️ Menciona datos SIN VERIFICAR: regimen")
@@ -334,4 +336,202 @@ def test_con_fotos_de_entidad_solo_usa_esas_y_las_repite(monkeypatch, tmp_path) 
     contrato = json_mod.loads(db_mod.get(cx, "content_queue", qid)["slideshow_json"])
     assert vistas["f"] == ["entidad"]
     assert [s["image_urls"] for s in contrato["slides"]] == [["/e/1.jpg"], ["/e/2.jpg"], ["/e/1.jpg"]]
+    assert {s["source"] for s in contrato["slides"]} == {"entidad"}
+
+
+# ------------------- recetas: URL de la entidad, unverified, régimen, fotos
+
+URL = "https://melaquecapital.com/es/propiedades/lote-esquina"
+
+
+def _guion_ficha(textos, caption="Lote frente al mar."):
+    """Guion hook + puntos + cta con los textos dados (el último es el cta)."""
+    roles = ["hook"] + ["punto"] * (len(textos) - 2) + ["cta"]
+    return {"tema": "lote", "hook": textos[0], "caption": caption,
+            "cta": textos[-1],
+            "slides": [{"text": t, "rol": r, "image_hint": "x"}
+                       for t, r in zip(textos, roles)]}
+
+
+def _contrato(cx, qid):
+    return json_mod.loads(db_mod.get(cx, "content_queue", qid)["slideshow_json"])
+
+
+def _textos(contrato):
+    return [" ".join(t["text"] for t in s["text_items"]) for s in contrato["slides"]]
+
+
+def test_url_inventada_se_reemplaza_por_la_de_la_entidad(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", lambda tema, **kw: _guion_ficha(
+        ["Lote en Melaque", "Más en melaquewcrealestate.com",
+         "Ve la ficha en melaquewestcoastrealestate.com"],
+        caption="Info: www.melaquewcrealestate.com o ventas@melaquewc.com"))
+    qid = gs.generar(cx, "lote", hechos={"m2": 300}, entity_id=1, url_entidad=URL)
+    contrato = _contrato(cx, qid)
+    textos = _textos(contrato)
+    caption = db_mod.get(cx, "content_queue", qid)["caption"]
+    assert URL in textos[-1] and URL in caption
+    todo = " ".join(textos) + " " + caption
+    assert "melaquewc" not in todo and "westcoast" not in todo
+    assert URL not in textos[1]                     # slides intermedios: se quita
+    assert caption.count(URL) == 1
+
+
+def test_url_omitida_se_agrega_al_cta_y_caption(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", lambda tema, **kw: _guion_ficha(
+        ["Lote en Melaque", "300 m2", "Ve la ficha completa"]))
+    qid = gs.generar(cx, "lote", hechos={"m2": 300}, entity_id=1, url_entidad=URL)
+    textos = _textos(_contrato(cx, qid))
+    assert textos[-1].startswith("Ve la ficha completa") and textos[-1].endswith(URL)
+    assert URL in db_mod.get(cx, "content_queue", qid)["caption"]
+
+
+def test_url_correcta_no_se_duplica(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", lambda tema, **kw: _guion_ficha(
+        ["Lote", "300 m2", f"Ficha: {URL}"], caption=f"Mira {URL}."))
+    qid = gs.generar(cx, "lote", hechos={"m2": 300}, entity_id=1, url_entidad=URL)
+    textos = _textos(_contrato(cx, qid))
+    assert textos[-1] == f"Ficha: {URL}"
+    assert db_mod.get(cx, "content_queue", qid)["caption"].count(URL) == 1
+
+
+def test_prompt_prohibe_urls_y_oculta_unverified(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    vistos = []
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: vistos.append(kw) or _guion_ficha(
+                            ["Lote", "300 m2", "Ver ficha"]))
+    gs.generar(cx, "lote", hechos={"m2": 300, "regimen": "escriturada"},
+               no_verificados=["regimen"], entity_id=1, url_entidad=URL)
+    ctx = vistos[0]["contexto"]
+    assert "No escribas URLs" in ctx
+    assert "TEMAS SIN CONFIRMAR: regimen" in ctx
+    assert "escriturada" not in ctx                 # el valor no confirmado no llega
+
+
+def test_unverified_afirmado_regenera_una_vez_y_pasa(monkeypatch, tmp_path) -> None:
+    cx, _, enviados = _preparar(monkeypatch, tmp_path)
+    llamadas = []
+
+    def _spy(tema, **kw):
+        llamadas.append(kw.get("feedback"))
+        punto = "Escriturado, 300 m2" if len(llamadas) == 1 else "300 m2"
+        return _guion_ficha(["Lote", punto, "Ver ficha"])
+
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", _spy)
+    qid = gs.generar(cx, "lote", hechos={"m2": 300, "regimen": "escriturada"},
+                     no_verificados=["regimen"], entity_id=1)
+    assert qid is not None and len(llamadas) == 2
+    assert llamadas[0] is None and "regimen" in llamadas[1]
+    assert not enviados[0][0].startswith("⚠️")
+
+
+def test_unverified_afirmado_dos_veces_descarta(monkeypatch, tmp_path) -> None:
+    import pytest
+    cx, subidas, enviados = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", lambda tema, **kw: _guion_ficha(
+        ["Lote", "Con certeza jurídica", "Ver ficha"]))
+    with pytest.raises(gs.TextoNoPermitido, match="regimen"):
+        gs.generar(cx, "lote", hechos={"m2": 300, "regimen": "escriturada"},
+                   no_verificados=["regimen"])
+    assert subidas == [] and enviados == []
+    assert db.rows(cx, "SELECT * FROM content_queue") == []
+
+
+def test_cifra_de_clave_unverified_no_es_citable(monkeypatch, tmp_path) -> None:
+    import pytest
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", lambda tema, **kw: _guion_ficha(
+        ["Lote", "Mide 450 m2", "Ver ficha"]))
+    with pytest.raises(gs.CifrasFueraDeFacts):
+        gs.generar(cx, "lote", hechos={"m2": 450}, no_verificados=["m2"])
+
+
+def test_listo_para_escriturar_regenera_y_descarta(monkeypatch, tmp_path) -> None:
+    import pytest
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    llamadas = []
+
+    def _spy(tema, **kw):
+        llamadas.append(kw)
+        return _guion_ficha(["Lote", "Escriturado y listo para escriturar", "Ver ficha"])
+
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", _spy)
+    with pytest.raises(gs.TextoNoPermitido, match="listo para escritur"):
+        gs.generar(cx, "lote", hechos={"regimen": "escriturada"})
+    assert len(llamadas) == 2
+    assert "UNA sola vez" in llamadas[0]["contexto"] and "«escriturada»" in llamadas[0]["contexto"]
+    assert "listo para escritur" in llamadas[1]["feedback"]
+
+
+def test_regimen_verificado_textual_pasa(monkeypatch, tmp_path) -> None:
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion", lambda tema, **kw: _guion_ficha(
+        ["Lote", "Régimen: escriturada", "Ver ficha"]))
+    assert gs.generar(cx, "lote", hechos={"regimen": "escriturada"}) is not None
+
+
+def test_tipo_sin_confirmar_prompt_dice_propiedad_y_valida(monkeypatch, tmp_path) -> None:
+    import pytest
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    vistos = []
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: vistos.append(kw) or _guion_ficha(
+                            ["Departamento en Melaque", "300 m2", "Ver ficha"]))
+    with pytest.raises(gs.TextoNoPermitido, match="tipo"):
+        gs.generar(cx, "lote", hechos={"m2": 300, "tipo": "departamento"},
+                   no_verificados=["tipo"])
+    assert "«propiedad»" in vistos[0]["contexto"]
+    assert "departamento" not in vistos[0]["contexto"].split("REGLAS DE LA FICHA")[0]
+
+
+def _fotos_spy(monkeypatch, vistas):
+    def _resolver_spy(hints, fuentes, **kw):
+        vistas["f"] = fuentes
+        provider = kw["providers"]["entidad"]
+        urls = list(dict.fromkeys(provider.urls))
+        return [_Img(urls[k], "entidad") if k < len(urls) else None
+                for k in range(len(hints))]
+    monkeypatch.setattr(gs.image_sources, "resolver", _resolver_spy)
+
+
+def test_fotos_suficientes_no_se_repiten_y_recorta_slides(monkeypatch, tmp_path) -> None:
+    """4 fotos distintas y 6 slides pedidos → 4 slides, una foto cada uno."""
+    from src import marcas_seed
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    marcas_seed.sembrar(cx)
+    pedidos = []
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: pedidos.append(kw["n_slides"]) or _guion_ficha(
+                            ["Casa", "Uno", "Dos", "Ver"][:kw["n_slides"]]))
+    vistas = {}
+    _fotos_spy(monkeypatch, vistas)
+    fotos = [f"/e/{i}.jpg" for i in range(4)] + ["/e/0.jpg"]   # duplicada en la media
+    qid = gs.generar(cx, "casa", marca="melaquecapital", n_slides=6,
+                     imagenes_preferidas=fotos)
+    contrato = _contrato(cx, qid)
+    assert pedidos == [4] and vistas["f"] == ["entidad"]
+    usadas = [s["image_urls"][0] for s in contrato["slides"]]
+    assert len(usadas) == len(set(usadas)) == 4
+
+
+def test_pocas_fotos_repite_lo_minimo_para_tres(monkeypatch, tmp_path) -> None:
+    from src import marcas_seed
+    cx, _, _ = _preparar(monkeypatch, tmp_path)
+    marcas_seed.sembrar(cx)
+    pedidos = []
+    monkeypatch.setattr(gs.slideshow_script, "generar_guion",
+                        lambda tema, **kw: pedidos.append(kw["n_slides"]) or _guion_ficha(
+                            ["Casa", "Uno", "Ver"]))
+    vistas = {}
+    _fotos_spy(monkeypatch, vistas)
+    qid = gs.generar(cx, "casa", marca="melaquecapital", n_slides=6,
+                     imagenes_preferidas=["/e/1.jpg", "/e/2.jpg"])
+    contrato = _contrato(cx, qid)
+    assert pedidos == [3]
+    usadas = [s["image_urls"][0] for s in contrato["slides"]]
+    assert usadas == ["/e/1.jpg", "/e/2.jpg", "/e/1.jpg"]
     assert {s["source"] for s in contrato["slides"]} == {"entidad"}

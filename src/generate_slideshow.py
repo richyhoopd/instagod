@@ -20,6 +20,7 @@ from src import (
     cifras,
     compose,
     db,
+    guion_entidad,
     host,
     image_sources,
     slideshow_compile,
@@ -34,6 +35,11 @@ class CifrasFueraDeFacts(RuntimeError):
     La pieza se descarta (no se encola)."""
 
 
+class TextoNoPermitido(RuntimeError):
+    """El guion afirmó temas sin confirmar (`unverified`) o redundancias
+    legales ("listo para escriturar"), aun tras regenerar una vez. Se descarta."""
+
+
 def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = None,
             estilo: str | None = None, fuentes: tuple[str, ...] | None = None,
             n_slides: int = 6, aspect: str = "4:5", contexto: str | None = None,
@@ -45,6 +51,7 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
             entity_id: int | None = None,
             receta: str | None = None,
             imagenes_preferidas: list[str] | None = None,
+            url_entidad: str | None = None,
             extra_brief: dict | None = None) -> int | None:
     """Genera el set con el PERFIL de la marca; queue_id o None en dry-run.
 
@@ -61,6 +68,13 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     `no_verificados` mencionados → ⚠️ en la tarjeta de Telegram.
     `imagenes_preferidas`: URLs de la media del item, antes que la cascada.
     Aspecto 9:16 → además manda un ZIP de PNGs al Telegram de la marca.
+
+    Fix 2026-10-07 (carruseles MWRS): las claves de `no_verificados` salen de
+    los facts citables y no se pueden afirmar (TextoNoPermitido tras regenerar
+    1 vez); "listo para escriturar" igual. Con `url_entidad` la liga del cta y
+    del caption la pone el código y se borra cualquier otra URL. Con fotos del
+    item: n_slides = min(pedido, max(3, fotos distintas)), sin repetir fotos
+    salvo para llegar a 3.
     """
     from src import marcas as marcas_mod
 
@@ -80,7 +94,14 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
                          f"(disponibles: {sorted(catalogo)})")
     fuentes = tuple(fuentes) if fuentes else tuple(fuentes_mod.orden_imagen(cx, m))
     prompt_formato = m.prompts.get("por_formato", {}).get(formato)
-    contexto_full = "\n\n".join(x for x in (m.voz, prompt_formato, contexto) if x) or None
+    reglas = (guion_entidad.reglas_prompt(hechos, no_verificados, url_entidad)
+              if hechos is not None or url_entidad else None)
+    contexto_full = "\n\n".join(
+        x for x in (m.voz, prompt_formato, contexto, reglas) if x) or None
+    if imagenes_preferidas:
+        # Una foto por slide: no se repiten salvo para llegar al mínimo de 3.
+        imagenes_preferidas = list(dict.fromkeys(u for u in imagenes_preferidas if u))
+        n_slides = min(n_slides, max(3, len(imagenes_preferidas)))
 
     _reportar(10, "guion")
     guion = slideshow_script.generar_guion(tema, formato=formato,
@@ -88,20 +109,46 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
                                            contexto=contexto_full)
     advertencias: list[str] = []
     if hechos is not None:
-        fuera = cifras.cifras_fuera(cifras.textos_de_guion(guion), hechos)
-        if fuera:
-            _reportar(25, "regenerando: cifras fuera de facts")
+        citables = guion_entidad.facts_visibles(hechos, no_verificados)
+
+        def _problemas(g):
+            textos = cifras.textos_de_guion(g)
+            return (cifras.cifras_fuera(textos, citables),
+                    guion_entidad.temas_no_verificados_afirmados(
+                        textos, no_verificados, hechos),
+                    guion_entidad.redundancias_legales(textos))
+
+        fuera, afirmados, redund = _problemas(guion)
+        if fuera or afirmados or redund:
+            _reportar(25, "regenerando: texto fuera de facts")
+            avisos = []
+            if fuera:
+                avisos.append("Estas cifras NO están en los datos verificados y no "
+                              f"pueden aparecer: {', '.join(fuera)}. Cita solo cifras "
+                              "de FACTS, tal cual; si no hay cifra, no pongas número.")
+            if afirmados:
+                avisos.append(f"Afirmaste temas SIN CONFIRMAR ({', '.join(afirmados)}): "
+                              "quita toda mención a ellos, ni sinónimos.")
+            if redund:
+                avisos.append(f"Frase legal redundante prohibida ({', '.join(redund)}): "
+                              "el régimen va una sola vez, textual al de FACTS.")
             guion = slideshow_script.generar_guion(
                 tema, formato=formato, n_slides=n_slides, contexto=contexto_full,
-                feedback=("Estas cifras NO están en los datos verificados y no "
-                          f"pueden aparecer: {', '.join(fuera)}. Cita solo cifras "
-                          "de FACTS, tal cual; si no hay cifra, no pongas número."))
-            fuera = cifras.cifras_fuera(cifras.textos_de_guion(guion), hechos)
+                feedback=" ".join(avisos))
+            fuera, afirmados, redund = _problemas(guion)
             if fuera:
                 raise CifrasFueraDeFacts(
                     f"cifras fuera de facts tras regenerar, se descarta: {fuera}")
+            if afirmados or redund:
+                raise TextoNoPermitido(
+                    "tras regenerar, se descarta: "
+                    + "; ".join(x for x in (
+                        afirmados and f"afirma temas sin confirmar {afirmados}",
+                        redund and f"redundancia legal {redund}") if x))
         advertencias = cifras.menciones_no_verificadas(
             cifras.textos_de_guion(guion), hechos, no_verificados)
+    if url_entidad:
+        guion = guion_entidad.fijar_url_entidad(guion, url_entidad)
     hints = [sl["image_hint"] for sl in guion["slides"]]
     _reportar(40, "imágenes")
     providers = image_sources.providers_default(
@@ -110,7 +157,7 @@ def generar(cx, tema: str, *, marca: str = "gdlscene", formato: str | None = Non
     if imagenes_preferidas:
         providers = {**providers, "entidad": image_sources.ListaProvider(imagenes_preferidas)}
         # Solo fotos del item: una foto de otro lugar en la ficha de una
-        # propiedad engaña. Si faltan, se repiten las del item.
+        # propiedad engaña. Si faltan (menos de 3), se repiten las del item.
         orden_fuentes = ["entidad"]
     imagenes = image_sources.resolver(
         hints, orden_fuentes, cx=cx, slug=m.slug, providers=providers)
