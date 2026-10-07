@@ -363,6 +363,50 @@ def test_duplicar_guarda_v2(cliente_manager, marca, cx, plantilla_legacy):
     assert plantillas.layout_de(plantillas.obtener(cx, nuevo))["v"] == 2
 
 
+def test_duplicar_v1_conserva_v1(cliente_manager, marca, cx):
+    tid = plantillas.crear(cx, 1, "Viejo", "", _ct(), layout=layout.vacio("4:5"))
+    r = cliente_manager.post(f"/brands/{marca}/templates/{tid}/duplicate")
+    assert r.status_code == 201, r.text
+    copia = plantillas.obtener(cx, r.json()["id"])
+    assert plantillas.layout_de(copia) == plantillas.layout_de(plantillas.obtener(cx, tid))
+    assert plantillas.layout_de(copia)["v"] == 1
+
+
+def test_duplicar_v2_conserva_v2(cliente_manager, marca, cx):
+    tid = cliente_manager.post(f"/brands/{marca}/templates",
+                               json={"nombre": "D", "aspecto": "4:5"}).json()["id"]
+    r = cliente_manager.post(f"/brands/{marca}/templates/{tid}/duplicate")
+    assert r.status_code == 201, r.text
+    original = plantillas.layout_de(plantillas.obtener(cx, tid))
+    assert plantillas.layout_de(plantillas.obtener(cx, r.json()["id"])) == original
+    assert original["v"] == 2
+
+
+def test_patch_con_layout_v1_guarda_v1(cliente_manager, marca, cx):
+    tid = plantillas.crear(cx, 1, "Viejo", "", _ct(), layout=layout.vacio("4:5"))
+    r = cliente_manager.patch(f"/brands/{marca}/templates/{tid}",
+                              json={"layout": layout.vacio("4:5")})
+    assert r.status_code == 200, r.text
+    assert plantillas.layout_de(plantillas.obtener(cx, tid))["v"] == 1
+
+
+def test_get_con_v1_malformado_no_es_500_ni_toca_la_bd(cliente_manager, marca, cx):
+    import json
+    tid = plantillas.crear(cx, 1, "Roto", "", _ct(), layout=layout.vacio("4:5"))
+    malo = layout.vacio("4:5")
+    malo["capas"][0]["x"] = "1"
+    crudo = json.dumps(malo)
+    cx.execute("UPDATE brand_templates SET layout_json = ? WHERE id = ?", (crudo, tid))
+    cx.commit()
+    r = cliente_manager.get(f"/brands/{marca}/templates/{tid}")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["layout"] is None and d["editable"] is False
+    assert d["layout_error"]
+    assert cx.execute("SELECT layout_json FROM brand_templates WHERE id = ?",
+                      (tid,)).fetchone()[0] == crudo
+
+
 def _anidado(n: int) -> dict:
     d: dict = {}
     for _ in range(n):

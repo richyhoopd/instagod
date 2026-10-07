@@ -532,8 +532,20 @@ def _migrar_check_aspecto_templates(cx: sqlite3.Connection) -> None:
         cx.execute(_BRAND_TEMPLATES_REBUILD_DDL)
         cx.execute(f"INSERT INTO brand_templates_new ({col_list}) "
                    f"SELECT {col_list} FROM brand_templates")
+        # El DROP se lleva la fila de sqlite_sequence y el INSERT..SELECT solo
+        # la deja en MAX(id): si la última plantilla se borró antes, su id se
+        # reusaría. Se guarda el seq viejo y se restaura tras el RENAME.
+        fila_seq = cx.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'brand_templates'").fetchone()
+        seq_viejo = fila_seq[0] if fila_seq else 0
         cx.execute("DROP TABLE brand_templates")
         cx.execute("ALTER TABLE brand_templates_new RENAME TO brand_templates")
+        seq = max(seq_viejo, cx.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM brand_templates").fetchone()[0])
+        if seq:
+            cx.execute("DELETE FROM sqlite_sequence WHERE name = 'brand_templates'")
+            cx.execute("INSERT INTO sqlite_sequence (name, seq) "
+                       "VALUES ('brand_templates', ?)", (seq,))
         cx.execute("CREATE INDEX IF NOT EXISTS idx_templates_cuenta "
                    "ON brand_templates(account_id, estado)")
         # Con foreign_keys=OFF nada valida las FK del rebuild solas. Solo se

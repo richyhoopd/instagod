@@ -151,3 +151,40 @@ def test_si_falla_a_la_mitad_no_deja_la_base_a_medias(tmp_path):
                       "'brand_templates_new'").fetchone() is None
     idx = {r["name"] for r in cx.execute("PRAGMA index_list(brand_templates)")}
     assert "idx_templates_cuenta" in idx
+
+
+def test_conserva_el_seq_de_autoincrement_con_el_ultimo_id_borrado(tmp_path):
+    """DROP + RENAME reinicia sqlite_sequence: sin preservarlo, el id 12 se reusaría."""
+    path = tmp_path / "vieja.db"
+    _db_vieja(path, plantillas=12)       # ids 7 y 8..18 (autoincrement tras el 7)
+    cx = sqlite3.connect(path)
+    cx.execute("PRAGMA foreign_keys = ON")   # la cascada se lleva sus versiones
+    ultimo = cx.execute("SELECT MAX(id) FROM brand_templates").fetchone()[0]
+    cx.execute("DELETE FROM brand_templates WHERE id = ?", (ultimo,))
+    cx.commit()
+    seq_viejo = cx.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name='brand_templates'").fetchone()[0]
+    assert seq_viejo == ultimo
+    cx.close()
+
+    cx = db.connect(path)
+    db.init_db(cx)
+    nuevo = db.insert(cx, "brand_templates", account_id=1, slug="n", nombre="N",
+                      aspecto="1:1", contrato_json="{}", html="x")
+    assert nuevo == ultimo + 1
+
+
+def test_seq_nunca_queda_por_debajo_del_max_id(tmp_path):
+    """Si no hay fila en sqlite_sequence, el seq sale del MAX(id)."""
+    path = tmp_path / "vieja.db"
+    _db_vieja(path, plantillas=3)
+    cx = sqlite3.connect(path)
+    cx.execute("DELETE FROM sqlite_sequence WHERE name='brand_templates'")
+    cx.commit()
+    maximo = cx.execute("SELECT MAX(id) FROM brand_templates").fetchone()[0]
+    cx.close()
+    cx = db.connect(path)
+    db.init_db(cx)
+    nuevo = db.insert(cx, "brand_templates", account_id=1, slug="n", nombre="N",
+                      aspecto="1:1", contrato_json="{}", html="x")
+    assert nuevo == maximo + 1

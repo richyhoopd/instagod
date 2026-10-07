@@ -151,3 +151,21 @@ def test_normalizar_none_en_1x1():
     else:
         with pytest.raises(E.EscenaInvalida):
             E.normalizar(None, "1:1")
+
+
+@pytest.mark.parametrize("campo,valor", [("x", "1"), ("y", [1]), ("w", None),
+                                         ("h", "alto"), ("x", True)])
+def test_v1_con_geometria_malformada_es_escena_invalida(campo, valor):
+    v1 = layout.vacio("4:5")
+    v1["capas"][0][campo] = valor
+    with pytest.raises(E.EscenaInvalida):
+        E.v1_a_v2(v1, "4:5")
+    with pytest.raises(E.EscenaInvalida):
+        E.normalizar(v1, "4:5")
+
+
+def test_v1_con_guias_malformadas_es_escena_invalida():
+    v1 = layout.vacio("4:5")
+    v1["guias"] = 5
+    with pytest.raises(E.EscenaInvalida):
+        E.v1_a_v2(v1, "4:5")

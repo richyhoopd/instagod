@@ -499,6 +499,8 @@ def _guardar_v1(layout: Any) -> None:
         raise EscenaInvalida("el layout v1 debe ser un objeto")
     if layout.get("lienzo") is not None and not isinstance(layout["lienzo"], dict):
         raise EscenaInvalida("lienzo del layout v1 debe ser un objeto")
+    if layout.get("guias") is not None and not isinstance(layout["guias"], (list, dict)):
+        raise EscenaInvalida("guias del layout v1 debe ser una lista o un objeto")
     capas = layout.get("capas")
     if capas is None:
         return
@@ -514,6 +516,11 @@ def _guardar_v1(layout: Any) -> None:
             raise EscenaInvalida(f"capa {capa['id']!r}: falta el tipo de capa")
         if tipo not in _DE_V1:
             raise EscenaInvalida(f"tipo de capa desconocido en v1: {tipo!r} (capa {capa['id']!r})")
+        for clave in ("x", "y", "w", "h"):
+            v = capa.get(clave)
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                raise EscenaInvalida(
+                    f"capa {capa['id']!r}: '{clave}' del layout v1 debe ser un número")
         if tipo == "imagen" and not capa.get("campo") and not capa.get("archivo"):
             raise EscenaInvalida(f"capa {capa['id']!r}: imagen v1 sin campo ni archivo")
 
@@ -529,6 +536,13 @@ def v1_a_v2(layout: dict[str, Any], aspecto: str) -> dict[str, Any]:
     if not isinstance(aspecto, str) or aspecto not in FORMATO_DE_ASPECTO:
         raise EscenaInvalida(f"aspecto desconocido {aspecto!r}")
     _guardar_v1(layout)
+    try:
+        return _convertir_v1(layout, aspecto)
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        raise EscenaInvalida(f"layout v1 malformado: {exc}") from exc
+
+
+def _convertir_v1(layout: dict[str, Any], aspecto: str) -> dict[str, Any]:
     formato = FORMATO_DE_ASPECTO[aspecto]
     ancho, alto = FORMATOS[formato]
     lienzo_v1 = layout.get("lienzo") or {}

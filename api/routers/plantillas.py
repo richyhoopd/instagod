@@ -106,7 +106,16 @@ class PedirDiseno(BaseModel):
 
 
 def _vista(fila) -> dict[str, Any]:
-    """Cómo ve el portal un diseño. Nunca expone el HTML: es derivado."""
+    """Cómo ve el portal un diseño. Nunca expone el HTML: es derivado.
+
+    Un layout guardado que no se puede convertir a v2 (malformado en la BD) no
+    tumba la lectura: sale `layout: None`, `editable: False` y el motivo en
+    `layout_error`. La BD no se toca; el diseño se puede duplicar o sustituir.
+    """
+    try:
+        layout, error = plantillas.escena_de(fila), None
+    except escena_mod.EscenaInvalida as exc:
+        layout, error = None, str(exc)
     return {
         "id": fila["id"],
         "nombre": fila["nombre"],
@@ -115,8 +124,9 @@ def _vista(fila) -> dict[str, Any]:
         "estado": fila["estado"],
         "version_actual": fila["version_actual"],
         "contrato": plantillas.contrato_de(fila),
-        "layout": plantillas.escena_de(fila),
-        "editable": plantillas.es_editable(fila),
+        "layout": layout,
+        "editable": error is None and plantillas.es_editable(fila),
+        "layout_error": error,
     }
 
 
@@ -234,7 +244,9 @@ def duplicar_diseno(slug: str, tid: int, user: dict = Depends(usuario_actual),
                     cx=Depends(get_cx)) -> dict:
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     fila = _plantilla_de_marca(cx, marca["id"], tid)
-    layout_existente = plantillas.escena_de(fila)
+    # Crudo, no `escena_de`: la copia conserva el layout tal cual (v1 sigue v1,
+    # v2 sigue v2); convertir de más reescribiría el diseño sin que nadie lo pida.
+    layout_existente = plantillas.layout_de(fila)
     if layout_existente is None:
         # Legacy sin capas: la copia arranca un lienzo en blanco, editable.
         layout_nuevo = escena_mod.normalizar(None, fila["aspecto"])
