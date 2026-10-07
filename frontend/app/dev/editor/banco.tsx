@@ -17,7 +17,7 @@ export function Banco() {
   useEffect(() => {
     const st = useEditor.getState();
     const e = structuredClone(datos.base) as unknown as Escena;
-    e.guias = { cols: 0, filas: 0, iman: false };
+    e.guias = { cols: 0, filas: 0, iman: 0 };
     st.cargar(e);
     st.setZoom(0.5);
     return () => useEditor.getState().vaciar();

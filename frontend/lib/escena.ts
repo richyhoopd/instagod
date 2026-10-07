@@ -22,7 +22,13 @@ export const ID_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 export type Anclaje = "top" | "center" | "bottom";
 export type Fondo = { tipo: "color" | "gradiente" | "imagen"; valor: string };
 export type Tokens = { colores: Record<string, string>; fuente?: string };
-export type Guias = { cols: number; filas: number; iman: boolean };
+export type Guias = { cols: number; filas: number; iman: number };
+
+// El backend guarda el imán como entero 0..64 (px); Moveable espera un booleano.
+// Sin guías, el imán queda activo.
+export function imanActivo(guias?: Guias): boolean {
+  return (guias?.iman ?? 1) > 0;
+}
 export type Span = { desde: number; hasta: number; color: string };
 
 type CapaBase = {

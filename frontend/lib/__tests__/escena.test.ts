@@ -7,6 +7,7 @@ import {
   capaNueva,
   descendientes,
   idLibre,
+  imanActivo,
   normalizarAngulo,
   ocultasEfectivas,
   ordenadas,
@@ -189,5 +190,13 @@ describe("utilidades", () => {
     expect(normalizarAngulo(190)).toBe(-170);
     expect(normalizarAngulo(-190)).toBe(170);
     expect(normalizarAngulo(180)).toBe(180);
+  });
+});
+
+describe("imanActivo", () => {
+  it("el imán numérico del backend activa el snap; 0 lo apaga; sin guías queda activo", () => {
+    expect(imanActivo({ cols: 12, filas: 15, iman: 8 })).toBe(true);
+    expect(imanActivo({ cols: 0, filas: 0, iman: 0 })).toBe(false);
+    expect(imanActivo(undefined)).toBe(true);
   });
 });

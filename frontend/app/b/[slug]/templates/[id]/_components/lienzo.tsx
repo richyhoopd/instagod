@@ -6,7 +6,7 @@ import Moveable from "react-moveable";
 import Selecto from "react-selecto";
 import { Button } from "@/components/ui/button";
 import { expandir } from "@/lib/edicion";
-import { normalizarAngulo, ocultasEfectivas, type Escena, type Op } from "@/lib/escena";
+import { imanActivo, normalizarAngulo, ocultasEfectivas, type Escena, type Op } from "@/lib/escena";
 import { alternar, encuadre, raicesSeleccionables, zoomEnPunto } from "@/lib/vista";
 import { useEditor } from "@/stores/editor";
 import { Escenario, fondoCss } from "./capa-vista";
@@ -160,7 +160,7 @@ export function Lienzo({ slug, colorMarca, ajustarAlCargar = true }: Props) {
           resizable={unaHoja}
           rotatable={unaHoja}
           keepRatio={false}
-          snappable={escena.guias?.iman ?? true}
+          snappable={imanActivo(escena.guias)}
           snapThreshold={6}
           elementGuidelines={escena.capas.filter((c) => !objetivos.includes(c.id)).map((c) => selector(c.id))}
           onDragStart={() => {
