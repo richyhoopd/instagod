@@ -21,7 +21,10 @@ vi.mock("@/hooks/use-disenos", () => ({
 vi.mock("sonner", () => ({ toast: { error: (m: string) => toast.error(m), success: vi.fn() } }));
 vi.mock("../_components/lienzo", () => ({ Lienzo: () => <div data-testid="lienzo" /> }));
 vi.mock("../_components/panel-capas", () => ({ PanelCapas: () => null }));
-vi.mock("../_components/panel-propiedades", () => ({ PanelPropiedades: () => null }));
+vi.mock("../_components/panel-propiedades", () => ({
+  PanelPropiedades: () => null,
+  camposDeContrato: () => ({ texto: [], imagen: [] }),
+}));
 vi.mock("../_components/vista-previa", () => ({ VistaPrevia: () => null }));
 let alRestaurar: ((d: Diseno) => void) | undefined;
 vi.mock("../_components/dialogo-versiones", () => ({

@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import datos from "@/lib/__fixtures__/ops-casos.json";
-import type { CapaTexto, Escena } from "@/lib/escena";
+import type { CapaForma, CapaTexto, Escena } from "@/lib/escena";
 import { useEditor } from "@/stores/editor";
-import { PanelPropiedades } from "../panel-propiedades";
+import { camposDeContrato, PanelPropiedades } from "../panel-propiedades";
 
 const base = datos.base as unknown as Escena;
 const st = () => useEditor.getState();
@@ -210,5 +210,117 @@ describe("PanelPropiedades", () => {
       }),
     );
     expect((screen.getByRole("combobox", { name: "Peso" }) as HTMLSelectElement).value).toBe("350");
+  });
+});
+
+const CAMPOS = { texto: ["titular", "handle"], imagen: ["imagen", "logo"] };
+
+function montarConCampos(seleccion: string[]) {
+  st().vaciar();
+  st().cargar(structuredClone(base));
+  st().seleccionar(seleccion);
+  render(<PanelPropiedades colorMarca="#ff3366" campos={CAMPOS} />);
+}
+const combo = (nombre: string) => screen.getByRole("combobox", { name: nombre }) as HTMLSelectElement;
+
+describe("camposDeContrato", () => {
+  it("separa texto de imagen y suma los extras por tipo", () => {
+    expect(
+      camposDeContrato({
+        aspecto: "4:5",
+        base: ["titular", "imagen", "handle", "logo", "color_marca"],
+        extras: [
+          { id: "precio", tipo: "numero" },
+          { id: "foto2", tipo: "imagen" },
+        ],
+      }),
+    ).toEqual({ texto: ["titular", "handle", "precio"], imagen: ["imagen", "logo", "foto2"] });
+  });
+});
+
+describe("PanelPropiedades: efectos y datos", () => {
+  beforeEach(() => st().vaciar());
+
+  it("sin campos no muestra Dato", () => {
+    montar(["titulo"]);
+    expect(screen.queryByRole("combobox", { name: "Dato" })).toBeNull();
+  });
+
+  it("vincular un texto limpia sus tramos en un paso", () => {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().aplicar([{ op: "set", capa: "titulo", ruta: "estilo.spans", valor: [{ desde: 0, hasta: 4, color: "#ff0000" }] }]);
+    st().seleccionar(["titulo"]);
+    render(<PanelPropiedades colorMarca="#ff3366" campos={CAMPOS} />);
+    const antes = st().pasado.length;
+    expect([...combo("Dato").options].map((o) => o.value)).toEqual(["", "titular", "handle"]);
+    fireEvent.change(combo("Dato"), { target: { value: "titular" } });
+    const t = capa("titulo") as CapaTexto;
+    expect(t.campo).toBe("titular");
+    expect(t.estilo.spans).toEqual([]);
+    expect(st().pasado).toHaveLength(antes + 1);
+  });
+
+  it("desvincular apaga resaltar", () => {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().aplicar([
+      { op: "set", capa: "titulo", ruta: "campo", valor: "titular" },
+      { op: "set", capa: "titulo", ruta: "resaltar", valor: true },
+    ]);
+    st().seleccionar(["titulo"]);
+    render(<PanelPropiedades colorMarca="#ff3366" campos={CAMPOS} />);
+    fireEvent.change(combo("Dato"), { target: { value: "" } });
+    const t = capa("titulo") as CapaTexto;
+    expect(t.campo).toBeNull();
+    expect(t.resaltar).toBe(false);
+  });
+
+  it("la sombra de una forma escribe estilo.filter", () => {
+    montarConCampos(["caja"]);
+    expect(combo("Sombra").value).toBe("none");
+    fireEvent.change(combo("Sombra"), { target: { value: "drop-shadow(0 16px 32px rgba(0,0,0,.3))" } });
+    expect((capa("caja") as CapaForma).estilo.filter).toBe("drop-shadow(0 16px 32px rgba(0,0,0,.3))");
+  });
+
+  it("una sombra personalizada se muestra y no se pisa", () => {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().aplicar([{ op: "set", capa: "caja", ruta: "estilo.filter", valor: "blur(2px)" }]);
+    st().seleccionar(["caja"]);
+    render(<PanelPropiedades colorMarca="#ff3366" />);
+    expect(combo("Sombra").value).toBe("blur(2px)");
+    expect((capa("caja") as CapaForma).estilo.filter).toBe("blur(2px)");
+  });
+
+  it("la mezcla escribe estilo.mixBlendMode", () => {
+    montarConCampos(["logo"]);
+    fireEvent.change(combo("Mezcla"), { target: { value: "multiply" } });
+    expect(capa("logo")).toMatchObject({ estilo: { mixBlendMode: "multiply" } });
+  });
+
+  it("el texto no tiene efectos", () => {
+    montarConCampos(["titulo"]);
+    expect(screen.queryByRole("combobox", { name: "Sombra" })).toBeNull();
+  });
+
+  it("el borde de una forma", () => {
+    montarConCampos(["caja"]);
+    fireEvent.change(campo("Borde"), { target: { value: "4" } });
+    fireEvent.blur(campo("Borde"));
+    expect((capa("caja") as CapaForma).estilo.borderWidth).toBe(4);
+    fireEvent.change(combo("Color de borde"), { target: { value: "token:tinta" } });
+    expect((capa("caja") as CapaForma).estilo.borderColor).toBe("token:tinta");
+  });
+
+  it("el tracking acepta texto y vacío lo quita", () => {
+    montarConCampos(["titulo"]);
+    const tracking = screen.getByRole("textbox", { name: "Tracking" });
+    fireEvent.change(tracking, { target: { value: "2px" } });
+    fireEvent.blur(tracking);
+    expect((capa("titulo") as CapaTexto).estilo.letterSpacing).toBe("2px");
+    fireEvent.change(tracking, { target: { value: "" } });
+    fireEvent.blur(tracking);
+    expect((capa("titulo") as CapaTexto).estilo.letterSpacing).toBeUndefined();
   });
 });

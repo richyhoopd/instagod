@@ -13,7 +13,10 @@ vi.mock("@/hooks/use-brands", () => ({ useBrand: () => ({ data: { color_marca: "
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<typeof import("@/lib/api")>()), ...api }));
 vi.mock("../_components/lienzo", () => ({ Lienzo: () => <div data-testid="lienzo" /> }));
 vi.mock("../_components/panel-capas", () => ({ PanelCapas: () => null }));
-vi.mock("../_components/panel-propiedades", () => ({ PanelPropiedades: () => null }));
+vi.mock("../_components/panel-propiedades", () => ({
+  PanelPropiedades: () => null,
+  camposDeContrato: () => ({ texto: [], imagen: [] }),
+}));
 vi.mock("../_components/vista-previa", () => ({ VistaPrevia: () => null }));
 vi.mock("../_components/dialogo-versiones", () => ({ DialogoVersiones: () => null }));
 

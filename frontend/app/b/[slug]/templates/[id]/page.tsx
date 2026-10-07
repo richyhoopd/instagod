@@ -17,7 +17,7 @@ import { DialogoVersiones } from "./_components/dialogo-versiones";
 import { Lienzo } from "./_components/lienzo";
 import { PanelCapas } from "./_components/panel-capas";
 import { PanelLateral } from "./_components/panel-lateral";
-import { PanelPropiedades } from "./_components/panel-propiedades";
+import { camposDeContrato, PanelPropiedades } from "./_components/panel-propiedades";
 import { VistaPrevia } from "./_components/vista-previa";
 
 // Se remonta por diseño: así nada de A (temporizadores, filas, mutaciones,
@@ -198,7 +198,7 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
           <Lienzo slug={slug} colorMarca={colorMarca} />
         </div>
         <aside className="w-72 shrink-0 overflow-y-auto rounded-lg border">
-          <PanelPropiedades colorMarca={colorMarca} />
+          <PanelPropiedades colorMarca={colorMarca} campos={camposDeContrato(diseno.contrato)} />
         </aside>
       </div>
     </div>
