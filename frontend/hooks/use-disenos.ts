@@ -97,11 +97,17 @@ export function useCrearDiseno(slug: string) {
   });
 }
 
-export function useGuardarDiseno(slug: string, id: number) {
+// El id viaja en las variables, no en las opciones del hook: un flush tardío
+// (el de un diseño del que ya se salió) nunca cambia de destino.
+export function useGuardarDiseno(slug: string) {
   const qc = useQueryClient();
-  return useMutation<Diseno, ApiError, { layout: Escena; contrato?: ContratoPlantilla; mensaje?: string }>({
-    mutationFn: (b) => patch<Diseno>(`/brands/${slug}/templates/${id}`, b),
-    onSuccess: () => {
+  return useMutation<
+    Diseno,
+    ApiError,
+    { id: number; layout: Escena; contrato?: ContratoPlantilla; mensaje?: string }
+  >({
+    mutationFn: ({ id, ...b }) => patch<Diseno>(`/brands/${slug}/templates/${id}`, b),
+    onSuccess: (_d, { id }) => {
       qc.invalidateQueries({ queryKey: ["diseno", slug, id] });
       qc.invalidateQueries({ queryKey: ["versiones", slug, id] });
       qc.invalidateQueries({ queryKey: ["disenos", slug] });

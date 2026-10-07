@@ -19,13 +19,17 @@ import { PanelLateral } from "./_components/panel-lateral";
 import { PanelPropiedades } from "./_components/panel-propiedades";
 import { VistaPrevia } from "./_components/vista-previa";
 
+// Se remonta por diseño: así nada de A (temporizadores, filas, mutaciones,
+// diálogos) sobrevive en la pantalla de B.
 export default function DisenoPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
-  const disenoId = Number(id);
+  return <Editor key={id} slug={slug} disenoId={Number(id)} />;
+}
 
+function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
   const disenoQuery = useDiseno(slug, disenoId);
   const marcaQuery = useBrand(slug);
-  const guardarMut = useGuardarDiseno(slug, disenoId);
+  const guardarMut = useGuardarDiseno(slug);
   const activarMut = useActivarDiseno(slug, disenoId);
   const listo = useEditor((s) => s.escena !== null);
   const colorMarca = marcaQuery.data?.color_marca ?? "#000000";
@@ -45,24 +49,27 @@ export default function DisenoPage() {
   const activo = !!diseno?.editable && diseno.layout !== null && diseno.estado === "borrador" && listo;
   const { guardando, error, guardarAhora, restaurar } = useAutoguardado({
     activo,
-    clave: disenoId,
     guardar: (escena, mensaje) =>
-      guardarMut.mutateAsync(mensaje ? { layout: escena, mensaje } : { layout: escena }),
+      guardarMut.mutateAsync(
+        mensaje ? { id: disenoId, layout: escena, mensaje } : { id: disenoId, layout: escena },
+      ),
   });
   useAtajos(activo);
 
   // Al salir del editor el store queda vacío para el siguiente diseño. Va
   // después del autoguardado a propósito: los cleanups corren en orden y su
-  // flush debe leer el store antes de que se vacíe. Depende del id: si cambia
-  // sin remontar, la escena A no puede quedar en el store del diseño B. En
-  // StrictMode el efecto corre dos veces; `sembrado` en null deja resembrar.
-  useEffect(
-    () => () => {
+  // flush debe leer el store antes de que se vacíe. En StrictMode el efecto
+  // corre dos veces; `sembrado` en null deja resembrar. `montado` evita que el
+  // resultado de un revert tardío de este diseño se cargue sobre otro.
+  const montado = useRef(false);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
       sembrado.current = null;
       useEditor.getState().vaciar();
-    },
-    [disenoId],
-  );
+    };
+  }, []);
   const [activando, setActivando] = useState(false);
 
   async function activar() {
@@ -178,7 +185,7 @@ export default function DisenoPage() {
               ocupado={guardando}
               proteger={restaurar}
               onRestaurado={(d) => {
-                if (d.layout) useEditor.getState().cargar(d.layout);
+                if (d.layout && montado.current && d.id === disenoId) useEditor.getState().cargar(d.layout);
               }}
             />
           </>

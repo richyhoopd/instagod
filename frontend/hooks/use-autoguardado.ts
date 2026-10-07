@@ -14,14 +14,10 @@ export function useAutoguardado({
   activo,
   guardar,
   retraso = 2000,
-  clave,
 }: {
   activo: boolean;
   guardar: Guardar;
   retraso?: number;
-  // Identidad del diseño abierto. Si cambia sin remontar, lo pendiente de la
-  // escena vieja se manda (con el guardar viejo) antes de que se vacíe.
-  clave?: unknown;
 }) {
   const sucio = useEditor((s) => s.sucio);
   const revision = useEditor((s) => s.revision);
@@ -39,6 +35,15 @@ export function useAutoguardado({
     guardarRef.current = guardar;
   });
   const cola = useRef<Promise<void>>(Promise.resolve());
+  // Todo lo que toca el servidor (guardados y reverts) corre en esta fila.
+  const encolar = useCallback(<T,>(tarea: () => Promise<T>): Promise<T> => {
+    const p = cola.current.then(tarea);
+    cola.current = p.then(
+      () => {},
+      () => {},
+    );
+    return p;
+  }, []);
 
   const activoRef = useRef(activo);
   useEffect(() => {
@@ -50,8 +55,8 @@ export function useAutoguardado({
   // Resuelve true si guardó o no había nada que guardar; false si un
   // autoguardado falló (con mensaje, en cambio, rechaza).
   const guardarAhora = useCallback((mensaje?: string, instantanea?: Estado): Promise<boolean> => {
-    // Con instantánea (flush de desmontaje o de cambio de diseño) todo se fija
-    // ahora: cuando la fila llegue a correr, la ref ya apunta al diseño nuevo.
+    // Con instantánea (flush de desmontaje) todo se fija ahora: cuando la fila
+    // llegue a correr, la ref puede haber cambiado.
     const guardarFijo = instantanea ? guardarRef.current : null;
     const activoFijo = instantanea ? activoRef.current : null;
     const correr = async (): Promise<boolean> => {
@@ -84,29 +89,27 @@ export function useAutoguardado({
         setGuardando(false);
       }
     };
-    const p = cola.current.then(correr);
-    cola.current = p.then(
-      () => {},
-      () => {},
-    );
-    return p;
-  }, []);
+    return encolar(correr);
+  }, [encolar]);
 
   // Restaurar una versión: vuelca lo pendiente (y espera lo que va en vuelo),
   // pausa el autoguardado mientras corre `accion` y lo reanuda al terminar.
   const restaurar = useCallback(
     async <T,>(accion: () => Promise<T>): Promise<T> => {
       await guardarAhora();
-      pausadoRef.current = true;
-      setPausado(true);
-      try {
-        return await accion();
-      } finally {
-        pausadoRef.current = false;
-        setPausado(false);
-      }
+      // En la fila: un flush de desmontaje no corre en paralelo con el revert.
+      return encolar(async () => {
+        pausadoRef.current = true;
+        setPausado(true);
+        try {
+          return await accion();
+        } finally {
+          pausadoRef.current = false;
+          setPausado(false);
+        }
+      });
     },
-    [guardarAhora],
+    [guardarAhora, encolar],
   );
 
   useEffect(() => {
@@ -115,13 +118,14 @@ export function useAutoguardado({
     return () => clearTimeout(t);
   }, [activo, sucio, pausado, revision, retraso, guardarAhora]);
 
-  // Navegación SPA o cambio de diseño: lo que quedó sucio se manda ahora.
+  // Navegación SPA o cambio de diseño (la página remonta por id): lo que quedó
+  // sucio se manda ahora.
   useEffect(
     () => () => {
       const s = useEditor.getState();
       if (activoRef.current && s.sucio && s.escena) void guardarAhora(undefined, s);
     },
-    [guardarAhora, clave],
+    [guardarAhora],
   );
 
   useEffect(() => {

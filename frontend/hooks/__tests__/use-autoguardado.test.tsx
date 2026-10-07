@@ -325,20 +325,4 @@ describe("useAutoguardado", () => {
       expect(xGuardada(guardar, 0)).toBe(130);
     });
   });
-
-  it("al cambiar la clave hace flush de la escena vieja con el guardar viejo", async () => {
-    const guardarA = vi.fn<Guardar>().mockResolvedValue(undefined);
-    const guardarB = vi.fn<Guardar>().mockResolvedValue(undefined);
-    const { rerender } = renderHook(
-      (p: { clave: number; guardar: Guardar }) => useAutoguardado({ activo: true, guardar: p.guardar, clave: p.clave }),
-      { initialProps: { clave: 1, guardar: guardarA } },
-    );
-    editar(95);
-    rerender({ clave: 2, guardar: guardarB });
-    st().vaciar();
-    await avanzar(0);
-    expect(guardarA).toHaveBeenCalledTimes(1);
-    expect(xGuardada(guardarA, 0)).toBe(95);
-    expect(guardarB).not.toHaveBeenCalled();
-  });
 });

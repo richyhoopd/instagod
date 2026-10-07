@@ -55,7 +55,8 @@ function ignorar(e: KeyboardEvent, s: EstadoEditor): boolean {
   return e.target instanceof Element && e.target.closest('[role="dialog"],[role="alertdialog"]') !== null;
 }
 
-// Cuántas veces se repite una tecla mantenida sin sentido: ⌘D, ⌘V, ⌘G y ⌘Z.
+// Atajos que no deben repetirse al mantener la tecla (auto-repeat): deshacer,
+// rehacer, pegar, duplicar y agrupar.
 const SIN_REPETIR = new Set(["z", "y", "v", "d", "g"]);
 
 function huella(s: EstadoEditor): [unknown, unknown, string] {

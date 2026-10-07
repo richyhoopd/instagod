@@ -23,7 +23,13 @@ vi.mock("../_components/lienzo", () => ({ Lienzo: () => <div data-testid="lienzo
 vi.mock("../_components/panel-capas", () => ({ PanelCapas: () => null }));
 vi.mock("../_components/panel-propiedades", () => ({ PanelPropiedades: () => null }));
 vi.mock("../_components/vista-previa", () => ({ VistaPrevia: () => null }));
-vi.mock("../_components/dialogo-versiones", () => ({ DialogoVersiones: () => null }));
+let alRestaurar: ((d: Diseno) => void) | undefined;
+vi.mock("../_components/dialogo-versiones", () => ({
+  DialogoVersiones: (p: { onRestaurado: (d: Diseno) => void }) => {
+    alRestaurar = p.onRestaurado;
+    return null;
+  },
+}));
 
 import DisenoPage from "../page";
 
@@ -104,7 +110,7 @@ describe("DisenoPage", () => {
     expect(screen.queryByTestId("lienzo")).toBeNull();
   });
 
-  it("cambiar de diseño sin remontar guarda A y vacía el store antes de B", async () => {
+  it("cambiar de diseño remonta: guarda A y vacía el store antes de B", async () => {
     vi.useFakeTimers();
     guardar.mockResolvedValue(undefined);
     diseno = { id: 7, nombre: "A", aspecto: "4:5", estado: "borrador", editable: true, layout: structuredClone(escena) };
@@ -119,5 +125,26 @@ describe("DisenoPage", () => {
     expect(guardar).toHaveBeenCalledTimes(1);
     expect(guardar.mock.calls[0][0].layout.capas.find((c: { id: string }) => c.id === "titulo").x).toBe(90);
     expect(useEditor.getState().escena).toBeNull();
+  });
+
+  it("el resultado de un revert de A no se carga sobre B", async () => {
+    const capas = (x: number) => {
+      const e = structuredClone(escena);
+      e.capas.find((c) => c.id === "titulo")!.x = x;
+      return e;
+    };
+    diseno = { id: 7, nombre: "A", aspecto: "4:5", estado: "borrador", editable: true, layout: capas(10) };
+    const { rerender } = render(<DisenoPage />);
+    const restauraA = alRestaurar!;
+    idRuta = "8";
+    diseno = { id: 8, nombre: "B", aspecto: "4:5", estado: "borrador", editable: true, layout: capas(20) };
+    rerender(<DisenoPage />);
+    const xB = () => useEditor.getState().escena!.capas.find((c) => c.id === "titulo")!.x;
+    expect(xB()).toBe(20);
+    act(() => restauraA({ id: 7, layout: capas(99) } as Diseno));
+    expect(xB()).toBe(20);
+    // El del diseño montado sí se aplica.
+    act(() => alRestaurar!({ id: 8, layout: capas(55) } as Diseno));
+    expect(xB()).toBe(55);
   });
 });
