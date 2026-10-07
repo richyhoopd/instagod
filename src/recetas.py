@@ -35,7 +35,7 @@ _BLOQUE_DATOS = """\
 DATOS VERIFICADOS (FACTS) — únicas cifras citables:
 {% for k, v in item.facts.items() %}- {{ k }}: {{ v }}
 {% endfor %}{% if item.unverified %}
-SIN CONFIRMAR — no lo afirmes; si lo mencionas, di que está por confirmar: {{ item.unverified | join(', ') }}
+SIN CONFIRMAR — no afirmes nada sobre estos temas: {{ item.unverified | join(', ') }}
 {% endif %}{% if item.summary %}
 Resumen: {{ item.summary }}{% endif %}{% if item.body %}
 Descripción: {{ item.body }}{% endif %}
@@ -149,9 +149,15 @@ def item_de(fila: dict) -> dict:
 
 
 def render_prompt(receta: dict, item: dict) -> str:
+    """El prompt de la receta (vive en DB) con lo que el LLM puede ver: sin
+    los facts de `unverified` y sin la URL (la pone generate_slideshow)."""
     from jinja2.sandbox import SandboxedEnvironment
+
+    from src import guion_entidad
+    visible = {**item, "facts": guion_entidad.facts_visibles(item["facts"], item["unverified"]),
+               "url": "(la agrega el sistema; no escribas URLs)"}
     env = SandboxedEnvironment(autoescape=False, trim_blocks=False)
-    return env.from_string(receta["prompt"]).render(item=item).strip()
+    return env.from_string(receta["prompt"]).render(item=visible).strip()
 
 
 def generar_desde_entidad(cx, account_id: int, receta_slug: str, entidad_id: int, *,
@@ -187,6 +193,7 @@ def generar_desde_entidad(cx, account_id: int, receta_slug: str, entidad_id: int
         hechos=item["facts"], no_verificados=item["unverified"],
         entity_id=fila["id"], receta=receta["slug"],
         imagenes_preferidas=item["media"] or None,
+        url_entidad=item["url"] or None,
         extra_brief={"slot_planeado": scheduled_datetime} if scheduled_datetime else None)
 
 

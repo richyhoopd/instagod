@@ -57,7 +57,9 @@ def test_render_prompt_lista_facts_y_sin_confirmar(tmp_path):
     texto = recetas.render_prompt(recetas.por_slug(cx, aid, "ficha-carrusel"), it)
     assert "$1,450,000 MXN" in texto and "m2: 300" in texto
     assert "SIN CONFIRMAR" in texto and "regimen" in texto
-    assert item()["url"] in texto and "{{" not in texto
+    assert "regimen: ejidal" not in texto          # el valor sin confirmar no se ve
+    # La URL ya no la ve el LLM: la pone generate_slideshow (fix 2026-10-07).
+    assert item()["url"] not in texto and "{{" not in texto
 
 
 def test_item_de_prefiere_cdn(tmp_path):
@@ -173,6 +175,10 @@ def test_generar_desde_entidad_pasa_facts_media_y_aspecto(tmp_path):
     assert kw["entity_id"] == eid and kw["receta"] == "tip-con-ejemplo-9x16"
     assert len(kw["imagenes_preferidas"]) == 2
     assert "RECETA tip-con-ejemplo" in kw["contexto"]
+    # La URL la pone el código; el LLM no ve la URL ni los facts sin confirmar.
+    assert kw["url_entidad"] == "https://melaquecapital.com/es/propiedades/lote-esquina-melaque"
+    assert "melaquecapital.com/es/propiedades" not in kw["contexto"]
+    assert "regimen: ejidal" not in kw["contexto"] and "- m2: 300" in kw["contexto"]
 
 
 def test_generar_rechaza_entidad_ajena_inactiva_o_de_otro_tipo(tmp_path):
