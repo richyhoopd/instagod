@@ -323,4 +323,128 @@ describe("PanelPropiedades: efectos y datos", () => {
     fireEvent.blur(tracking);
     expect((capa("titulo") as CapaTexto).estilo.letterSpacing).toBeUndefined();
   });
+
+  const tracking = () => screen.getByRole("textbox", { name: "Tracking" }) as HTMLInputElement;
+
+  it("el tracking inválido no toca el store y revierte el input", () => {
+    montarConCampos(["titulo"]);
+    for (const malo of ["abc", "2", "1234px", "1.2345em", "2 px", "px"]) {
+      fireEvent.change(tracking(), { target: { value: malo } });
+      fireEvent.blur(tracking());
+      expect((capa("titulo") as CapaTexto).estilo.letterSpacing).toBe("-0.02em");
+      expect(tracking().value).toBe("-0.02em");
+    }
+    expect(st().pasado).toHaveLength(0);
+    for (const bueno of ["-0.03em", "2px", "0.5em", "-12.25px"]) {
+      fireEvent.change(tracking(), { target: { value: bueno } });
+      fireEvent.blur(tracking());
+      expect((capa("titulo") as CapaTexto).estilo.letterSpacing).toBe(bueno);
+    }
+  });
+
+  it("el tracking sigue al store tras deshacer", () => {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().aplicar([{ op: "set", capa: "titulo", ruta: "estilo.letterSpacing", valor: undefined }]);
+    st().seleccionar(["titulo"]);
+    render(<PanelPropiedades colorMarca="#ff3366" campos={CAMPOS} />);
+    fireEvent.change(tracking(), { target: { value: "2px" } });
+    fireEvent.blur(tracking());
+    expect(tracking().value).toBe("2px");
+    act(() => st().deshacer());
+    expect(tracking().value).toBe("");
+  });
+
+  function conImagenSinSrc(tipo: "image" | "video") {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().editarEscena((d) => {
+      const l = d.capas.find((x) => x.id === "logo") as unknown as { tipo: string; src: string | null; campo: string | null };
+      l.tipo = tipo;
+      l.src = null;
+      l.campo = "logo";
+    });
+    st().seleccionar(["logo"]);
+    render(<PanelPropiedades colorMarca="#ff3366" campos={CAMPOS} />);
+  }
+
+  it.each(["image", "video"] as const)("%s sin src no se puede desvincular", (tipo) => {
+    conImagenSinSrc(tipo);
+    const ninguno = [...combo("Dato").options].find((o) => o.value === "")!;
+    expect(ninguno.disabled).toBe(true);
+    expect(ninguno.title).toMatch(/src/i);
+  });
+
+  it("una imagen con src sí se puede desvincular", () => {
+    montarConCampos(["logo"]);
+    act(() =>
+      st().editarEscena((d) => {
+        const l = d.capas.find((x) => x.id === "logo") as unknown as { tipo: string; campo: string | null };
+        l.tipo = "image";
+        l.campo = "logo";
+      }),
+    );
+    const ninguno = [...combo("Dato").options].find((o) => o.value === "")!;
+    expect(ninguno.disabled).toBe(false);
+  });
+
+  it("una mezcla fuera de la lista se muestra", () => {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().aplicar([{ op: "set", capa: "caja", ruta: "estilo.mixBlendMode", valor: "color-dodge" }]);
+    st().seleccionar(["caja"]);
+    render(<PanelPropiedades colorMarca="#ff3366" />);
+    expect(combo("Mezcla").value).toBe("color-dodge");
+    expect([...combo("Mezcla").options].some((o) => o.value === "color-dodge")).toBe(true);
+  });
+
+  it("screen se llama Pantalla", () => {
+    montarConCampos(["caja"]);
+    expect([...combo("Mezcla").options].find((o) => o.value === "screen")!.textContent).toBe("Pantalla");
+  });
+
+  it("el borde se acota a 200 como el backend", () => {
+    montarConCampos(["caja"]);
+    fireEvent.change(campo("Borde"), { target: { value: "500" } });
+    fireEvent.blur(campo("Borde"));
+    expect((capa("caja") as CapaForma).estilo.borderWidth).toBe(200);
+  });
+
+  it("capa bloqueada deshabilita Dato, Efectos, Tracking, Borde y Color de borde", () => {
+    montarConCampos(["titulo"]);
+    act(() => st().editarEscena((d) => void (d.capas.find((c) => c.id === "titulo")!.bloqueada = true)));
+    expect(combo("Dato").disabled).toBe(true);
+    expect(tracking().disabled).toBe(true);
+    act(() => st().seleccionar(["caja"]));
+    act(() => st().editarEscena((d) => void (d.capas.find((c) => c.id === "caja")!.bloqueada = true)));
+    expect(combo("Mezcla").disabled).toBe(true);
+    expect(combo("Sombra").disabled).toBe(true);
+    expect(campo("Borde").disabled).toBe(true);
+    expect(combo("Color de borde").disabled).toBe(true);
+  });
+
+  it("deshacer tras cambiar Efectos y Dato", () => {
+    montarConCampos(["titulo"]);
+    fireEvent.change(combo("Dato"), { target: { value: "titular" } });
+    expect(combo("Dato").value).toBe("titular");
+    act(() => st().deshacer());
+    expect(combo("Dato").value).toBe("");
+    act(() => st().seleccionar(["caja"]));
+    fireEvent.change(combo("Sombra"), { target: { value: "drop-shadow(0 8px 16px rgba(0,0,0,.25))" } });
+    act(() => st().deshacer());
+    expect(combo("Sombra").value).toBe("none");
+    fireEvent.change(combo("Mezcla"), { target: { value: "multiply" } });
+    act(() => st().deshacer());
+    expect(combo("Mezcla").value).toBe("normal");
+  });
+
+  it("un campo fuera del contrato se conserva como huérfano", () => {
+    st().vaciar();
+    st().cargar(structuredClone(base));
+    st().aplicar([{ op: "set", capa: "titulo", ruta: "campo", valor: "viejo" }]);
+    st().seleccionar(["titulo"]);
+    render(<PanelPropiedades colorMarca="#ff3366" campos={CAMPOS} />);
+    expect(combo("Dato").value).toBe("viejo");
+    expect([...combo("Dato").options].some((o) => o.textContent === "viejo (no está en el contrato)")).toBe(true);
+  });
 });

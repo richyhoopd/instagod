@@ -47,7 +47,7 @@ const SOMBRAS = [
 const MEZCLAS = [
   { valor: "normal", nombre: "Normal" },
   { valor: "multiply", nombre: "Multiplicar" },
-  { valor: "screen", nombre: "Trama" },
+  { valor: "screen", nombre: "Pantalla" },
   { valor: "overlay", nombre: "Superponer" },
   { valor: "darken", nombre: "Oscurecer" },
   { valor: "lighten", nombre: "Aclarar" },
@@ -115,6 +115,41 @@ export function CampoNumero({
 }
 
 const FUENTE_INVALIDA = /['"\\]/;
+// Misma regex que _TRACKING en src/plantillas/escena.py.
+const TRACKING_VALIDO = /^-?\d{1,3}(\.\d{1,3})?(em|px)$/;
+
+function CampoTracking({ valor, deshabilitado, onCommit }: { valor: string; deshabilitado: boolean; onCommit: (v: string | undefined) => void }) {
+  const [texto, setTexto] = useState(valor);
+  const [previo, setPrevio] = useState(valor);
+  if (previo !== valor) {
+    setPrevio(valor);
+    setTexto(valor);
+  }
+  const confirmar = () => {
+    const v = texto.trim();
+    if (v !== "" && !TRACKING_VALIDO.test(v)) return setTexto(valor);
+    setTexto(v);
+    if (v !== valor) onCommit(v || undefined);
+  };
+  return (
+    <Label className="flex flex-col items-stretch gap-1 text-xs text-muted-foreground">
+      Tracking
+      <input
+        aria-label="Tracking"
+        value={texto}
+        placeholder="-0.02em"
+        disabled={deshabilitado}
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground disabled:opacity-50"
+        onChange={(ev) => setTexto(ev.target.value)}
+        onBlur={confirmar}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") confirmar();
+          if (ev.key === "Escape") setTexto(valor);
+        }}
+      />
+    </Label>
+  );
+}
 
 function CampoFuente({ valor, deshabilitado, onCommit }: { valor: string; deshabilitado: boolean; onCommit: (v: string) => void }) {
   const [texto, setTexto] = useState(valor);
@@ -240,7 +275,7 @@ function Selector<T extends string | number>({
 }: {
   etiqueta: string;
   valor: T;
-  opciones: { valor: T; nombre: string }[];
+  opciones: { valor: T; nombre: string; deshabilitada?: string }[];
   onCambio: (v: T) => void;
   deshabilitado?: boolean;
 }) {
@@ -261,7 +296,7 @@ function Selector<T extends string | number>({
         }}
       >
         {opciones.map((o) => (
-          <option key={String(o.valor)} value={String(o.valor)}>
+          <option key={String(o.valor)} value={String(o.valor)} disabled={!!o.deshabilitada} title={o.deshabilitada}>
             {o.nombre}
           </option>
         ))}
@@ -404,20 +439,7 @@ function PropiedadesDeTipo({
           deshabilitado={bloq}
           onCommit={(v) => set("estilo.color", v)}
         />
-        <Label className="flex flex-col items-stretch gap-1 text-xs text-muted-foreground">
-          Tracking
-          <input
-            aria-label="Tracking"
-            defaultValue={e.letterSpacing ?? ""}
-            placeholder="-0.02em"
-            disabled={bloq}
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground disabled:opacity-50"
-            onBlur={(ev) => {
-              const v = ev.target.value.trim();
-              if (v !== (e.letterSpacing ?? "")) set("estilo.letterSpacing", v || undefined);
-            }}
-          />
-        </Label>
+        <CampoTracking valor={e.letterSpacing ?? ""} deshabilitado={bloq} onCommit={(v) => set("estilo.letterSpacing", v)} />
       </Seccion>
     );
   }
@@ -437,7 +459,7 @@ function PropiedadesDeTipo({
           etiqueta="Borde"
           valor={c.estilo.borderWidth ?? 0}
           min={0}
-          max={100}
+          max={200}
           deshabilitado={bloq}
           onCommit={(n) => set("estilo.borderWidth", n)}
         />
@@ -475,9 +497,15 @@ function Dato({ capa: c, campos, bloq }: { capa: Capa; campos: Campos; bloq: boo
   if (c.tipo !== "text" && c.tipo !== "image" && c.tipo !== "video") return null;
   const lista = c.tipo === "text" ? campos.texto : campos.imagen;
   const actual = c.campo ?? "";
+  const sinSrc = (c.tipo === "image" || c.tipo === "video") && !c.src;
   // Un campo que ya no está en el contrato se sigue mostrando para no perderlo.
   const opciones = [
-    { valor: "", nombre: "Ninguno" },
+    {
+      valor: "",
+      nombre: "Ninguno",
+      // El backend exige src cuando la capa no tiene campo: sin src, desvincular la deja inválida.
+      deshabilitada: sinSrc ? "Esta capa no tiene src propio: elige un dato o súbele una imagen primero." : undefined,
+    },
     ...lista.map((x) => ({ valor: x, nombre: x })),
     ...(actual && !lista.includes(actual) ? [{ valor: actual, nombre: `${actual} (no está en el contrato)` }] : []),
   ];
