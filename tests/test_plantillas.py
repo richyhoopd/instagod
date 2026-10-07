@@ -212,3 +212,69 @@ def test_revertir_recupera_el_layout_viejo(tmp_path) -> None:
     plantillas.revertir(cx, tid, 1)
     assert plantillas.layout_de(plantillas.obtener(cx, tid))["lienzo"][
         "fondo"] == "#ffffff"
+
+
+# ---------- despacho v1/v2 ----------
+
+def test_crear_y_versionar_con_escena_v2(tmp_path) -> None:
+    from src.plantillas import escena
+    cx = _cx(tmp_path)
+    esc = escena.normalizar(None, "4:5")
+    tid = plantillas.crear(cx, 1, "V2", "", _ct(), layout=esc)
+    fila = plantillas.obtener(cx, tid)
+    assert plantillas.layout_de(fila)["v"] == 2
+    assert 'class="card"' in fila["html"] and "capa-titular" in fila["html"]
+    esc["capas"][1]["estilo"]["fontSize"] = 90
+    plantillas.nueva_version(cx, tid, "", _ct(), layout=esc)
+    assert "font-size:90px" in plantillas.obtener(cx, tid)["html"]
+
+
+def test_escena_v2_invalida_es_contrato_invalido(tmp_path) -> None:
+    from src.plantillas import escena
+    cx = _cx(tmp_path)
+    esc = escena.normalizar(None, "4:5")
+    esc["capas"][1]["estilo"]["fontFamily"] = "Papyrus"
+    with pytest.raises(plantillas.ContratoInvalido, match="tipograf"):
+        plantillas.crear(cx, 1, "Mala", "", _ct(), layout=esc)
+
+
+def test_escena_de_normaliza_y_layout_de_no(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    tid = plantillas.crear(cx, 1, "V1", "", _ct(), layout=layout.vacio("4:5"))
+    fila = plantillas.obtener(cx, tid)
+    assert plantillas.layout_de(fila)["v"] == 1
+    assert plantillas.escena_de(fila)["v"] == 2
+    assert plantillas.escena_de(fila)["lienzo"]["formato"] == "4x5"
+
+
+def test_escena_de_un_legacy_es_none(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    tid = plantillas.crear(cx, 1, "Legacy", _HTML, _ct())
+    assert plantillas.escena_de(plantillas.obtener(cx, tid)) is None
+
+
+def test_compilar_despacha_por_version() -> None:
+    from src.plantillas import escena
+    ct = _ct()
+    assert plantillas.compilar(layout.vacio("4:5"), ct) == layout.a_html(layout.vacio("4:5"), ct)
+    esc = escena.normalizar(None, "4:5")
+    assert plantillas.compilar(esc, ct) == escena.a_html(esc, ct)
+    with pytest.raises(plantillas.ContratoInvalido):
+        plantillas.validar_diseno({"v": 3}, ct)
+
+
+@pytest.mark.parametrize("malo", [{"v": 3}, {"v": "2"}, {}, {"v": None}, [], "x", None])
+def test_version_desconocida_o_malformada_es_contrato_invalido(malo) -> None:
+    with pytest.raises(plantillas.ContratoInvalido):
+        plantillas.compilar(malo, _ct())
+    with pytest.raises(plantillas.ContratoInvalido):
+        plantillas.validar_diseno(malo, _ct())
+
+
+def test_v1_en_servicio_html_identico_al_compilador_v1(tmp_path) -> None:
+    """Las plantillas v1 de producción deben dar el mismo HTML que antes."""
+    cx = _cx(tmp_path)
+    lay = layout.vacio("4:5")
+    tid = plantillas.crear(cx, 1, "V1", "", _ct(), layout=lay)
+    assert plantillas.obtener(cx, tid)["html"] == layout.a_html(
+        lay, _ct(), fuentes=plantillas.fuentes_tipograficas.catalogo(cx, 1))

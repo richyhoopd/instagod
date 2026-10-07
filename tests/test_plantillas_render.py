@@ -133,3 +133,12 @@ def test_render_reproduce_el_png_del_archivo_byte_a_byte(slug, tmp_path) -> None
     assert _sha(nuevo) == _sha(viejo), (
         f"render.render() de '{slug}' no reproduce el PNG del archivo de templates/"
     )
+
+
+def test_contexto_trae_assets_dir(tmp_path) -> None:
+    from src.image_sources import BRANDS_DIR
+    cx = _cx(tmp_path)
+    m = marcas.cargar(cx, "gdlscene")
+    ctx = R.contexto(m, {"titular": "x"})
+    assert ctx["assets_dir"] == (BRANDS_DIR / m.slug / "assets").as_uri()
+    assert R.contexto(m, {}, assets_dir="file:///tmp/a")["assets_dir"] == "file:///tmp/a"

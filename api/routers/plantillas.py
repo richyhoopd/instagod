@@ -1,6 +1,7 @@
 """Endpoints de plantillas/diseños del portal."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +11,13 @@ from pydantic import BaseModel, Field
 
 from api.deps import get_cx, marca_para, usuario_actual
 from api.errors import no_encontrado
+from api.routers.brands import _SLUG_RE
 from api.routers.fuentes_api import listar_photos
 from src import compose, jobs, marcas, plantillas
 from src.image_sources import BRANDS_DIR
 from src.plantillas import contrato as contrato_mod
+from src.plantillas import escena as escena_mod
 from src.plantillas import fuentes_tipograficas, preview
-from src.plantillas import layout as layout_mod
 
 router = APIRouter(prefix="/brands/{slug}", tags=["posts"])
 
@@ -35,11 +37,15 @@ def _plantilla_de_marca(cx, account_id: int, template_id: int) -> dict:
 @router.get("/templates")
 def listar_templates(slug: str,
                      estado: str | None = Query(
-                         None, pattern="^(activa|borrador|archivada)$"),
+                         None, pattern="^(activa|borrador|archivada|todas)$"),
                      user: dict = Depends(usuario_actual),
                      cx=Depends(get_cx)) -> list[dict]:
     fila, _ = marca_para(slug, cx, user)
-    activas = plantillas.listar(cx, fila["id"], estado=estado or "activa")
+    # Sin parámetro sigue siendo «activas» (lo usa el creador de posts);
+    # el editor pide `todas` para su lista. `listar` filtra siempre por la
+    # cuenta de la marca, `todas` solo quita el filtro de estado.
+    filtro = None if estado == "todas" else (estado or "activa")
+    activas = plantillas.listar(cx, fila["id"], estado=filtro)
     return [
         {
             "id": t["id"],
@@ -76,7 +82,7 @@ def preview_template(slug: str, tid: int, user: dict = Depends(usuario_actual),
 
 class DisenoNuevo(BaseModel):
     nombre: str = Field(min_length=1, max_length=80)
-    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
     layout: dict[str, Any] | None = None
     contrato: dict[str, Any] | None = None
 
@@ -90,17 +96,26 @@ class DisenoGuardado(BaseModel):
 class VistaPrevia(BaseModel):
     layout: dict[str, Any]
     contrato: dict[str, Any] | None = None
-    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
 
 
 class PedirDiseno(BaseModel):
     instruccion: str = Field(min_length=1, max_length=2000)
-    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
     template_id: int | None = None
 
 
 def _vista(fila) -> dict[str, Any]:
-    """Cómo ve el portal un diseño. Nunca expone el HTML: es derivado."""
+    """Cómo ve el portal un diseño. Nunca expone el HTML: es derivado.
+
+    Un layout guardado que no se puede convertir a v2 (malformado en la BD) no
+    tumba la lectura: sale `layout: None`, `editable: False` y el motivo en
+    `layout_error`. La BD no se toca; el diseño se puede duplicar o sustituir.
+    """
+    try:
+        layout, error = plantillas.escena_de(fila), None
+    except escena_mod.EscenaInvalida as exc:
+        layout, error = None, str(exc)
     return {
         "id": fila["id"],
         "nombre": fila["nombre"],
@@ -109,8 +124,9 @@ def _vista(fila) -> dict[str, Any]:
         "estado": fila["estado"],
         "version_actual": fila["version_actual"],
         "contrato": plantillas.contrato_de(fila),
-        "layout": plantillas.layout_de(fila),
-        "editable": plantillas.es_editable(fila),
+        "layout": layout,
+        "editable": error is None and plantillas.es_editable(fila),
+        "layout_error": error,
     }
 
 
@@ -136,7 +152,7 @@ def crear_diseno(slug: str, cuerpo: DisenoNuevo, user: dict = Depends(usuario_ac
         "base": list(contrato_mod.CAMPOS_BASE),
         "extras": [],
     }
-    layout_dict = cuerpo.layout or layout_mod.vacio(cuerpo.aspecto)
+    layout_dict = cuerpo.layout or escena_mod.normalizar(None, cuerpo.aspecto)
     try:
         tid = plantillas.crear(cx, marca["id"], cuerpo.nombre, "",
                                contrato_dict, layout=layout_dict,
@@ -152,6 +168,16 @@ def guardar_diseno(slug: str, tid: int, cuerpo: DisenoGuardado,
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     fila = _plantilla_de_marca(cx, marca["id"], tid)
     contrato_dict = cuerpo.contrato or plantillas.contrato_de(fila)
+    lienzo = cuerpo.layout.get("lienzo")
+    # Sin guardas de tipo: un lienzo str o un formato lista se dejan pasar tal
+    # cual y `nueva_version` los rechaza con 422 al validar.
+    formato = (lienzo.get("formato")
+               if cuerpo.layout.get("v") == 2 and isinstance(lienzo, dict) else None)
+    if (cuerpo.contrato is None and isinstance(formato, str)
+            and formato in escena_mod.ASPECTO_DE_FORMATO):
+        # El editor cambia de formato sin mandar el contrato: el aspecto lo
+        # dicta el lienzo, y `nueva_version` lo copia a brand_templates.aspecto.
+        contrato_dict = {**contrato_dict, "aspecto": escena_mod.ASPECTO_DE_FORMATO[formato]}
     try:
         plantillas.nueva_version(cx, tid, "", contrato_dict,
                                  mensaje_usuario=cuerpo.mensaje,
@@ -175,10 +201,11 @@ def vista_previa(slug: str, cuerpo: VistaPrevia, user: dict = Depends(usuario_ac
     # pantalla al instante, no un trabajo que falla treinta segundos después.
     try:
         # El contrato primero, en el mismo orden que `plantillas._validado`:
-        # `layout.validar` no revisa el aspecto, y `a_html` lo indexa a pelo
-        # (`LIENZO[contrato["aspecto"]]`, src/plantillas/layout.py:371).
+        # `plantillas.validar_diseno` (v1 o v2) no revisa el aspecto, y
+        # `a_html` lo indexa a pelo (`LIENZO[contrato["aspecto"]]`,
+        # src/plantillas/layout.py:371).
         contrato_mod.validar(contrato_dict)
-        layout_mod.validar(
+        plantillas.validar_diseno(
             cuerpo.layout, contrato_dict,
             familias=fuentes_tipograficas.familias(cx, marca["id"]))
     except contrato_mod.ContratoInvalido as exc:
@@ -217,10 +244,12 @@ def duplicar_diseno(slug: str, tid: int, user: dict = Depends(usuario_actual),
                     cx=Depends(get_cx)) -> dict:
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     fila = _plantilla_de_marca(cx, marca["id"], tid)
+    # Crudo, no `escena_de`: la copia conserva el layout tal cual (v1 sigue v1,
+    # v2 sigue v2); convertir de más reescribiría el diseño sin que nadie lo pida.
     layout_existente = plantillas.layout_de(fila)
     if layout_existente is None:
         # Legacy sin capas: la copia arranca un lienzo en blanco, editable.
-        layout_nuevo = layout_mod.vacio(fila["aspecto"])
+        layout_nuevo = escena_mod.normalizar(None, fila["aspecto"])
         nombre_nuevo = f"{fila['nombre']} (editable)"
     else:
         layout_nuevo = layout_existente
@@ -322,6 +351,39 @@ def archivo_fuente(slug: str, familia: str, user: dict = Depends(usuario_actual)
     return FileResponse(ruta, media_type=_TIPO_FUENTE[ruta.suffix.lower()],
                         headers={"X-Content-Type-Options": "nosniff",
                                  "Cache-Control": "public, max-age=604800"})
+
+
+_TIPO_ASSET = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
+               ".mp4": "video/mp4", ".webm": "video/webm"}
+_ARCHIVO_ASSET = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
+
+
+@router.get("/files/assets/{archivo}")
+def archivo_asset(slug: str, archivo: str, user: dict = Depends(usuario_actual),
+                  cx=Depends(get_cx)) -> FileResponse:
+    """Los bytes de una imagen o video de la biblioteca de la marca.
+
+    Es lo que pinta el lienzo del editor para una capa con `src: assets/<archivo>`.
+    Mismo blindaje que `archivo_fuente`: nombre por regex (fullmatch: un salto de
+    línea al final no pasa), ruta resuelta dentro de la carpeta de ESTA marca (un
+    symlink que apunte fuera no pasa) y lista blanca de extensiones. El SVG va con
+    CSP sandbox: abierto directo en el navegador no puede correr scripts.
+    """
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    if not _SLUG_RE.match(marca["slug"]) or not _ARCHIVO_ASSET.fullmatch(archivo):
+        raise no_encontrado("ese archivo")
+    carpeta = (BRANDS_DIR / marca["slug"] / "assets").resolve()
+    ruta = (carpeta / archivo).resolve()
+    tipo = _TIPO_ASSET.get(ruta.suffix.lower())
+    if tipo is None or not ruta.is_relative_to(carpeta) or not ruta.is_file():
+        raise no_encontrado("ese archivo")
+    headers = {"X-Content-Type-Options": "nosniff",
+               "Cache-Control": "private, max-age=86400"}
+    if tipo == "image/svg+xml":
+        headers["Content-Security-Policy"] = (
+            "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    return FileResponse(ruta, media_type=tipo, headers=headers)
 
 
 @router.get("/stickers")

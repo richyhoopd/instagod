@@ -1,233 +1,271 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { dentro, imantar, LIENZO, type Capa, type Layout } from "@/lib/layout";
-import { CapaVista, type Asa } from "./capa-vista";
+import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Moveable from "react-moveable";
+import Selecto from "react-selecto";
+import { Button } from "@/components/ui/button";
+import { expandir } from "@/lib/edicion";
+import { imanActivo, normalizarAngulo, ocultasEfectivas, type Escena, type Op } from "@/lib/escena";
+import { alternar, encuadre, raicesSeleccionables, zoomEnPunto } from "@/lib/vista";
+import { useEditor } from "@/stores/editor";
+import { Escenario, fondoCss } from "./capa-vista";
+import { EditorTexto } from "./editor-texto";
 
-// Qué bordes mueve cada asa. El asa arrastra siempre su propia esquina y deja
-// quieta la opuesta.
-const REDIM: Record<Asa, (c: Capa, dx: number, dy: number) => Partial<Capa>> = {
-  se: (c, dx, dy) => ({ w: c.w + dx, h: c.h + dy }),
-  sw: (c, dx, dy) => ({ x: c.x + dx, w: c.w - dx, h: c.h + dy }),
-  ne: (c, dx, dy) => ({ y: c.y + dy, w: c.w + dx, h: c.h - dy }),
-  nw: (c, dx, dy) => ({ x: c.x + dx, y: c.y + dy, w: c.w - dx, h: c.h - dy }),
-};
+type Props = { slug: string; colorMarca: string; ajustarAlCargar?: boolean };
+type Gesto = { t?: number[]; w?: number; h?: number; rot?: number };
+type Pan = { x: number; y: number };
 
-const MINIMO = 8;
+const PAN_INICIAL: Pan = { x: 32, y: 32 };
+const selector = (id: string) => `#marco .capa[data-id="${id}"]`;
 
-export function Lienzo({
-  layout,
-  aspecto,
-  seleccion,
-  slug,
-  colorMarca,
-  fuentes,
-  stickers,
-  onSeleccionar,
-  onCambiar,
-  onBorrar,
-  rejilla,
-}: {
-  layout: Layout;
-  aspecto: string;
-  seleccion: string | null;
-  slug: string;
-  colorMarca: string;
-  fuentes: { familia: string; propia: boolean }[];
-  stickers: { nombre: string; url: string }[];
-  onSeleccionar: (id: string | null) => void;
-  onCambiar: (capa: Capa) => void;
-  onBorrar: (id: string) => void;
-  rejilla: boolean;
-}) {
-  const { ancho, alto } = LIENZO[aspecto] ?? LIENZO["4:5"];
+// Moveable escribe directo en el DOM. Al soltar se regresa el nodo a lo que
+// dice el store; el commit siguiente pinta la posición nueva.
+function restaurar(escena: Escena, el: HTMLElement | SVGElement) {
+  const c = escena.capas.find((x) => x.id === el.getAttribute("data-id"));
+  if (!c) return;
+  el.style.left = `${c.x}px`;
+  el.style.top = `${c.y}px`;
+  el.style.width = `${c.w}px`;
+  el.style.height = `${c.h}px`;
+  el.style.transform = `rotate(${c.rot}deg)`;
+}
 
-  // El lienzo real mide 1080 px de ancho y en pantalla cabe en bastante menos.
-  // Todo se dibuja en coordenadas reales y se encoge con un `scale`, así lo que
-  // se guarda no depende del monitor de quien lo acomodó.
-  const ref = useRef<HTMLDivElement>(null);
-  const [escala, setEscala] = useState(0.4);
+export function Lienzo({ slug, colorMarca, ajustarAlCargar = true }: Props) {
+  const escena = useEditor((s) => s.escena);
+  const seleccion = useEditor((s) => s.seleccion);
+  const zoom = useEditor((s) => s.zoom);
+  const editandoTexto = useEditor((s) => s.editandoTexto);
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) =>
-      // Un ancestro oculto reporta ancho 0 y una escala 0 vuelve infinitos
-      // los deltas y las asas. El piso mantiene el lienzo utilizable.
-      setEscala(Math.max(0.05, e.contentRect.width / ancho))
-    );
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ancho]);
+  const [marco, setMarco] = useState<HTMLDivElement | null>(null);
+  const [pan, setPan] = useState<Pan>(PAN_INICIAL);
+  const panRef = useRef<Pan>(PAN_INICIAL);
+  const moveableRef = useRef<Moveable>(null);
+  const gesto = useRef<Gesto | null>(null);
 
-  // Posición del elemento al empezar el gesto. El arrastre reporta el delta
-  // acumulado, así que hay que recordar de dónde salió.
-  const partida = useRef<Capa | null>(null);
-
-  // Con Alt se ignora el imán y el movimiento es fino. Es la convención de
-  // todos los editores; se lee de la ventana porque el gesto ya está en curso
-  // cuando la tecla se aprieta.
-  const alt = useRef(false);
-  useEffect(() => {
-    const marcar = (e: KeyboardEvent) => {
-      alt.current = e.altKey;
-    };
-    // Al salir de la ventana con Alt apretado no llega el `keyup` y el imán
-    // se quedaría apagado en silencio.
-    const soltar = () => {
-      alt.current = false;
-    };
-    window.addEventListener("keydown", marcar);
-    window.addEventListener("keyup", marcar);
-    window.addEventListener("blur", soltar);
-    return () => {
-      window.removeEventListener("keydown", marcar);
-      window.removeEventListener("keyup", marcar);
-      window.removeEventListener("blur", soltar);
-    };
+  const fijarPan = useCallback((p: Pan) => {
+    panRef.current = p;
+    setPan(p);
   }, []);
 
-  const paso = {
-    x: ancho / Math.max(1, layout.guias.cols),
-    y: alto / Math.max(1, layout.guias.filas),
+  const ajustar = useCallback(() => {
+    const st = useEditor.getState();
+    if (!marco || !st.escena) return;
+    const r = marco.getBoundingClientRect();
+    const v = encuadre({ w: r.width, h: r.height }, st.escena.lienzo);
+    st.setZoom(v.zoom);
+    fijarPan({ x: v.x, y: v.y });
+  }, [marco, fijarPan]);
+
+  // Ajusta al montar, al cambiar de formato y al cambiar el tamaño del marco.
+  // El setState ocurre en el callback del observer, no en el cuerpo del efecto.
+  const claveLienzo = escena ? `${escena.lienzo.w}x${escena.lienzo.h}` : null;
+  useEffect(() => {
+    if (!ajustarAlCargar || !marco || !claveLienzo) return;
+    const ro = new ResizeObserver(() => ajustar());
+    ro.observe(marco);
+    return () => ro.disconnect();
+  }, [ajustarAlCargar, marco, claveLienzo, ajustar]);
+
+  // Rueda: con ctrl/cmd (o pellizco del trackpad) hace zoom en el cursor; sin, desplaza.
+  useEffect(() => {
+    if (!marco) return;
+    const rueda = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const st = useEditor.getState();
+      if (ev.ctrlKey || ev.metaKey) {
+        const r = marco.getBoundingClientRect();
+        const v = zoomEnPunto(
+          { zoom: st.zoom, ...panRef.current },
+          st.zoom * Math.exp(-ev.deltaY / 300),
+          ev.clientX - r.left,
+          ev.clientY - r.top,
+        );
+        st.setZoom(v.zoom);
+        fijarPan({ x: v.x, y: v.y });
+      } else {
+        fijarPan({ x: panRef.current.x - ev.deltaX, y: panRef.current.y - ev.deltaY });
+      }
+    };
+    marco.addEventListener("wheel", rueda, { passive: false });
+    return () => marco.removeEventListener("wheel", rueda);
+  }, [marco, fijarPan]);
+
+  const objetivos = useMemo(() => {
+    if (!escena || editandoTexto) return [];
+    const ocultas = ocultasEfectivas(escena);
+    const m = new Map(escena.capas.map((c) => [c.id, c]));
+    return expandir(escena, seleccion).filter((id) => !ocultas.has(id) && !m.get(id)?.bloqueada);
+  }, [escena, seleccion, editandoTexto]);
+  const unaHoja = objetivos.length === 1 && seleccion.length === 1 && seleccion[0] === objetivos[0];
+
+  // La caja de Moveable se recalcula cuando cambia lo que hay debajo.
+  useEffect(() => {
+    moveableRef.current?.updateRect();
+  }, [escena, zoom, pan]);
+
+  const terminar = (targets: (HTMLElement | SVGElement)[]): Gesto | null => {
+    const g = gesto.current;
+    gesto.current = null;
+    const e = useEditor.getState().escena;
+    if (e) targets.forEach((el) => restaurar(e, el));
+    return g;
   };
 
-  // Las tipografías propias de la marca solo se ven bien si el navegador las
-  // baja; el endpoint las sirve por familia y se autentica con la cookie.
-  const css = useMemo(
-    () =>
-      fuentes
-        .map(
-          (f) =>
-            `@font-face{font-family:${JSON.stringify(f.familia)};` +
-            `src:url('/api/brands/${slug}/files/fonts/${encodeURIComponent(f.familia)}');` +
-            `font-display:block;}`
-        )
-        .join("\n"),
-    [fuentes, slug]
-  );
+  const confirmarMovimiento = (g: Gesto | null) => {
+    if (g?.t) useEditor.getState().mover(Math.round(g.t[0]), Math.round(g.t[1]));
+  };
 
-  const capaSel = layout.capas.find((c) => c.id === seleccion) ?? null;
-
-  function arrastrar(capa: Capa, dx: number, dy: number) {
-    const base = (partida.current ??= capa);
-    const libre = alt.current;
-    onCambiar(
-      dentro(
-        {
-          ...base,
-          x: libre ? Math.round(base.x + dx) : imantar(base.x + dx, paso.x, layout.guias.iman),
-          y: libre ? Math.round(base.y + dy) : imantar(base.y + dy, paso.y, layout.guias.iman),
-        },
-        ancho,
-        alto
-      )
-    );
-  }
-
-  function redimensionar(capa: Capa, asa: Asa, dx: number, dy: number) {
-    const base = (partida.current ??= capa);
-    // Si el tirón pasa de largo el borde opuesto, acotar `w` y `h` después no
-    // basta: `x`/`y` ya se movieron y el elemento salta más allá del borde que
-    // debía quedarse quieto. Se acota el delta antes de repartirlo.
-    const mueveIzq = asa === "sw" || asa === "nw";
-    const mueveArr = asa === "ne" || asa === "nw";
-    const ddx = mueveIzq ? Math.min(dx, base.w - MINIMO) : Math.max(dx, MINIMO - base.w);
-    const ddy = mueveArr ? Math.min(dy, base.h - MINIMO) : Math.max(dy, MINIMO - base.h);
-    const cambio = REDIM[asa](base, ddx, ddy);
-    onCambiar(
-      dentro(
-        {
-          ...base,
-          ...cambio,
-          w: Math.max(MINIMO, cambio.w ?? base.w),
-          h: Math.max(MINIMO, cambio.h ?? base.h),
-        },
-        ancho,
-        alto
-      )
-    );
-  }
-
-  function teclado(e: React.KeyboardEvent) {
-    if (!capaSel) return;
-    if (e.key === "Escape") {
-      onSeleccionar(null);
-      return;
-    }
-    if (e.key === "Delete" || e.key === "Backspace") {
-      e.preventDefault();
-      onBorrar(capaSel.id);
-      return;
-    }
-    const salto = e.shiftKey ? 10 : 1;
-    const mueve: Record<string, [number, number]> = {
-      ArrowLeft: [-salto, 0],
-      ArrowRight: [salto, 0],
-      ArrowUp: [0, -salto],
-      ArrowDown: [0, salto],
-    };
-    const d = mueve[e.key];
-    if (!d) return;
-    e.preventDefault();
-    onCambiar(dentro({ ...capaSel, x: capaSel.x + d[0], y: capaSel.y + d[1] }, ancho, alto));
-  }
+  if (!escena) return null;
+  const { w: W, h: H } = escena.lienzo;
+  const capaEditada = editandoTexto ? escena.capas.find((c) => c.id === editandoTexto) : undefined;
 
   return (
-    <div
-      ref={ref}
-      tabIndex={0}
-      onKeyDown={teclado}
-      onPointerDown={() => onSeleccionar(null)}
-      style={{ height: alto * escala }}
-      className="relative w-full overflow-hidden rounded-lg border outline-none"
-    >
-      <style>{css}</style>
+    <div className="relative h-full w-full">
       <div
-        style={{
-          width: ancho,
-          height: alto,
-          transform: `scale(${escala})`,
-          transformOrigin: "top left",
-          // Sin esto, arrastrar un texto pinta la selección azul del navegador
-          // encima del editor y dispara el arrastre nativo de texto.
-          userSelect: "none",
-          background: layout.lienzo.fondo === "marca" ? colorMarca : layout.lienzo.fondo,
-          position: "relative",
+        id="marco"
+        ref={setMarco}
+        className="relative h-full w-full overflow-hidden bg-muted"
+        onDoubleClick={(ev) => {
+          const el = (ev.target as Element).closest("#marco .capa");
+          const id = el?.getAttribute("data-id");
+          const c = escena.capas.find((x) => x.id === id);
+          if (c?.tipo === "text" && !c.bloqueada) useEditor.getState().editarTexto(c.id);
         }}
       >
-        {rejilla && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              // La línea se engorda al dividirla entre la escala: dibujada en
-              // coordenadas reales, 1 px se encogería hasta desaparecer.
-              backgroundImage:
-                `linear-gradient(to right, rgba(15,23,42,0.16) ${1 / escala}px, transparent ${1 / escala}px),` +
-                `linear-gradient(to bottom, rgba(15,23,42,0.16) ${1 / escala}px, transparent ${1 / escala}px)`,
-              backgroundSize: `${paso.x}px ${paso.y}px`,
-            }}
-          />
-        )}
+        <div
+          data-testid="escenario"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: W,
+            height: H,
+            overflow: "hidden",
+            background: fondoCss(escena.lienzo.fondo, escena.tokens, colorMarca, slug),
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
+          }}
+        >
+          <Escenario escena={escena} slug={slug} colorMarca={colorMarca} editandoTexto={editandoTexto} />
+          {capaEditada?.tipo === "text" && (
+            <EditorTexto key={capaEditada.id} capa={capaEditada} tokens={escena.tokens} colorMarca={colorMarca} zoom={zoom} />
+          )}
+        </div>
 
-        {layout.capas.map((capa) => (
-          <CapaVista
-            key={capa.id}
-            capa={capa}
-            escala={escala}
-            seleccionada={capa.id === seleccion}
-            colorMarca={colorMarca}
-            stickers={stickers}
-            onSeleccionar={() => onSeleccionar(capa.id)}
-            onArrastrar={(dx, dy) => arrastrar(capa, dx, dy)}
-            onRedimensionar={(asa, dx, dy) => redimensionar(capa, asa, dx, dy)}
-            onSoltar={() => {
-              partida.current = null;
-            }}
-          />
-        ))}
+        <Moveable
+          ref={moveableRef}
+          target={objetivos.map(selector)}
+          draggable
+          resizable={unaHoja}
+          rotatable={unaHoja}
+          keepRatio={false}
+          snappable={imanActivo(escena.guias)}
+          snapThreshold={6}
+          elementGuidelines={escena.capas.filter((c) => !objetivos.includes(c.id)).map((c) => selector(c.id))}
+          onDragStart={() => {
+            gesto.current = null;
+          }}
+          onDrag={(e) => {
+            e.target.style.transform = e.transform;
+            gesto.current = { t: e.beforeTranslate };
+          }}
+          onDragEnd={(e) => confirmarMovimiento(terminar([e.target]))}
+          onDragGroupStart={() => {
+            gesto.current = null;
+          }}
+          onDragGroup={(e) => {
+            e.events.forEach((ev) => {
+              ev.target.style.transform = ev.transform;
+            });
+            gesto.current = { t: e.events[0]?.beforeTranslate };
+          }}
+          onDragGroupEnd={(e) => confirmarMovimiento(terminar(e.targets))}
+          onResizeStart={() => {
+            gesto.current = null;
+          }}
+          onResize={(e) => {
+            e.target.style.width = `${e.width}px`;
+            e.target.style.height = `${e.height}px`;
+            e.target.style.transform = e.drag.transform;
+            gesto.current = { t: e.drag.beforeTranslate, w: e.width, h: e.height };
+          }}
+          onResizeEnd={(e) => {
+            const g = terminar([e.target]);
+            const st = useEditor.getState();
+            const c = st.escena?.capas.find((x) => x.id === e.target.getAttribute("data-id"));
+            if (!g || g.w === undefined || g.h === undefined || !c) return;
+            const t = g.t ?? [0, 0];
+            const ops: Op[] = [
+              { op: "set", capa: c.id, ruta: "x", valor: Math.round(c.x + t[0]) },
+              { op: "set", capa: c.id, ruta: "y", valor: Math.round(c.y + t[1]) },
+              { op: "set", capa: c.id, ruta: "w", valor: Math.max(1, Math.round(g.w)) },
+              { op: "set", capa: c.id, ruta: "h", valor: Math.max(1, Math.round(g.h)) },
+            ];
+            st.aplicar(ops, "Redimensionar");
+          }}
+          onRotateStart={() => {
+            gesto.current = null;
+          }}
+          onRotate={(e) => {
+            e.target.style.transform = e.drag.transform;
+            // ⚠️ En 0.56 `rotation` es el ángulo total del objetivo, no el delta.
+            gesto.current = { rot: e.rotation };
+          }}
+          onRotateEnd={(e) => {
+            const g = terminar([e.target]);
+            const id = e.target.getAttribute("data-id");
+            if (g?.rot === undefined || !id) return;
+            useEditor
+              .getState()
+              .aplicar([{ op: "set", capa: id, ruta: "rot", valor: normalizarAngulo(Math.round(g.rot)) }], "Rotar");
+          }}
+        />
+      </div>
+
+      {marco && (
+        <Selecto
+          dragContainer={marco}
+          selectableTargets={["#marco .capa"]}
+          hitRate={0}
+          selectByClick
+          selectFromInside={false}
+          onDragStart={(e) => {
+            const t = e.inputEvent.target as Element;
+            const st = useEditor.getState();
+            if (!st.escena) return e.stop();
+            if (t.closest("[data-editor-texto], [data-editor-barra]")) return e.stop();
+            if (moveableRef.current?.isMoveableElement(t)) return e.stop();
+            const id = t.closest("#marco .capa")?.getAttribute("data-id");
+            const yaElegida = !!id && expandir(st.escena, st.seleccion).includes(id);
+            if (yaElegida && !(e.inputEvent as MouseEvent).shiftKey) e.stop();
+          }}
+          onSelectEnd={(e) => {
+            const st = useEditor.getState();
+            if (!st.escena) return;
+            const ids = e.selected.map((el) => el.getAttribute("data-id")!).filter(Boolean);
+            const nuevos = raicesSeleccionables(st.escena, ids);
+            const shift = (e.inputEvent as MouseEvent).shiftKey;
+            st.seleccionar(shift ? alternar(st.seleccion, nuevos) : nuevos);
+            if (e.isDragStart && !shift && nuevos.length > 0) {
+              e.inputEvent.preventDefault();
+              moveableRef.current?.waitToChangeTarget().then(() => moveableRef.current?.dragStart(e.inputEvent));
+            }
+          }}
+        />
+      )}
+
+      <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-md border bg-background p-1 shadow-sm">
+        <Button variant="ghost" size="icon-sm" aria-label="Alejar" onClick={() => useEditor.getState().setZoom(zoom / 1.25)}>
+          <ZoomOut />
+        </Button>
+        <span className="w-12 text-center text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
+        <Button variant="ghost" size="icon-sm" aria-label="Acercar" onClick={() => useEditor.getState().setZoom(zoom * 1.25)}>
+          <ZoomIn />
+        </Button>
+        <Button variant="ghost" size="icon-sm" aria-label="Ajustar" onClick={ajustar}>
+          <Maximize />
+        </Button>
       </div>
     </div>
   );

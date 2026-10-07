@@ -22,12 +22,17 @@ import {
   useCrearDiseno,
   useDisenos,
   useDuplicarDiseno,
+  type Aspecto,
   type PlantillaLista,
 } from "@/hooks/use-disenos";
+import { ETIQUETA_DE_ASPECTO } from "@/lib/aspecto";
 
 type EstadoDiseno = "activa" | "borrador" | "archivada";
 
-const PESTANAS: { value: EstadoDiseno; label: string }[] = [
+type Filtro = EstadoDiseno | "todas";
+
+const PESTANAS: { value: Filtro; label: string }[] = [
+  { value: "todas", label: "Todos" },
   { value: "activa", label: "Publicados" },
   { value: "borrador", label: "Borradores" },
   { value: "archivada", label: "Archivados" },
@@ -45,7 +50,7 @@ function NuevoDisenoDialog({ slug }: { slug: string }) {
   const crear = useCrearDiseno(slug);
   const [abierto, setAbierto] = useState(false);
   const [nombre, setNombre] = useState("");
-  const [aspecto, setAspecto] = useState<"4:5" | "9:16">("4:5");
+  const [aspecto, setAspecto] = useState<Aspecto>("4:5");
 
   function enviar() {
     crear.mutate(
@@ -89,22 +94,17 @@ function NuevoDisenoDialog({ slug }: { slug: string }) {
           <div className="grid gap-1.5">
             <p className="text-sm font-medium">Proporción</p>
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={aspecto === "4:5" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setAspecto("4:5")}
-              >
-                Cuadrada alta
-              </Button>
-              <Button
-                type="button"
-                variant={aspecto === "9:16" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setAspecto("9:16")}
-              >
-                Vertical
-              </Button>
+              {(["4:5", "1:1", "9:16"] as const).map((a) => (
+                <Button
+                  key={a}
+                  type="button"
+                  variant={aspecto === a ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setAspecto(a)}
+                >
+                  {ETIQUETA_DE_ASPECTO[a]}
+                </Button>
+              ))}
             </div>
           </div>
           <Button onClick={enviar} disabled={crear.isPending || nombre.trim().length === 0}>
@@ -137,7 +137,7 @@ function TarjetaDiseno({
           src={`/api/brands/${slug}/templates/${diseno.id}/preview.png?v=${diseno.version_actual}`}
           alt={`Vista previa del diseño ${diseno.nombre}`}
           loading="lazy"
-          className="size-full object-cover"
+          className="size-full object-contain"
         />
       </div>
       <div className="flex flex-1 flex-col gap-2 p-3">
@@ -181,7 +181,7 @@ function TarjetaDiseno({
 export default function TemplatesPage() {
   const { slug } = useParams<{ slug: string }>();
   const router = useRouter();
-  const [estado, setEstado] = useState<EstadoDiseno>("activa");
+  const [estado, setEstado] = useState<Filtro>("todas");
   const disenosQuery = useDisenos(slug, estado);
   const duplicar = useDuplicarDiseno(slug);
 
@@ -207,7 +207,7 @@ export default function TemplatesPage() {
         <NuevoDisenoDialog slug={slug} />
       </div>
 
-      <Tabs value={estado} onValueChange={(v) => setEstado(v as EstadoDiseno)}>
+      <Tabs value={estado} onValueChange={(v) => setEstado(v as Filtro)}>
         <TabsList>
           {PESTANAS.map((p) => (
             <TabsTrigger key={p.value} value={p.value}>

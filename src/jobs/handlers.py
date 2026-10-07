@@ -38,7 +38,7 @@ from src import (
 from src import fuentes as fuentes_mod
 from src.image_sources import BRANDS_DIR
 from src.plantillas import contrato as contrato_mod
-from src.plantillas import disenador, fuentes_tipograficas, layout, preview
+from src.plantillas import disenador, fuentes_tipograficas, preview
 from src.plantillas import render as plantillas_render
 
 # Espera entre subreddits de una misma fuente: Reddit responde 429 a la 2ª
@@ -410,7 +410,7 @@ def template_preview(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, A
     jobs.progresar(cx, job["id"], 20, "Armando el diseño")
 
     fuentes = fuentes_tipograficas.catalogo(cx, job["account_id"])
-    html = layout.a_html(payload["layout"], contrato_dict, fuentes=fuentes)
+    html = plantillas.compilar(payload["layout"], contrato_dict, fuentes=fuentes)
     campos = preview.campos_de_muestra(contrato_dict)
     jobs.progresar(cx, job["id"], 50, "Tomando la foto")
 

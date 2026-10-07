@@ -162,7 +162,7 @@ def test_el_handler_traduce_errores_del_llm_sin_filtrar_secretos(cx, monkeypatch
 
 def test_el_handler_rechaza_un_aspecto_inventado_sin_llamar_al_modelo(cx, monkeypatch):
     """El aspecto llega dentro del contrato y `_prompt` lo usa como llave: si
-    no es uno de los dos que existen, el trabajo falla con un mensaje legible
+    no es uno de los que existen, el trabajo falla con un mensaje legible
     y sin gastar una llamada de pago."""
     llamadas = []
 
@@ -172,7 +172,7 @@ def test_el_handler_rechaza_un_aspecto_inventado_sin_llamar_al_modelo(cx, monkey
 
     monkeypatch.setattr(handlers.disenador, "_pedir_al_llm", falso)
     job = _job(cx, "template.disenar", 1,
-              {"template_id": None, "instruccion": "x", "aspecto": "1:1"})
+              {"template_id": None, "instruccion": "x", "aspecto": "16:9"})
 
     with pytest.raises(ValueError):
         handlers.template_disenar(cx, job)

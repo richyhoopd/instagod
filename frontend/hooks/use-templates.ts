@@ -26,7 +26,7 @@ export interface Plantilla {
   slug: string;
   nombre: string;
   descripcion: string | null;
-  aspecto: "4:5" | "9:16";
+  aspecto: "4:5" | "1:1" | "9:16";
   version_actual: number;
   contrato: ContratoPlantilla;
 }

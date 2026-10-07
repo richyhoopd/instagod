@@ -99,3 +99,17 @@ def test_html_con_card_como_prefijo_se_rechaza() -> None:
     ct = _contrato_minimo()
     with pytest.raises(c.ContratoInvalido, match="marco"):
         c.validar_html('<div class="card-top">{{ titular }}</div>', ct)
+
+
+def test_assets_dir_es_variable_de_sistema() -> None:
+    """La biblioteca de la marca se pide como {{ assets_dir }}/<archivo>."""
+    c.validar_html(
+        "<html><body><div class='card' "
+        "style=\"background:url('{{ assets_dir }}/a.png')\"></div></body></html>",
+        _contrato_minimo())
+
+
+def test_contrato_acepta_1_1():
+    from src.plantillas import contrato as _c
+    _c.validar({"aspecto": "1:1", "base": list(_c.CAMPOS_BASE), "extras": []})
+    assert _c.dimensiones("1:1") == (1080, 1080)

@@ -1,243 +1,230 @@
 "use client";
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties } from "react";
 import { ImageIcon } from "lucide-react";
-import type { Capa } from "@/lib/layout";
+import {
+  ocultasEfectivas,
+  ordenadas,
+  resolverColor,
+  urlDeAsset,
+  type Capa,
+  type CapaTexto,
+  type Escena,
+  type Fondo,
+  type Tokens,
+} from "@/lib/escena";
+import { trozos } from "@/lib/spans";
 
-export type Asa = "nw" | "ne" | "sw" | "se";
-
-const ASAS: Asa[] = ["nw", "ne", "sw", "se"];
-
-const VERTICAL: Record<string, CSSProperties["alignItems"]> = {
-  arriba: "flex-start",
-  centro: "center",
-  abajo: "flex-end",
+const VERTICAL: Record<string, CSSProperties["justifyContent"]> = {
+  top: "flex-start",
+  center: "center",
+  bottom: "flex-end",
 };
 
-const HORIZONTAL: Record<string, CSSProperties["justifyContent"]> = {
-  izq: "flex-start",
-  centro: "center",
-  der: "flex-end",
-};
-
-const TEXTO_ALINEADO: Record<string, CSSProperties["textAlign"]> = {
-  izq: "left",
-  centro: "center",
-  der: "right",
-};
-
-/**
- * Un gesto de puntero que sobrevive a que el cursor se salga del elemento.
- * `setPointerCapture` es lo que lo hace posible: sin eso el arrastre se corta
- * en cuanto el puntero pisa otro elemento y se siente roto.
- *
- * El delta que se reporta es SIEMPRE el acumulado desde el inicio del gesto y
- * ya viene dividido entre la escala, o sea en píxeles reales del lienzo. Así
- * un `pointermove` perdido no descuadra nada: el padre recalcula desde la
- * posición de partida en vez de ir sumando incrementos.
- */
-function iniciarGesto(
-  e: ReactPointerEvent,
-  escala: number,
-  alMover: (dx: number, dy: number) => void,
-  alSoltar: () => void
-) {
-  e.stopPropagation();
-  const el = e.currentTarget as HTMLElement;
-  el.setPointerCapture(e.pointerId);
-  const inicio = { x: e.clientX, y: e.clientY };
-  const mover = (ev: PointerEvent) =>
-    alMover((ev.clientX - inicio.x) / escala, (ev.clientY - inicio.y) / escala);
-  const soltar = () => {
-    window.removeEventListener("pointermove", mover);
-    window.removeEventListener("pointerup", soltar);
-    window.removeEventListener("pointercancel", soltar);
-    alSoltar();
-  };
-  window.addEventListener("pointermove", mover);
-  window.addEventListener("pointerup", soltar);
-  window.addEventListener("pointercancel", soltar);
+export function radioDeMascara(mascara: string): string | undefined {
+  if (mascara === "circle") return "50%";
+  const m = /^rounded:(\d+)$/.exec(mascara);
+  return m ? `${m[1]}px` : undefined;
 }
 
-export function CapaVista({
-  capa,
-  escala,
-  seleccionada,
-  colorMarca,
-  stickers,
-  onSeleccionar,
-  onArrastrar,
-  onRedimensionar,
-  onSoltar,
-}: {
-  capa: Capa;
-  escala: number;
-  seleccionada: boolean;
-  colorMarca: string;
-  stickers: { nombre: string; url: string }[];
-  onSeleccionar: () => void;
-  onArrastrar: (dx: number, dy: number) => void;
-  onRedimensionar: (asa: Asa, dx: number, dy: number) => void;
-  onSoltar: () => void;
-}) {
-  // El color "marca" es un alias que resuelve el color de cada marca; el
-  // backend hace lo mismo al renderizar.
-  const color = (v: string | undefined) => (v === "marca" ? colorMarca : (v ?? "#111111"));
+// Mismo criterio que _fondo_css del plan 1: el gradiente va tal cual y la
+// imagen cubre el lienzo.
+export function fondoCss(fondo: Fondo, tokens: Tokens, colorMarca: string, slug: string): string {
+  if (fondo.tipo === "gradiente") return fondo.valor;
+  if (fondo.tipo === "imagen") return `url('${urlDeAsset(slug, fondo.valor)}') center/cover no-repeat`;
+  return resolverColor(fondo.valor, tokens, colorMarca);
+}
 
-  // Todo lo que tiene que medir igual en pantalla sin importar el acercamiento
-  // se divide entre la escala, porque vive dentro del contenedor escalado.
-  const px = (n: number) => n / escala;
+// Las fuentes de la marca se sirven desde el backend; se declaran solo las
+// que usa la escena.
+export function EstilosFuentes({ slug, familias }: { slug: string; familias: string[] }) {
+  if (familias.length === 0) return null;
+  const css = familias
+    .map(
+      (f) =>
+        `@font-face{font-family:'${f.replace(/'/g, "")}';src:url('/api/brands/${slug}/files/fonts/${encodeURIComponent(f)}');font-display:swap;}`,
+    )
+    .join("\n");
+  return <style>{css}</style>;
+}
 
-  const marco: CSSProperties = {
+type Props = { capa: Capa; tokens: Tokens; slug: string; colorMarca: string; editando?: boolean };
+
+export function CapaVista({ capa, tokens, slug, colorMarca, editando = false }: Props) {
+  if (capa.tipo === "group") return null;
+  const color = (v: string) => resolverColor(v, tokens, colorMarca);
+  const caja: CSSProperties = {
     position: "absolute",
     left: capa.x,
     top: capa.y,
     width: capa.w,
     height: capa.h,
-    zIndex: capa.z,
-    opacity: capa.opacidad,
     transform: `rotate(${capa.rot}deg)`,
-    touchAction: "none",
-    cursor: "move",
-    outline: seleccionada ? `${px(2)}px solid #2563eb` : undefined,
-    outlineOffset: 0,
+    opacity: capa.opacity,
+    zIndex: capa.z,
   };
 
-  return (
-    <div
-      style={marco}
-      onPointerDown={(e) => {
-        onSeleccionar();
-        iniciarGesto(e, escala, onArrastrar, onSoltar);
-      }}
-    >
-      <Contenido capa={capa} color={color} stickers={stickers} />
-
-      {seleccionada &&
-        ASAS.map((asa) => (
-          <span
-            key={asa}
-            onPointerDown={(e) =>
-              iniciarGesto(e, escala, (dx, dy) => onRedimensionar(asa, dx, dy), onSoltar)
-            }
-            style={{
-              position: "absolute",
-              width: px(12),
-              height: px(12),
-              top: asa[0] === "n" ? px(-6) : undefined,
-              bottom: asa[0] === "s" ? px(-6) : undefined,
-              left: asa[1] === "w" ? px(-6) : undefined,
-              right: asa[1] === "e" ? px(-6) : undefined,
-              background: "#2563eb",
-              border: `${px(2)}px solid #ffffff`,
-              borderRadius: px(3),
-              cursor: `${asa}-resize`,
-              touchAction: "none",
-            }}
-          />
-        ))}
-    </div>
-  );
-}
-
-/** El dibujo de cada tipo de elemento. Es vista previa de estructura, no de contenido. */
-function Contenido({
-  capa,
-  color,
-  stickers,
-}: {
-  capa: Capa;
-  color: (v: string | undefined) => string;
-  stickers: { nombre: string; url: string }[];
-}) {
-  if (capa.tipo === "caja") {
+  if (capa.tipo === "text") {
+    const e = capa.estilo;
     return (
       <div
+        data-id={capa.id}
+        className="capa"
         style={{
-          width: "100%",
-          height: "100%",
-          background: color(capa.color),
-          borderRadius: capa.radio ?? 0,
+          ...caja,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: VERTICAL[e.verticalAlign ?? "top"],
+          overflow: "hidden",
+          // Mientras se edita, el textarea (Task 8) ocupa su lugar.
+          visibility: editando ? "hidden" : undefined,
         }}
-      />
+      >
+        <div
+          style={{
+            fontFamily: familiaCss(e.fontFamily),
+            fontWeight: e.fontWeight,
+            fontSize: e.fontSize,
+            lineHeight: e.lineHeight,
+            letterSpacing: e.letterSpacing,
+            color: color(e.color),
+            textAlign: e.textAlign,
+            textTransform: e.textTransform,
+            // Paridad con escena.py: el texto fijo respeta saltos (pre-line,
+            // pre si nowrap); el dato del post no. whiteSpace va antes que
+            // textWrap porque el shorthand reinicia text-wrap-mode.
+            ...cortesDeTexto(capa),
+            overflowWrap: "break-word",
+          }}
+        >
+          {trozos(capa.texto, e.spans).map((t, i) => (
+            <span key={i} style={t.color ? { color: color(t.color) } : undefined}>
+              {t.texto}
+            </span>
+          ))}
+        </div>
+      </div>
     );
   }
 
-  if (capa.tipo === "imagen") {
-    const sticker = capa.archivo
-      ? stickers.find((s) => s.nombre === capa.archivo)
-      : undefined;
-    if (sticker) {
-      return (
-        // eslint-disable-next-line @next/next/no-img-element -- archivo servido por la API vía rewrite
+  if (capa.tipo === "shape") {
+    const e = capa.estilo;
+    const borde = e.borderWidth ?? 0;
+    return (
+      <div data-id={capa.id} className="capa" style={caja}>
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            boxSizing: "border-box",
+            backgroundColor: color(e.fill),
+            borderRadius: capa.forma === "ellipse" ? "50%" : (e.radius ?? 0),
+            border: borde > 0 ? `${borde}px solid ${color(e.borderColor ?? "#000000")}` : undefined,
+            filter: e.filter,
+            mixBlendMode: e.mixBlendMode as CSSProperties["mixBlendMode"],
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (capa.tipo === "svg") {
+    return (
+      <div data-id={capa.id} className="capa" style={caja}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={`/api${sticker.url}`}
+          src={urlDeAsset(slug, capa.src)}
           alt=""
           draggable={false}
           style={{
             width: "100%",
             height: "100%",
-            objectFit: capa.ajuste ?? "cover",
-            borderRadius: capa.radio ?? 0,
+            objectFit: capa.ajuste,
+            filter: capa.estilo.filter,
+            mixBlendMode: capa.estilo.mixBlendMode as CSSProperties["mixBlendMode"],
             pointerEvents: "none",
           }}
         />
-      );
-    }
-    // Sin archivo la imagen sale de un dato del diseño: aquí solo se marca el
-    // hueco, porque el contenido real llega al generar el post.
-    return (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 12,
-          border: "4px dashed #9ca3af",
-          borderRadius: capa.radio ?? 0,
-          color: "#6b7280",
-          background: "rgba(148,163,184,0.15)",
-        }}
-      >
-        <ImageIcon style={{ width: 64, height: 64 }} strokeWidth={1.5} />
-        <span style={{ fontSize: 32, fontWeight: 500 }}>Foto</span>
       </div>
     );
   }
 
-  // Texto. Atado a un dato se dibuja el nombre del dato en gris: lo que se está
-  // acomodando es el hueco, no la frase que va a caer ahí.
-  const esDato = !!capa.campo;
+  // image y video
+  const medio: CSSProperties = {
+    width: "100%",
+    height: "100%",
+    objectFit: capa.ajuste,
+    objectPosition: capa.estilo.objectPosition,
+    filter: capa.estilo.filter,
+    mixBlendMode: capa.estilo.mixBlendMode as CSSProperties["mixBlendMode"],
+    borderRadius: radioDeMascara(capa.mascara),
+    pointerEvents: "none",
+  };
+  if (!capa.src) {
+    return (
+      <div data-id={capa.id} className="capa" style={caja}>
+        <div
+          className="flex flex-col items-center justify-center gap-2 bg-muted text-muted-foreground"
+          style={{ ...medio, fontSize: Math.max(18, Math.min(capa.w, capa.h) / 12) }}
+        >
+          <ImageIcon style={{ width: "20%", height: "20%" }} />
+          <span>Campo: {capa.campo ?? "imagen"}</span>
+        </div>
+      </div>
+    );
+  }
+  if (capa.tipo === "video") {
+    return (
+      <div data-id={capa.id} className="capa" style={caja}>
+        <video
+          src={urlDeAsset(slug, capa.src)}
+          poster={capa.poster ? urlDeAsset(slug, capa.poster) : undefined}
+          muted
+          playsInline
+          style={medio}
+        />
+      </div>
+    );
+  }
   return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: VERTICAL[capa.vertical ?? "centro"] ?? "center",
-        justifyContent: HORIZONTAL[capa.alinear ?? "centro"] ?? "center",
-        overflow: "hidden",
-      }}
-    >
-      <span
-        style={{
-          width: "100%",
-          fontFamily: capa.fuente ? JSON.stringify(capa.fuente) : undefined,
-          fontSize: capa.tam ?? 48,
-          fontWeight: capa.peso ?? 400,
-          color: esDato ? "#9ca3af" : color(capa.color),
-          textAlign: TEXTO_ALINEADO[capa.alinear ?? "centro"] ?? "center",
-          lineHeight: capa.interlinea ?? 1.2,
-          textTransform: capa.mayusculas ? "uppercase" : undefined,
-          whiteSpace: "pre-wrap",
-          overflowWrap: "break-word",
-        }}
-      >
-        {esDato ? `«${capa.campo}»` : (capa.texto ?? "")}
-      </span>
+    <div data-id={capa.id} className="capa" style={caja}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={urlDeAsset(slug, capa.src)} alt="" draggable={false} style={medio} />
     </div>
   );
 }
+
+type PropsEscenario = { escena: Escena; slug: string; colorMarca: string; editandoTexto?: string | null };
+
+// Las capas en orden de pintado. El fondo lo pone quien contiene al escenario.
+export function Escenario({ escena, slug, colorMarca, editandoTexto = null }: PropsEscenario) {
+  const ocultas = ocultasEfectivas(escena);
+  const visibles = ordenadas(escena).filter((c) => c.tipo !== "group" && !ocultas.has(c.id));
+  const familias = [...new Set(visibles.flatMap((c) => (c.tipo === "text" ? [c.estilo.fontFamily] : [])))];
+  return (
+    <>
+      <EstilosFuentes slug={slug} familias={familias} />
+      {visibles.map((c) => (
+        <CapaVista
+          key={c.id}
+          capa={c}
+          tokens={escena.tokens}
+          slug={slug}
+          colorMarca={colorMarca}
+          editando={c.id === editandoTexto}
+        />
+      ))}
+    </>
+  );
+}
+
+/** white-space y text-wrap como escena.py; lo comparte el textarea de edición. */
+export function cortesDeTexto(capa: CapaTexto): CSSProperties {
+  const wrap = capa.estilo.textWrap;
+  return {
+    whiteSpace: capa.campo ? (wrap === "nowrap" ? "nowrap" : "normal") : wrap === "nowrap" ? "pre" : "pre-line",
+    textWrap: wrap === "balance" || wrap === "pretty" ? wrap : undefined,
+  };
+}
+
+export const familiaCss = (familia: string) => `'${familia}', sans-serif`;

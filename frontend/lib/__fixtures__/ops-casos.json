@@ -1,0 +1,91 @@
+{
+  "base": {
+    "v": 2,
+    "lienzo": { "w": 1080, "h": 1350, "formato": "4x5", "fondo": { "tipo": "color", "valor": "#ffffff" } },
+    "tokens": { "colores": { "tinta": "#111111" } },
+    "capas": [
+      { "id": "titulo", "nombre": "Título", "tipo": "text", "x": 80, "y": 196, "w": 920, "h": 300, "rot": 0, "opacity": 1, "z": 3, "bloqueada": false, "oculta": false, "anclaje": "top", "texto": "Hola mundo", "estilo": { "fontFamily": "Inter", "fontWeight": 800, "fontSize": 96, "lineHeight": 1.05, "letterSpacing": "-0.02em", "color": "token:tinta", "textAlign": "left", "textWrap": "balance", "verticalAlign": "top", "textTransform": "none", "spans": [] } },
+      { "id": "caja", "nombre": "Caja", "tipo": "shape", "x": 0, "y": 1200, "w": 1080, "h": 150, "rot": 0, "opacity": 1, "z": 1, "bloqueada": false, "oculta": false, "anclaje": "bottom", "forma": "rect", "estilo": { "fill": "token:marca", "radius": 0, "borderWidth": 0 } },
+      { "id": "logo", "nombre": "Logo", "tipo": "svg", "x": 900, "y": 1230, "w": 120, "h": 90, "rot": 0, "opacity": 1, "z": 2, "bloqueada": false, "oculta": false, "anclaje": "bottom", "src": "assets/logo.svg", "ajuste": "contain", "estilo": {} },
+      { "id": "marca", "nombre": "Marca", "tipo": "group", "x": 0, "y": 1200, "w": 1080, "h": 150, "rot": 0, "opacity": 1, "z": 0, "bloqueada": false, "oculta": false, "anclaje": "bottom", "hijos": ["caja", "logo"], "estilo": {} }
+    ]
+  },
+  "casos": [
+    {
+      "nombre": "set estilo.fill",
+      "ops": [{ "op": "set", "capa": "caja", "ruta": "estilo.fill", "valor": "#00ff00" }],
+      "ids": ["titulo", "caja", "logo", "marca"],
+      "cambiadas": {
+        "caja": { "id": "caja", "nombre": "Caja", "tipo": "shape", "x": 0, "y": 1200, "w": 1080, "h": 150, "rot": 0, "opacity": 1, "z": 1, "bloqueada": false, "oculta": false, "anclaje": "bottom", "forma": "rect", "estilo": { "fill": "#00ff00", "radius": 0, "borderWidth": 0 } }
+      }
+    },
+    {
+      "nombre": "set crea intermedios",
+      "ops": [{ "op": "set", "capa": "logo", "ruta": "fuente_asset.autor", "valor": "Ana" }],
+      "ids": ["titulo", "caja", "logo", "marca"],
+      "cambiadas": {
+        "logo": { "id": "logo", "nombre": "Logo", "tipo": "svg", "x": 900, "y": 1230, "w": 120, "h": 90, "rot": 0, "opacity": 1, "z": 2, "bloqueada": false, "oculta": false, "anclaje": "bottom", "src": "assets/logo.svg", "ajuste": "contain", "estilo": {}, "fuente_asset": { "autor": "Ana" } }
+      }
+    },
+    {
+      "nombre": "set de un objeto completo copia el valor",
+      "ops": [{ "op": "set", "capa": "titulo", "ruta": "estilo.spans", "valor": [{ "desde": 0, "hasta": 4, "color": "token:marca" }] }],
+      "ids": ["titulo", "caja", "logo", "marca"],
+      "cambiadas": {
+        "titulo": { "id": "titulo", "nombre": "Título", "tipo": "text", "x": 80, "y": 196, "w": 920, "h": 300, "rot": 0, "opacity": 1, "z": 3, "bloqueada": false, "oculta": false, "anclaje": "top", "texto": "Hola mundo", "estilo": { "fontFamily": "Inter", "fontWeight": 800, "fontSize": 96, "lineHeight": 1.05, "letterSpacing": "-0.02em", "color": "token:tinta", "textAlign": "left", "textWrap": "balance", "verticalAlign": "top", "textTransform": "none", "spans": [{ "desde": 0, "hasta": 4, "color": "token:marca" }] } }
+      }
+    },
+    { "nombre": "set id falla", "ops": [{ "op": "set", "capa": "titulo", "ruta": "id", "valor": "otro" }], "error": true },
+    { "nombre": "set tipo falla", "ops": [{ "op": "set", "capa": "titulo", "ruta": "tipo", "valor": "shape" }], "error": true },
+    { "nombre": "set capa inexistente falla", "ops": [{ "op": "set", "capa": "nadie", "ruta": "x", "valor": 1 }], "error": true },
+    { "nombre": "set ruta vacía falla", "ops": [{ "op": "set", "capa": "titulo", "ruta": "estilo..color", "valor": "#000000" }], "error": true },
+    { "nombre": "set a través de un primitivo falla", "ops": [{ "op": "set", "capa": "titulo", "ruta": "texto.largo", "valor": 3 }], "error": true },
+    { "nombre": "set con __proto__ falla", "ops": [{ "op": "set", "capa": "titulo", "ruta": "__proto__.x", "valor": 1 }], "error": true },
+    {
+      "nombre": "add al final",
+      "ops": [{ "op": "add", "capa": { "id": "nueva", "nombre": "Nueva", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "ellipse", "estilo": { "fill": "#ff0000" } } }],
+      "ids": ["titulo", "caja", "logo", "marca", "nueva"],
+      "cambiadas": {
+        "nueva": { "id": "nueva", "nombre": "Nueva", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "ellipse", "estilo": { "fill": "#ff0000" } }
+      }
+    },
+    {
+      "nombre": "add con indice 0",
+      "ops": [{ "op": "add", "indice": 0, "capa": { "id": "nueva", "nombre": "Nueva", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "ellipse", "estilo": { "fill": "#ff0000" } } }],
+      "ids": ["nueva", "titulo", "caja", "logo", "marca"],
+      "cambiadas": {
+        "nueva": { "id": "nueva", "nombre": "Nueva", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "ellipse", "estilo": { "fill": "#ff0000" } }
+      }
+    },
+    {
+      "nombre": "add con indice 99 se acota al final",
+      "ops": [{ "op": "add", "indice": 99, "capa": { "id": "nueva", "nombre": "Nueva", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "ellipse", "estilo": { "fill": "#ff0000" } } }],
+      "ids": ["titulo", "caja", "logo", "marca", "nueva"],
+      "cambiadas": {
+        "nueva": { "id": "nueva", "nombre": "Nueva", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "ellipse", "estilo": { "fill": "#ff0000" } }
+      }
+    },
+    {
+      "nombre": "add con id duplicado falla",
+      "ops": [{ "op": "add", "capa": { "id": "caja", "nombre": "Otra", "tipo": "shape", "x": 10, "y": 10, "w": 100, "h": 100, "rot": 0, "opacity": 1, "z": 4, "bloqueada": false, "oculta": false, "anclaje": "top", "forma": "rect", "estilo": { "fill": "#ff0000" } } }],
+      "error": true
+    },
+    { "nombre": "del simple", "ops": [{ "op": "del", "capa": "titulo" }], "ids": ["caja", "logo", "marca"] },
+    { "nombre": "del de un grupo borra sus descendientes", "ops": [{ "op": "del", "capa": "marca" }], "ids": ["titulo"] },
+    {
+      "nombre": "del de un hijo lo quita de hijos y no recalcula la caja",
+      "ops": [{ "op": "del", "capa": "logo" }],
+      "ids": ["titulo", "caja", "marca"],
+      "cambiadas": {
+        "marca": { "id": "marca", "nombre": "Marca", "tipo": "group", "x": 0, "y": 1200, "w": 1080, "h": 150, "rot": 0, "opacity": 1, "z": 0, "bloqueada": false, "oculta": false, "anclaje": "bottom", "hijos": ["caja"], "estilo": {} }
+      }
+    },
+    { "nombre": "del de todos los hijos borra el grupo vacío", "ops": [{ "op": "del", "capa": "caja" }, { "op": "del", "capa": "logo" }], "ids": ["titulo"] },
+    { "nombre": "del inexistente falla", "ops": [{ "op": "del", "capa": "nadie" }], "error": true },
+    {
+      "nombre": "las ops son atómicas",
+      "ops": [{ "op": "set", "capa": "titulo", "ruta": "texto", "valor": "Cambiado" }, { "op": "del", "capa": "nadie" }],
+      "error": true
+    }
+  ]
+}
