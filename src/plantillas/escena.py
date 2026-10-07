@@ -47,6 +47,7 @@ _ID = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 _RGBA = re.compile(
     r"^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d{1,3}|1\.0)\s*)?\)$")
+_CAMPO = re.compile(r"[a-z_][a-z0-9_]*")        # lo único que entra a {{ ... }}
 _TOKEN = re.compile(r"^token:([a-z][a-z0-9_-]{0,31})$")
 _SRC = re.compile(r"^(assets|fotos)/[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _FUENTE = re.compile(r"^[A-Za-z0-9 ._-]{1,60}$")
@@ -256,7 +257,7 @@ _VALIDADORES = {"text": _validar_text, "image": _validar_image, "video": _valida
 
 
 def _validar_capa(capa: dict[str, Any], colores: dict[str, str], declaradas: set[str],
-                  familias: set[str] | None) -> None:
+                  familias: set[str] | None, imagenes: frozenset[str] = frozenset()) -> None:
     donde = f"capa '{capa['id']}'"
     tipo = capa.get("tipo")
     if tipo not in TIPOS:
@@ -279,6 +280,14 @@ def _validar_capa(capa: dict[str, Any], colores: dict[str, str], declaradas: set
             raise EscenaInvalida(f"{donde}: solo texto, imagen y video se vinculan a un dato")
         if not isinstance(campo, str) or campo not in declaradas:
             raise EscenaInvalida(f"{donde}: el dato '{campo}' no está en el diseño")
+        if not _CAMPO.fullmatch(campo):
+            raise EscenaInvalida(f"{donde}: el nombre del dato no es un identificador válido")
+        # Imagen y video emiten el dato dentro de url('...') / src="..." sin escape:
+        # solo pueden ligarse a datos que son URL (los arma render con _to_src).
+        if tipo in ("image", "video") and campo not in imagenes:
+            raise EscenaInvalida(
+                f"{donde}: una capa de {'imagen' if tipo == 'image' else 'video'} solo "
+                "se liga a 'imagen', 'logo' o a un dato de tipo imagen")
     estilo = capa.get("estilo", {})
     if not isinstance(estilo, dict):
         raise EscenaInvalida(f"{donde}: 'estilo' debe ser un objeto")
@@ -345,9 +354,12 @@ def validar(escena: dict[str, Any], contrato: dict[str, Any],
         ids.add(cid)
 
     declaradas = variables_declaradas(contrato)
+    imagenes = frozenset({"imagen", "logo"} | {
+        e["id"] for e in contrato.get("extras") or []
+        if isinstance(e, dict) and e.get("tipo") == "imagen" and "id" in e})
     padre_de: dict[str, str] = {}
     for capa in capas:
-        _validar_capa(capa, colores, declaradas, familias)
+        _validar_capa(capa, colores, declaradas, familias, imagenes)
         if capa["tipo"] != "group":
             continue
         for hijo in capa["hijos"]:
@@ -553,9 +565,17 @@ def _url(src: str) -> str:
     return "{{ %s_dir }}/%s" % (carpeta, archivo)
 
 
+def _campo(capa: dict[str, Any]) -> str | None:
+    """El nombre de dato listo para {{ }}; solo identificadores (defensa en profundidad)."""
+    campo = capa.get("campo")
+    if campo and not (isinstance(campo, str) and _CAMPO.fullmatch(campo)):
+        raise EscenaInvalida(f"capa '{capa['id']}': el nombre del dato no es un identificador válido")
+    return campo or None
+
+
 def _origen(capa: dict[str, Any]) -> str:
     """El dato del post si viene; si viene vacío, el archivo fijo de la capa."""
-    campo, src = capa.get("campo"), capa.get("src")
+    campo, src = _campo(capa), capa.get("src")
     if campo and src:
         carpeta, archivo = src.split("/", 1)
         return "{{ %s or (%s_dir ~ '/%s') }}" % (campo, carpeta, archivo)
@@ -611,7 +631,7 @@ def _texto_con_spans(texto: str, spans: list[dict[str, Any]], colores: dict[str,
 
 def _pintar_text(capa: dict[str, Any], colores: dict[str, str]) -> str:
     e = capa.get("estilo", {})
-    if capa.get("campo"):
+    if _campo(capa):
         contenido = ("{{ %s|resaltar }}" if capa.get("resaltar") else "{{ %s }}") % capa["campo"]
     else:
         contenido = _texto_con_spans(capa.get("texto", ""), e.get("spans", []), colores)

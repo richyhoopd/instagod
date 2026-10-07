@@ -255,3 +255,48 @@ def test_paridad_de_pixeles_v1_y_v2(tmp_path):
     diff = ImageChops.difference(*salidas)
     distintos = sum(1 for p in diff.getdata() if max(p) > 8)
     assert distintos / (1080 * 1350) <= 0.01
+
+
+# ---------------------------------------------------------------------------
+# Revisión: campos ligados a imagen/video y nombres dentro de {{ }}
+# ---------------------------------------------------------------------------
+
+CONTRATO_IMG = {"aspecto": "4:5", "base": list(contrato.CAMPOS_BASE),
+                "extras": [{"id": "badge", "tipo": "texto", "etiqueta": "Etiqueta"},
+                           {"id": "foto2", "tipo": "imagen", "etiqueta": "Foto 2"}]}
+
+
+@pytest.mark.parametrize("campo", ["titular", "handle", "color_marca", "badge"])
+@pytest.mark.parametrize("capa", [1, 4])        # image y video
+def test_imagen_y_video_solo_se_ligan_a_campos_de_imagen(capa, campo):
+    esc = _escena()
+    esc["capas"][capa]["campo"] = campo
+    with pytest.raises(E.EscenaInvalida, match="c_foto|c_clip"):
+        E.a_html(esc, CONTRATO_IMG, fuentes=FUENTES)
+
+
+def test_imagen_se_liga_a_imagen_o_extra_de_tipo_imagen():
+    esc = _escena()
+    esc["capas"][1]["campo"] = "foto2"
+    html = E.a_html(esc, CONTRATO_IMG, fuentes=FUENTES)
+    assert "{{ foto2 or (assets_dir ~ '/abc123.png') }}" in html
+    for campo in ("imagen", "logo"):        # logo: también entra por _to_src (ver reporte)
+        esc["capas"][1]["campo"] = campo
+        E.a_html(esc, CONTRATO_IMG, fuentes=FUENTES)
+
+
+def test_extra_con_id_hostil_no_llega_a_jinja():
+    ct = {"aspecto": "4:5", "base": list(contrato.CAMPOS_BASE),
+          "extras": [{"id": "x }}{{ y", "tipo": "texto", "etiqueta": "x"}]}
+    esc = _escena()
+    esc["capas"][0]["campo"] = "x }}{{ y"
+    with pytest.raises(E.EscenaInvalida, match="identificador|nombre"):
+        E.a_html(esc, ct, fuentes=FUENTES)
+
+
+def test_el_titular_hostil_no_se_ejecuta_en_el_render():
+    """Con campo imagen legítimo el dato vive en {{ }}; el atacante no puede ligar el titular."""
+    esc = _escena()
+    esc["capas"][1]["campo"] = "titular"
+    with pytest.raises(E.EscenaInvalida):
+        E.a_html(esc, CONTRATO, fuentes=FUENTES)
