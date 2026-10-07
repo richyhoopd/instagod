@@ -1,6 +1,7 @@
 """Endpoints de plantillas/diseños del portal."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from api.deps import get_cx, marca_para, usuario_actual
 from api.errors import no_encontrado
+from api.routers.brands import _SLUG_RE
 from api.routers.fuentes_api import listar_photos
 from src import compose, jobs, marcas, plantillas
 from src.image_sources import BRANDS_DIR
@@ -337,6 +339,39 @@ def archivo_fuente(slug: str, familia: str, user: dict = Depends(usuario_actual)
     return FileResponse(ruta, media_type=_TIPO_FUENTE[ruta.suffix.lower()],
                         headers={"X-Content-Type-Options": "nosniff",
                                  "Cache-Control": "public, max-age=604800"})
+
+
+_TIPO_ASSET = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
+               ".mp4": "video/mp4", ".webm": "video/webm"}
+_ARCHIVO_ASSET = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
+
+
+@router.get("/files/assets/{archivo}")
+def archivo_asset(slug: str, archivo: str, user: dict = Depends(usuario_actual),
+                  cx=Depends(get_cx)) -> FileResponse:
+    """Los bytes de una imagen o video de la biblioteca de la marca.
+
+    Es lo que pinta el lienzo del editor para una capa con `src: assets/<archivo>`.
+    Mismo blindaje que `archivo_fuente`: nombre por regex (fullmatch: un salto de
+    línea al final no pasa), ruta resuelta dentro de la carpeta de ESTA marca (un
+    symlink que apunte fuera no pasa) y lista blanca de extensiones. El SVG va con
+    CSP sandbox: abierto directo en el navegador no puede correr scripts.
+    """
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    if not _SLUG_RE.match(marca["slug"]) or not _ARCHIVO_ASSET.fullmatch(archivo):
+        raise no_encontrado("ese archivo")
+    carpeta = (BRANDS_DIR / marca["slug"] / "assets").resolve()
+    ruta = (carpeta / archivo).resolve()
+    tipo = _TIPO_ASSET.get(ruta.suffix.lower())
+    if tipo is None or not ruta.is_relative_to(carpeta) or not ruta.is_file():
+        raise no_encontrado("ese archivo")
+    headers = {"X-Content-Type-Options": "nosniff",
+               "Cache-Control": "private, max-age=86400"}
+    if tipo == "image/svg+xml":
+        headers["Content-Security-Policy"] = (
+            "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    return FileResponse(ruta, media_type=tipo, headers=headers)
 
 
 @router.get("/stickers")
