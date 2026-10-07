@@ -85,6 +85,7 @@ Depende de: plan 1 (escena v2), plan 2 (`aplicarOps`, `useEditor`, `PanelLateral
 | 9 | Los SVG de decoración y el fondo aplanado se escriben en `data/brands/<slug>/assets/` **sin fila en `brand_assets`** | No son assets de biblioteca. Quedan huérfanos si se descarta la versión |
 | 10 | Si la crítica pide re-render, los archivos SVG y de fondo del primer intento quedan huérfanos | Lo mismo que el 9 |
 | 11 | El plan 3 no expone un helper de recorte (solo el job `asset.recorte`). `_recortar` copia su convención: `<stem>-recorte.png` y `UPDATE brand_assets.recorte_archivo` filtrado por `account_id` | Verificado contra el plan 3 (handler `asset_recorte`) |
+| 12 | El spec §2 pide conectar «pedir diseño» de `hooks/use-disenos.ts`. En v2 eso es el modo *crear* del chat (Task 10); `usePedirDiseno` (`use-disenos.ts:194`) sigue solo para v1 | `POST /templates/design` produce `layout_json` v1. Lo registra también el plan 2, D17 |
 
 ## No verificado (al escribir este plan)
 

@@ -105,6 +105,7 @@
 | D14 | «Restaurar» está deshabilitado mientras se guarda | Un PATCH en vuelo pisaría la versión restaurada |
 | D15 | Los atajos aceptan ⌘ o Ctrl y se ignoran en campos de texto, diálogos y edición de texto en el lienzo | Mismo comportamiento en Mac y en lo demás, sin robar teclas a los inputs |
 | D16 | Sombra = preset de `drop-shadow` sobre `estilo.filter`, solo en imagen, video, svg y forma. Vincular un campo limpia `spans`; desvincular apaga `resaltar`. «Dato» filtra los campos por tipo | `EstiloTexto` no tiene `filter`; los tramos y el resaltado dependen de si el texto es fijo o viene del dato |
+| D17 | El editor v2 **no** conecta `usePedirDiseno` (`hooks/use-disenos.ts:194`, `POST /templates/design`, v1). «Pedir diseño» en v2 es el modo *crear* de la pestaña «Chat» (plan 4, Task 10) | El endpoint v1 devuelve `layout_json` v1, no escena v2. El plan 4 deja v1 intacto y lo marca obsoleto |
 
 ---
 
