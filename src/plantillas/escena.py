@@ -29,6 +29,7 @@ MAX_CAPAS = 80
 MAX_TEXTO = 1000
 MAX_SPANS = 50
 MAX_TOKENS = 32
+MAX_PROFUNDIDAD = 10   # una escena real baja ~6 niveles (capas > capa > estilo > spans > span)
 
 TEXT_ALIGN = ("left", "center", "right", "justify")
 TEXT_WRAP = ("wrap", "balance", "pretty", "nowrap")
@@ -291,7 +292,32 @@ def _validar_capa(capa: dict[str, Any], colores: dict[str, str], declaradas: set
     estilo = capa.get("estilo", {})
     if not isinstance(estilo, dict):
         raise EscenaInvalida(f"{donde}: 'estilo' debe ser un objeto")
+    for clave, valor in estilo.items():
+        # Solo `spans` es estructurado; el resto son escalares. Una clave libre
+        # con un objeto dentro no la lee nadie y sí puede envenenar la plantilla.
+        if clave != "spans" and isinstance(valor, (dict, list)):
+            raise EscenaInvalida(f"{donde}: el estilo '{clave}' debe ser un valor simple")
     _VALIDADORES[tipo](capa, estilo, colores, familias, donde)
+
+
+def _profundidad(valor: Any, tope: int) -> int:
+    """Niveles de anidado de `valor`, contados sin recursión y sin pasar de tope+1.
+
+    Va ANTES de cualquier recorrido recursivo (deepcopy, json, normalizar):
+    una escena anidada a 900 niveles las tumba con RecursionError.
+    """
+    mayor = 0
+    pila = [(valor, 0)]
+    while pila:
+        actual, nivel = pila.pop()
+        mayor = max(mayor, nivel)
+        if mayor > tope:
+            return mayor
+        if isinstance(actual, dict):
+            pila.extend((v, nivel + 1) for v in actual.values())
+        elif isinstance(actual, list):
+            pila.extend((v, nivel + 1) for v in actual)
+    return mayor
 
 
 def validar(escena: dict[str, Any], contrato: dict[str, Any],
@@ -303,6 +329,9 @@ def validar(escena: dict[str, Any], contrato: dict[str, Any],
     """
     if not isinstance(escena, dict) or escena.get("v") != 2:
         raise EscenaInvalida("la escena debe ser un objeto con v=2")
+    if _profundidad(escena, MAX_PROFUNDIDAD) > MAX_PROFUNDIDAD:
+        raise EscenaInvalida(
+            f"la escena está demasiado anidada (profundidad máxima {MAX_PROFUNDIDAD})")
 
     lienzo = escena.get("lienzo")
     if not isinstance(lienzo, dict):

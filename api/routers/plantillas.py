@@ -156,9 +156,13 @@ def guardar_diseno(slug: str, tid: int, cuerpo: DisenoGuardado,
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     fila = _plantilla_de_marca(cx, marca["id"], tid)
     contrato_dict = cuerpo.contrato or plantillas.contrato_de(fila)
-    formato = ((cuerpo.layout.get("lienzo") or {}).get("formato")
-               if cuerpo.layout.get("v") == 2 else None)
-    if cuerpo.contrato is None and formato in escena_mod.ASPECTO_DE_FORMATO:
+    lienzo = cuerpo.layout.get("lienzo")
+    # Sin guardas de tipo: un lienzo str o un formato lista se dejan pasar tal
+    # cual y `nueva_version` los rechaza con 422 al validar.
+    formato = (lienzo.get("formato")
+               if cuerpo.layout.get("v") == 2 and isinstance(lienzo, dict) else None)
+    if (cuerpo.contrato is None and isinstance(formato, str)
+            and formato in escena_mod.ASPECTO_DE_FORMATO):
         # El editor cambia de formato sin mandar el contrato: el aspecto lo
         # dicta el lienzo, y `nueva_version` lo copia a brand_templates.aspecto.
         contrato_dict = {**contrato_dict, "aspecto": escena_mod.ASPECTO_DE_FORMATO[formato]}

@@ -361,3 +361,39 @@ def test_duplicar_guarda_v2(cliente_manager, marca, cx, plantilla_legacy):
     r = cliente_manager.post(f"/brands/{marca}/templates/{plantilla_legacy}/duplicate")
     nuevo = r.json()["id"]
     assert plantillas.layout_de(plantillas.obtener(cx, nuevo))["v"] == 2
+
+
+def _anidado(n: int) -> dict:
+    d: dict = {}
+    for _ in range(n):
+        d = {"a": d}
+    return d
+
+
+def _escena_envenenada() -> dict:
+    esc = escena.normalizar(None, "4:5")
+    esc["capas"][1]["estilo"]["x"] = _anidado(900)
+    return esc
+
+
+def test_escena_anidada_da_422_y_no_envenena(cliente_manager, marca, cx):
+    url = f"/brands/{marca}/templates"
+    tid = cliente_manager.post(url, json={"nombre": "P", "aspecto": "4:5"}).json()["id"]
+    antes = plantillas.obtener(cx, tid)["version_actual"]
+    esc = _escena_envenenada()
+    assert cliente_manager.patch(f"{url}/{tid}", json={"layout": esc}).status_code == 422
+    assert cliente_manager.post(url, json={"nombre": "Q", "aspecto": "4:5",
+                                           "layout": esc}).status_code == 422
+    assert cliente_manager.post(f"{url}/preview", json={"layout": esc,
+                                                        "aspecto": "4:5"}).status_code == 422
+    assert plantillas.obtener(cx, tid)["version_actual"] == antes
+    assert cliente_manager.get(f"{url}/{tid}").status_code == 200
+
+
+def test_guardar_con_lienzo_o_formato_de_tipo_raro_da_422(cliente_manager, marca):
+    url = f"/brands/{marca}/templates"
+    tid = cliente_manager.post(url, json={"nombre": "R", "aspecto": "4:5"}).json()["id"]
+    esc = escena.normalizar(None, "4:5")
+    for raro in ({**esc, "lienzo": "x"}, {**esc, "lienzo": {**esc["lienzo"], "formato": ["4x5"]}}):
+        r = cliente_manager.patch(f"{url}/{tid}", json={"layout": raro})
+        assert r.status_code == 422, r.text

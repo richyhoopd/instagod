@@ -182,3 +182,20 @@ def test_fondo_gradiente_e_imagen():
     E.validar(esc, CONTRATO)
     esc["lienzo"]["fondo"] = {"tipo": "imagen", "valor": "assets/fondo.jpg"}
     E.validar(esc, CONTRATO)
+
+
+def _anidado(n: int) -> dict:
+    d: dict = {}
+    for _ in range(n):
+        d = {"a": d}
+    return d
+
+
+def test_un_estilo_solo_admite_escalares():
+    _rompe(lambda e: e["capas"][0]["estilo"].update(x={"a": 1}), "estilo")
+    _rompe(lambda e: e["capas"][0]["estilo"].update(x=[1]), "estilo")
+
+
+def test_una_escena_muy_anidada_se_rechaza_sin_recursion():
+    _rompe(lambda e: e["capas"][0].update(extra=_anidado(900)), "profund")
+    _rompe(lambda e: e["tokens"].update(extra=_anidado(900)), "profund")
