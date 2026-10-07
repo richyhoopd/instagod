@@ -1,6 +1,6 @@
 # Editor v2, plan 4: chat IA que crea y edita escenas
 
-Spec: `docs/superpowers/specs/2026-10-06-editor-escena-v2-design.md` (commit e87942f), §5 «Chat IA» y §6 «Kinds».
+Spec: `docs/superpowers/specs/2026-10-06-editor-escena-v2-design.md` (commit e87942f), §3 «Chat de IA» (incluye «Biblioteca de kinds» y «Herramientas del modelo»), más las filas de §6 y §7 que tocan al chat.
 Índice y contrato de interfaces: `docs/superpowers/plans/2026-10-06-editor-v2-00-indice.md`.
 Depende de: plan 1 (escena v2), plan 2 (`aplicarOps`, `useEditor`, `PanelLateral`), plan 3 (`buscar`, `biblioteca`, `recorte`).
 
@@ -50,7 +50,8 @@ Depende de: plan 1 (escena v2), plan 2 (`aplicarOps`, `useEditor`, `PanelLateral
 - **Los kinds se diseñan en 4x5.**
   - 1:1 y 9:16 salen de `escena.reformatear` (plan 1).
 - **Nombres del contrato del índice:**
-  - `pedir_herramienta` gana dos kwargs opcionales, `uso` y `max_tokens`. El Task 0 los agrega al índice **antes** de escribir código.
+  - `pedir_herramienta` tiene dos kwargs opcionales, `uso` y `max_tokens`. **Ya están** en el índice (sección «Plan 4»); el Task 0 solo agrega las líneas de `kinds`, `extraer` y `chat`.
+  - `ops.aplicar` replica `aplicarOps` del plan 2 **y carga su fixture** (`frontend/lib/__fixtures__/ops-casos.json`). `valor: null` asigna `null`; no borra.
 - **Mantenimiento de lo existente:**
   - No se toca `src/plantillas/disenador.py` ni `POST /templates/design`. Siguen sirviendo a v1.
   - Se marcan como obsoletos en el Task 9 con un comentario y se borran después de que v2 esté en prod (fuera de este plan).
@@ -62,13 +63,21 @@ Depende de: plan 1 (escena v2), plan 2 (`aplicarOps`, `useEditor`, `PanelLateral
 
 ## Review Focus
 
-- `ops.py` y `aplicarOps` (TS) **deben** dar el mismo resultado. Si la paridad falla, se corrige el lado que contradiga el índice; no se relaja la prueba.
-- Aislamiento por marca en el handler y en el router: un `template_id` ajeno da 404 antes de encolar y `ValueError` dentro del job.
-- `extraer.py`:
-  - qué pasa con el texto que se desborda;
-  - si un `rot` medido sin `transform` reproduce la misma caja;
-  - si los colores se tokenizan solo cuando son exactos.
-- El costo: el chat de crear hace como máximo 4 llamadas (diseñar, reintento, revisar, reintento implícito de revisar = 0). Ver `llm_meta.uso`.
+Los cinco modos de falla más probables que el spec no cubre solo, cada uno con la prueba que lo fija:
+
+| # | Modo de falla | Prueba (task) |
+|---|---|---|
+| 1 | `ops.py` y `aplicarOps` divergen (`null` que borra vs asigna, cascada de `del`, `id`/`tipo`), y las ops que el servidor validó fallan en el navegador | `test_casos_compartidos` y `test_set_null_asigna_null_como_ts` en `tests/test_ops.py` (Task 2), sobre el fixture del plan 2 |
+| 2 | La primera candidata de la búsqueda no se descarga (404, host no permitido, tipo equivocado) y el post entero falla aunque haya otras viables (§3 pide «el primer resultado viable») | `test_asset_salta_candidata_que_no_descarga` en `tests/test_chat_crear.py` (Task 7) |
+| 3 | Editar manda a Claude `src` largos (`data:`/`file:` o rutas enormes): tokens de más y rutas locales filtradas (§3 pide «escena sin `src` largos») | `test_editar_no_manda_src_largos` en `tests/test_chat_editar.py` (Task 8) |
+| 4 | Un mensaje falla (spec inválido dos veces, sin assets) y aun así queda versión o cambia la escena (§6: «se muestra el error en el chat y no se toca la escena») | `test_handler_error_no_guarda_version` en `tests/test_diseno_chat.py` (Task 9) |
+| 5 | La persona edita o borra una capa mientras corre el job y las ops ya no aplican: `aplicar` lanza `OpInvalida` dentro de un `useEffect` y tumba el editor | «ops que ya no aplican no rompen» en `frontend/hooks/__tests__/use-chat-diseno.test.ts` (Task 10) |
+
+También revisar, con pruebas que ya existen:
+
+- Aislamiento por marca: un `template_id` ajeno da 404 antes de encolar y `ValueError` dentro del job (`test_post_plantilla_ajena_404`, `test_handler_plantilla_de_otra_cuenta`, Task 9).
+- `extraer.py`: texto que se desborda, `rot` medido sin `transform`, colores tokenizados solo si son exactos (Task 6).
+- Costo: crear hace como máximo 3 llamadas (diseñar, su reintento, revisar; la corrección de la crítica no vuelve a llamar). Editar, como máximo 2. Ver `llm_meta.uso`.
 
 ## Desviaciones del spec (declaradas)
 
@@ -86,6 +95,9 @@ Depende de: plan 1 (escena v2), plan 2 (`aplicarOps`, `useEditor`, `PanelLateral
 | 10 | Si la crítica pide re-render, los archivos SVG y de fondo del primer intento quedan huérfanos | Lo mismo que el 9 |
 | 11 | El plan 3 no expone un helper de recorte (solo el job `asset.recorte`). `_recortar` copia su convención: `<stem>-recorte.png` y `UPDATE brand_assets.recorte_archivo` filtrado por `account_id` | Verificado contra el plan 3 (handler `asset_recorte`) |
 | 12 | El spec §2 pide conectar «pedir diseño» de `hooks/use-disenos.ts`. En v2 eso es el modo *crear* del chat (Task 10); `usePedirDiseno` (`use-disenos.ts:194`) sigue solo para v1 | `POST /templates/design` produce `layout_json` v1. Lo registra también el plan 2, D17 |
+| 13 | El spec §3 paso 6 marca las capas con `data-capa`/`data-campo`; este plan usa `data-tipo` + `data-id` (+ `data-campo`) | `data-tipo` dice además qué capa v2 sale (`text`, `caja`, `shape`, `image`, `svg`). Mismo propósito, otro nombre |
+| 14 | El spec §6 dice que todo lo que no tenga `data-capa` se aplana al fondo. Aquí solo se aplana lo marcado con `data-aplanar`; un elemento sin marca se pierde | Los kinds son a mano y el round-trip ≤1% del Task 6 atrapa cualquier elemento sin marca. Aplanar «todo lo demás» exige una segunda captura en cada render |
+| 15 | El costo queda en `jobs.resultado_json` (`uso`) y en `template_versions.llm_meta`, no en una columna de `jobs` | §6 pide «se registra en `jobs`»; no hay columna de costo y agregarla es migración fuera de este plan |
 
 ## No verificado (al escribir este plan)
 
@@ -147,12 +159,12 @@ Esperado: las columnas `proveedor`, `autor`, `licencia`, `url_origen`, `ig_handl
 - [ ] **Step 4: verificar el frontend de pruebas y el editor**
 
 ```bash
-cd frontend && grep -n "\"test\|vitest" package.json; ls tests 2>/dev/null; ls tests/unit 2>/dev/null | head; cd ..
-grep -n "throw" frontend/lib/escena.ts | head
+cd frontend && grep -n "\"test\|vitest" package.json; grep -n "include" vitest.config.ts; ls lib/__fixtures__ hooks/__tests__ 2>/dev/null; cd ..
+grep -n "export class OpInvalida\|INTOCABLES\|PELIGROSAS" frontend/lib/escena.ts
 ```
 
-- Si las pruebas unitarias no viven en `frontend/tests/unit/`, se cambia la ruta del Task 2, Step 5 y del Task 10.
-- Si `aplicarOps` **no** lanza ante una op inválida, los casos `error` del Task 2 fallan del lado TS. En ese caso se corrige `aplicarOps` (el índice dice «misma semántica»).
+- Esperado: `pnpm test` corre vitest con `include: ["**/*.test.ts", "**/*.test.tsx"]` (plan 2, Task 1) y existe `frontend/lib/__fixtures__/ops-casos.json` (plan 2, Task 2). Las pruebas TS de este plan van en `frontend/hooks/__tests__/`, como las del plan 2.
+- Si falta el fixture, **se para**: el Task 2 lo carga y no escribe uno propio.
 
 - [ ] **Step 5: verificar dependencias Python**
 
@@ -168,25 +180,15 @@ grep -n "throw" frontend/lib/escena.ts | head
   ```
   Ya está en `requirements.txt`, así que no hace falta editar el archivo.
 
-- [ ] **Step 6: ampliar el índice con la firma real de `pedir_herramienta`**
+- [ ] **Step 6: completar el índice**
 
-En `docs/superpowers/plans/2026-10-06-editor-v2-00-indice.md`, sección «Plan 4 (Python)», se reemplaza:
+La firma de `pedir_herramienta` con `uso` y `max_tokens` **ya está** en el índice (sección «Plan 4», ~línea 107). Se verifica, y no se toca:
 
-```python
-def pedir_herramienta(*, system: str, mensajes: list[dict], herramienta: dict,
-                      imagenes: list[Path] = (), modelo: str | None = None) -> dict
+```bash
+grep -n "uso: list\[dict\] | None = None, max_tokens: int = 8192" docs/superpowers/plans/2026-10-06-editor-v2-00-indice.md
 ```
 
-por:
-
-```python
-def pedir_herramienta(*, system: str, mensajes: list[dict], herramienta: dict,
-                      imagenes: list[Path] = (), modelo: str | None = None,
-                      uso: list[dict] | None = None, max_tokens: int = 8192) -> dict
-# uso: si se pasa, se le agrega {"modelo","entrada","salida"} por llamada
-```
-
-y se agrega debajo de `ops.aplicar`:
+Se agrega debajo de `ops.aplicar`:
 
 ```python
 # src/plantillas/kinds/__init__.py
@@ -202,7 +204,7 @@ def editar(cx, marca, escena, contrato, mensaje, *, uso=None) -> tuple[list, dic
 
 ```bash
 git add docs/superpowers/plans/2026-10-06-editor-v2-00-indice.md
-git commit -m "docs(plan4): amplía contrato del índice con uso/max_tokens, kinds, extraer y chat" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "docs(plan4): amplía contrato del índice con kinds, extraer y chat" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -454,83 +456,34 @@ git commit -m "feat(llm): cliente Claude con herramienta forzada, visión y regi
 
 **Files:**
 - Create: `src/plantillas/ops.py`
-- Create: `tests/fixtures/ops/casos.json`
 - Test: `tests/test_ops.py`
-- Test: `frontend/tests/unit/ops-paridad.test.ts` (ruta confirmada en el Task 0, Step 4)
+- Lee (no crea): `frontend/lib/__fixtures__/ops-casos.json` — es del **plan 2** (Task 2, 19 casos) y su vitest es `frontend/lib/__tests__/escena.test.ts` («casos compartidos con ops.py»). Este plan no escribe un fixture propio ni otra prueba TS: hay **un solo** fixture para los dos lados (Review Focus del plan 2, punto 1).
 
-**Semántica** (es la del índice, y esta prueba la fija para ambos lados):
+**Semántica** (la de `aplicarEnBorrador`/`aplicarOps` del plan 2, Task 2; aquí se copia, no se reinventa):
 
 - `set`:
-  - `ruta` va con puntos y crea los dicts intermedios.
-  - `valor: null` **borra** la clave.
-  - Prohíbe los segmentos vacíos y los segmentos `id`, `__proto__`, `constructor` y `prototype`.
-  - Si un intermedio no es dict, error.
+  - `ruta` va con puntos y crea los dicts intermedios cuando el intermedio falta o es `null`.
+  - `valor` se **asigna** tal cual, con copia profunda. `valor: null` deja la clave en `null`; **no** la borra.
+  - Error si algún segmento está vacío o es `__proto__`, `prototype` o `constructor`.
+  - Error si la ruta es exactamente `id` o `tipo` (un solo segmento). `estilo.id` sí se permite.
+  - Error si un intermedio no es dict (los arrays cuentan como no-dict).
 - `add`:
-  - `capa.id` debe cumplir `^[a-z][a-z0-9_-]{0,31}$` y no estar repetido.
-  - `indice` se recorta a `[0, len]`; si no se da, la capa va al final.
+  - Error si ya existe una capa con ese `id`. El formato del id **no** se valida aquí: lo valida `escena.validar` después (igual que en TS).
+  - `indice` se trunca a entero y se acota a `[0, len]`; sin `indice`, la capa va al final.
 - `del`:
-  - Quita la capa y también su id de los `hijos` de cualquier grupo.
-- Una op desconocida o una capa inexistente lanza error, y ninguna entrada se muta.
+  - Error si la capa no existe.
+  - Borra la capa y todos sus descendientes (si es grupo).
+  - Borra en cascada todo grupo que se queda sin hijos (D3 del plan 2).
+  - Quita los ids borrados de los `hijos` de los grupos que quedan.
+- Las ops son atómicas: si una falla, se lanza `OpInvalida` y la escena de entrada no se muta.
+- Solo en Python (el tipo `Op` de TS ya lo impide): `ops` que no es lista, op desconocida y `indice` no numérico son `OpInvalida`.
 
-- [ ] **Step 1: fixture compartido**
-
-`tests/fixtures/ops/casos.json`:
-
-```json
-[
-  {"nombre": "set crea intermedios",
-   "escena": {"v": 2, "capas": [{"id": "t", "tipo": "text"}]},
-   "ops": [{"op": "set", "capa": "t", "ruta": "estilo.color", "valor": "#ff0000"}],
-   "esperado": {"v": 2, "capas": [{"id": "t", "tipo": "text", "estilo": {"color": "#ff0000"}}]}},
-  {"nombre": "set con null borra la clave",
-   "escena": {"v": 2, "capas": [{"id": "t", "tipo": "text", "estilo": {"color": "#000000", "fontSize": 40}}]},
-   "ops": [{"op": "set", "capa": "t", "ruta": "estilo.color", "valor": null}],
-   "esperado": {"v": 2, "capas": [{"id": "t", "tipo": "text", "estilo": {"fontSize": 40}}]}},
-  {"nombre": "set reemplaza un objeto entero",
-   "escena": {"v": 2, "capas": [{"id": "f", "tipo": "image", "src": "assets/a.png"}]},
-   "ops": [{"op": "set", "capa": "f", "ruta": "fuente_asset", "valor": {"proveedor": "pexels", "autor": "Ana"}}],
-   "esperado": {"v": 2, "capas": [{"id": "f", "tipo": "image", "src": "assets/a.png", "fuente_asset": {"proveedor": "pexels", "autor": "Ana"}}]}},
-  {"nombre": "add al final y con indice recortado",
-   "escena": {"v": 2, "capas": [{"id": "a", "tipo": "shape"}]},
-   "ops": [{"op": "add", "capa": {"id": "b", "tipo": "shape"}},
-           {"op": "add", "capa": {"id": "c", "tipo": "shape"}, "indice": -5}],
-   "esperado": {"v": 2, "capas": [{"id": "c", "tipo": "shape"}, {"id": "a", "tipo": "shape"}, {"id": "b", "tipo": "shape"}]}},
-  {"nombre": "del quita de hijos",
-   "escena": {"v": 2, "capas": [{"id": "g", "tipo": "group", "hijos": ["a", "b"]}, {"id": "a", "tipo": "shape"}, {"id": "b", "tipo": "shape"}]},
-   "ops": [{"op": "del", "capa": "a"}],
-   "esperado": {"v": 2, "capas": [{"id": "g", "tipo": "group", "hijos": ["b"]}, {"id": "b", "tipo": "shape"}]}},
-  {"nombre": "set sobre id prohibido", "error": true,
-   "escena": {"v": 2, "capas": [{"id": "t", "tipo": "text"}]},
-   "ops": [{"op": "set", "capa": "t", "ruta": "id", "valor": "x"}]},
-  {"nombre": "set con __proto__", "error": true,
-   "escena": {"v": 2, "capas": [{"id": "t", "tipo": "text"}]},
-   "ops": [{"op": "set", "capa": "t", "ruta": "estilo.__proto__.x", "valor": 1}]},
-  {"nombre": "set con segmento vacío", "error": true,
-   "escena": {"v": 2, "capas": [{"id": "t", "tipo": "text"}]},
-   "ops": [{"op": "set", "capa": "t", "ruta": "estilo..color", "valor": 1}]},
-  {"nombre": "set a través de un no-dict", "error": true,
-   "escena": {"v": 2, "capas": [{"id": "t", "tipo": "text", "texto": "hola"}]},
-   "ops": [{"op": "set", "capa": "t", "ruta": "texto.color", "valor": 1}]},
-  {"nombre": "capa inexistente", "error": true,
-   "escena": {"v": 2, "capas": []},
-   "ops": [{"op": "del", "capa": "nada"}]},
-  {"nombre": "add con id duplicado", "error": true,
-   "escena": {"v": 2, "capas": [{"id": "a", "tipo": "shape"}]},
-   "ops": [{"op": "add", "capa": {"id": "a", "tipo": "shape"}}]},
-  {"nombre": "add con id inválido", "error": true,
-   "escena": {"v": 2, "capas": []},
-   "ops": [{"op": "add", "capa": {"id": "1mal", "tipo": "shape"}}]},
-  {"nombre": "op desconocida", "error": true,
-   "escena": {"v": 2, "capas": []},
-   "ops": [{"op": "mover", "capa": "a"}]}
-]
-```
-
-- [ ] **Step 2: prueba Python que falla**
+- [ ] **Step 1: prueba Python que falla**
 
 `tests/test_ops.py`:
 
 ```python
+"""ops.aplicar contra el MISMO fixture que aplicarOps (plan 2, frontend/lib/__fixtures__)."""
 import copy
 import json
 from pathlib import Path
@@ -539,57 +492,75 @@ import pytest
 
 from src.plantillas import ops
 
-CASOS = json.loads((Path(__file__).parent / "fixtures/ops/casos.json").read_text())
+FIXTURE = json.loads((Path(__file__).resolve().parents[1]
+                      / "frontend/lib/__fixtures__/ops-casos.json").read_text())
+BASE = FIXTURE["base"]
 
 
-@pytest.mark.parametrize("caso", CASOS, ids=[c["nombre"] for c in CASOS])
-def test_paridad(caso):
-    original = copy.deepcopy(caso["escena"])
+@pytest.mark.parametrize("caso", FIXTURE["casos"], ids=[c["nombre"] for c in FIXTURE["casos"]])
+def test_casos_compartidos(caso):
+    base = copy.deepcopy(BASE)
     if caso.get("error"):
         with pytest.raises(ops.OpInvalida):
-            ops.aplicar(caso["escena"], caso["ops"])
-    else:
-        assert ops.aplicar(caso["escena"], caso["ops"]) == caso["esperado"]
-    assert caso["escena"] == original
+            ops.aplicar(base, caso["ops"])
+        assert base == BASE
+        return
+    out = ops.aplicar(base, caso["ops"])
+    assert base == BASE
+    assert [c["id"] for c in out["capas"]] == caso["ids"]
+    cambiadas = caso.get("cambiadas") or {}
+    previas = {c["id"]: c for c in BASE["capas"]}
+    for c in out["capas"]:
+        assert c == cambiadas.get(c["id"], previas.get(c["id"]))
+
+
+def test_set_null_asigna_null_como_ts():
+    out = ops.aplicar({"v": 2, "capas": [{"id": "t", "tipo": "text", "estilo": {"color": "#000"}}]},
+                      [{"op": "set", "capa": "t", "ruta": "estilo.color", "valor": None}])
+    assert out["capas"][0]["estilo"] == {"color": None}
 
 
 def test_valor_se_copia():
     valor = {"a": [1]}
-    out = ops.aplicar({"v": 2, "capas": [{"id": "t"}]},
+    out = ops.aplicar({"v": 2, "capas": [{"id": "t", "tipo": "text"}]},
                       [{"op": "set", "capa": "t", "ruta": "x", "valor": valor}])
     valor["a"].append(2)
     assert out["capas"][0]["x"] == {"a": [1]}
 
 
-def test_ops_no_lista():
+@pytest.mark.parametrize("malas", [{"op": "del"}, [{"op": "mover", "capa": "t"}],
+                                   [{"op": "add", "capa": {"id": "n", "tipo": "shape"},
+                                     "indice": "0"}]])
+def test_solo_python(malas):
     with pytest.raises(ops.OpInvalida):
-        ops.aplicar({"v": 2, "capas": []}, {"op": "del"})
+        ops.aplicar({"v": 2, "capas": [{"id": "t", "tipo": "text"}]}, malas)
 ```
 
 ```bash
 /Users/ricardo/Work/personal/instagod/.venv/bin/pytest tests/test_ops.py -q
 ```
 
-Esperado: `ImportError` en `src.plantillas.ops`.
+- Esperado: `ImportError` en `src.plantillas.ops`.
+- Si el archivo `frontend/lib/__fixtures__/ops-casos.json` no existe, el plan 2 (Task 2) no se ha ejecutado: se para aquí (es dependencia dura, ver Task 0).
 
-- [ ] **Step 3: implementar**
+- [ ] **Step 2: implementar**
 
 `src/plantillas/ops.py`:
 
 ```python
-"""Ops sobre escenas v2. Misma semántica que `aplicarOps` en frontend/lib/escena.ts.
+"""Ops sobre escenas v2. Misma semántica que `aplicarOps` en frontend/lib/escena.ts (plan 2).
 
-La prueba de paridad (`tests/fixtures/ops/casos.json`) corre en pytest y en
-vitest: si cambias algo aquí, cámbialo allá en el mismo commit.
+El fixture `frontend/lib/__fixtures__/ops-casos.json` corre en pytest y en vitest:
+si cambias algo aquí, cámbialo allá y agrega el caso al fixture en el mismo commit.
 """
 from __future__ import annotations
 
 import copy
-import re
+import math
 from typing import Any
 
-_ID = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-_PROHIBIDOS = {"id", "__proto__", "constructor", "prototype"}
+_INTOCABLES = {"id", "tipo"}
+_PELIGROSAS = {"__proto__", "prototype", "constructor"}
 
 
 class OpInvalida(ValueError):
@@ -604,51 +575,82 @@ def _capa(capas: list[dict], cid: Any) -> dict:
 
 
 def _set(capas: list[dict], op: dict) -> None:
-    ruta = op.get("ruta")
-    if not isinstance(ruta, str) or not ruta:
-        raise OpInvalida("set necesita ruta")
-    segmentos = ruta.split(".")
-    if any(not s or s in _PROHIBIDOS for s in segmentos):
-        raise OpInvalida(f"ruta no permitida: {ruta!r}")
     obj = _capa(capas, op.get("capa"))
-    for s in segmentos[:-1]:
-        sig = obj.get(s)
+    ruta = op.get("ruta")
+    if not isinstance(ruta, str):
+        raise OpInvalida("set necesita ruta")
+    partes = ruta.split(".")
+    if any(p == "" or p in _PELIGROSAS for p in partes):
+        raise OpInvalida(f"ruta inválida: {ruta!r}")
+    if len(partes) == 1 and partes[0] in _INTOCABLES:
+        raise OpInvalida(f"{ruta!r} no se puede cambiar")
+    for p in partes[:-1]:
+        sig = obj.get(p)
         if sig is None:
-            sig = obj[s] = {}
+            sig = obj[p] = {}
         elif not isinstance(sig, dict):
-            raise OpInvalida(f"{ruta!r}: {s!r} no es un objeto")
+            raise OpInvalida(f"{p!r} no es un objeto en la capa {op.get('capa')!r}")
         obj = sig
-    if op.get("valor") is None:
-        obj.pop(segmentos[-1], None)
-    else:
-        obj[segmentos[-1]] = copy.deepcopy(op["valor"])
+    obj[partes[-1]] = copy.deepcopy(op.get("valor"))
 
 
 def _add(capas: list[dict], op: dict) -> None:
     capa = op.get("capa")
-    if not isinstance(capa, dict) or not _ID.match(str(capa.get("id", ""))):
-        raise OpInvalida("add necesita una capa con id válido")
-    if any(c.get("id") == capa["id"] for c in capas):
-        raise OpInvalida(f"id duplicado: {capa['id']!r}")
-    indice = op.get("indice", len(capas))
-    if not isinstance(indice, int) or isinstance(indice, bool):
-        raise OpInvalida("indice debe ser entero")
-    capas.insert(max(0, min(len(capas), indice)), copy.deepcopy(capa))
+    if not isinstance(capa, dict):
+        raise OpInvalida("add necesita una capa")
+    if any(c.get("id") == capa.get("id") for c in capas):
+        raise OpInvalida(f"ya existe la capa {capa.get('id')!r}")
+    n = len(capas)
+    indice = op.get("indice")
+    if indice is None:
+        i = n
+    elif isinstance(indice, bool) or not isinstance(indice, (int, float)) or not math.isfinite(indice):
+        raise OpInvalida("indice debe ser numérico")
+    else:
+        i = min(max(math.trunc(indice), 0), n)
+    capas.insert(i, copy.deepcopy(capa))
+
+
+def _descendientes(capas: list[dict], cid: Any) -> set:
+    por_id = {c.get("id"): c for c in capas}
+    vistos: set = set()
+    pila = [cid]
+    while pila:
+        c = por_id.get(pila.pop())
+        if not c or c.get("tipo") != "group":
+            continue
+        for h in c.get("hijos") or []:
+            if h in vistos or h == cid:
+                continue
+            vistos.add(h)
+            pila.append(h)
+    return vistos
 
 
 def _del(capas: list[dict], op: dict) -> None:
     cid = op.get("capa")
-    capas.remove(_capa(capas, cid))
+    _capa(capas, cid)
+    borrar = {cid} | _descendientes(capas, cid)
+    cambio = True
+    while cambio:  # un grupo sin hijos se borra también (el validador prohíbe hijos vacíos)
+        cambio = False
+        for c in capas:
+            hijos = c.get("hijos") or []
+            if (c.get("tipo") == "group" and c.get("id") not in borrar and hijos
+                    and all(h in borrar for h in hijos)):
+                borrar.add(c.get("id"))
+                cambio = True
+    capas[:] = [c for c in capas if c.get("id") not in borrar]
     for c in capas:
-        hijos = c.get("hijos")
-        if isinstance(hijos, list) and cid in hijos:
-            c["hijos"] = [h for h in hijos if h != cid]
+        if c.get("tipo") == "group":
+            c["hijos"] = [h for h in c.get("hijos") or [] if h not in borrar]
 
 
 _OPS = {"set": _set, "add": _add, "del": _del}
 
 
 def aplicar(escena: dict, ops: list[dict]) -> dict:
+    """Copia de `escena` con `ops` aplicadas. Atómica: la entrada nunca se muta."""
     if not isinstance(ops, list):
         raise OpInvalida("ops debe ser una lista")
     nueva = copy.deepcopy(escena)
@@ -660,62 +662,22 @@ def aplicar(escena: dict, ops: list[dict]) -> dict:
     return nueva
 ```
 
-- [ ] **Step 4: verde**
+- [ ] **Step 3: verde**
 
 ```bash
 /Users/ricardo/Work/personal/instagod/.venv/bin/pytest tests/test_ops.py -q
+cd /Users/ricardo/Work/personal/instagod/.claude/worktrees/editor-v2/frontend && pnpm test lib/__tests__/escena.test.ts; cd ..
 ```
 
-Esperado: `15 passed`.
+- Esperado: `24 passed` en pytest (19 casos del fixture + 5 propios) y la suite del plan 2 sigue verde.
+- Si un caso del fixture falla en Python, se corrige `ops.py`. **No** se toca `aplicarOps` ni el fixture desde este plan: si la semántica de TS parece mal, se anota en la sección «No verificado» y se resuelve en el plan 2.
 
-- [ ] **Step 5: paridad del lado TS**
-
-`frontend/tests/unit/ops-paridad.test.ts`:
-
-```ts
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { aplicarOps, type Escena, type Op } from "../../lib/escena";
-
-type Caso = { nombre: string; escena: Escena; ops: Op[]; esperado?: Escena; error?: boolean };
-
-const casos: Caso[] = JSON.parse(
-  readFileSync(resolve(__dirname, "../../../tests/fixtures/ops/casos.json"), "utf8"),
-);
-
-describe("paridad ops Python/TS", () => {
-  for (const c of casos) {
-    it(c.nombre, () => {
-      const original = structuredClone(c.escena);
-      if (c.error) {
-        expect(() => aplicarOps(c.escena, c.ops)).toThrow();
-      } else {
-        expect(aplicarOps(c.escena, c.ops)).toEqual(c.esperado);
-      }
-      expect(c.escena).toEqual(original);
-    });
-  }
-});
-```
-
-```bash
-cd /Users/ricardo/Work/personal/instagod/.claude/worktrees/editor-v2/frontend && pnpm vitest run tests/unit/ops-paridad.test.ts; cd ..
-```
-
-- Esperado: `13 passed`.
-- Si falla algún caso (lo más probable: `null` que borra, recorte de `indice`, o `del` sobre `hijos`), se corrige `aplicarOps` en `frontend/lib/escena.ts` para cumplir la semántica de arriba y se vuelve a correr la suite de vitest completa:
-  ```bash
-  pnpm vitest run
-  ```
-  El cambio TS se anota en el mensaje de commit.
-
-- [ ] **Step 6: lint y commit**
+- [ ] **Step 4: lint y commit**
 
 ```bash
 /Users/ricardo/Work/personal/instagod/.venv/bin/ruff check src/ tests/
-git add src/plantillas/ops.py tests/test_ops.py tests/fixtures/ops/casos.json frontend/tests/unit/ops-paridad.test.ts frontend/lib/escena.ts
-git commit -m "feat(escena): ops.aplicar en Python con fixture de paridad compartido con aplicarOps" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add src/plantillas/ops.py tests/test_ops.py
+git commit -m "feat(escena): ops.aplicar en Python, paridad con aplicarOps vía el fixture del plan 2" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2607,6 +2569,32 @@ def test_system_lista_los_kinds(entorno):
     for k in kinds.KINDS:
         assert f'"{k}"' in system
     assert "Cercana, directa." in system
+
+
+def test_asset_salta_candidata_que_no_descarga(entorno, monkeypatch):
+    # §3: «el primer resultado viable». Si la primera candidata no se descarga
+    # (404, host no permitido, tipo equivocado), se prueba la siguiente.
+    c1 = Candidata(proveedor="pexels", id_origen="1", tipo="imagen", url="u1", preview_url="p",
+                   ancho=10, alto=10, autor="Mala", licencia="Pexels", url_origen="o1")
+    c2 = Candidata(proveedor="pexels", id_origen="2", tipo="imagen", url="u2", preview_url="p",
+                   ancho=10, alto=10, autor="Buena", licencia="Pexels", url_origen="o2")
+    monkeypatch.setattr(chat.buscar, "buscar", lambda *a, **k: [c1, c2])
+
+    def importar(cx_, aid, slug, cand):
+        if cand.id_origen == "1":
+            raise chat.biblioteca.AssetInvalido("404")
+        return {"archivo": "buena.jpg", "proveedor": "pexels", "autor": cand.autor,
+                "licencia": "Pexels", "url_origen": cand.url_origen, "ig_handle": None,
+                "recorte_archivo": None}
+
+    monkeypatch.setattr(chat.biblioteca, "importar", importar)
+    a = chat.asset_para(entorno.cx, _marca(), "beach", recortar=False)
+    assert a["archivo"] == "assets/buena.jpg"
+    assert a["fuente_asset"]["autor"] == "Buena"
+
+    monkeypatch.setattr(chat.biblioteca, "importar",
+                        lambda *a, **k: (_ for _ in ()).throw(chat.biblioteca.AssetInvalido("x")))
+    assert chat.asset_para(entorno.cx, _marca(), "beach", recortar=False) is None
 ```
 
 ```bash
@@ -2730,10 +2718,16 @@ def _recortar(cx, marca, fila: dict) -> str:
 
 
 def asset_para(cx, marca, consulta: str, *, recortar: bool) -> dict | None:
-    candidatas = buscar.buscar(cx, marca.id, marca.slug, consulta, tipo="imagen", n=5)
-    if not candidatas:
+    # §3: «el primer resultado viable». Una candidata que no se descarga no tumba el post.
+    fila = None
+    for cand in buscar.buscar(cx, marca.id, marca.slug, consulta, tipo="imagen", n=5):
+        try:
+            fila = biblioteca.importar(cx, marca.id, marca.slug, cand)
+            break
+        except biblioteca.AssetInvalido:
+            continue
+    if fila is None:
         return None
-    fila = biblioteca.importar(cx, marca.id, marca.slug, candidatas[0])
     archivo = fila["archivo"]
     if recortar:
         archivo = fila.get("recorte_archivo") or _recortar(cx, marca, fila)
@@ -2853,7 +2847,7 @@ git add src/plantillas/chat.py tests/test_chat_crear.py
 git commit -m "feat(chat): crear elige kind, resuelve assets, extrae capas y pasa una crítica con visión" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-Esperado: `9 passed`.
+Esperado: `10 passed`.
 
 - [ ] **Step 4 (opcional, con red y costo real; solo si Ricardo lo aprueba en el momento): humo contra Claude**
 
@@ -2907,6 +2901,7 @@ def editar(cx, marca, escena: dict, contrato: dict, mensaje: str, *, uso: list |
 `tests/test_chat_editar.py`:
 
 ```python
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -2993,6 +2988,20 @@ def test_buscar_asset_sobre_capa_no_imagen(entorno):
     entorno.respuestas += [mala, mala]
     with pytest.raises(chat.ChatError, match="titulo"):
         chat.editar(entorno.cx, entorno.marca, ESCENA, CONTRATO, "x")
+
+
+def test_editar_no_manda_src_largos(entorno):
+    # §3: «escena sin src largos». Ni data: ni file:// ni cadenas enormes llegan a Claude.
+    escena = json.loads(json.dumps(ESCENA))
+    escena["capas"][1]["src"] = "data:image/png;base64," + "A" * 5000
+    escena["capas"].append({"id": "logo", "tipo": "image", "src": "file:///Users/x/logo.png",
+                            "recorte": False})
+    entorno.respuestas.append({"ops": [], "respuesta": "ok"})
+    chat.editar(entorno.cx, entorno.marca, escena, CONTRATO, "nada")
+    enviado = entorno.pedidos[0]["mensajes"][0]["content"]
+    assert "base64" not in enviado and "file://" not in enviado
+    assert '"imagen"' in enviado and '"logo"' in enviado
+    assert escena["capas"][1]["src"].startswith("data:")  # la escena real no se toca
 ```
 
 ```bash
@@ -3009,7 +3018,7 @@ Se agrega a `src/plantillas/chat.py`:
 HERRAMIENTA_EDITAR = {
     "name": "editar",
     "description": "Cambia la escena con ops. set: {op:'set', capa:id, ruta:'estilo.color', valor}; "
-                   "valor null borra la clave. add: {op:'add', capa:{...capa v2 completa...}, indice?}. "
+                   "valor null deja la clave en null (no la borra). add: {op:'add', capa:{...capa v2 completa...}, indice?}. "
                    "del: {op:'del', capa:id}. Para cambiar una foto usa buscar_asset, no inventes src.",
     "input_schema": {
         "type": "object",
@@ -3049,6 +3058,19 @@ def _ops_de_asset(cx, marca, escena: dict, pedido: dict) -> list[dict]:
              "valor": asset["fuente_asset"]}]
 
 
+def _escena_para_llm(valor, clave: str = ""):
+    """Copia de la escena sin src largos (§3): data:, file:// o un `src` de >300 caracteres.
+    Los textos largos sí viajan: el modelo los necesita para editar."""
+    if isinstance(valor, dict):
+        return {k: _escena_para_llm(v, k) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_escena_para_llm(v, clave) for v in valor]
+    if isinstance(valor, str) and (valor.startswith(("data:", "file:"))
+                                   or (clave == "src" and len(valor) > 300)):
+        return "<omitido>"
+    return valor
+
+
 def editar(cx, marca, escena: dict, contrato: dict, mensaje: str, *,
            uso: list | None = None) -> tuple[list, dict, dict]:
     uso = [] if uso is None else uso
@@ -3062,7 +3084,7 @@ def editar(cx, marca, escena: dict, contrato: dict, mensaje: str, *,
         escena_mod.validar(nueva, contrato, familias=familias)
         return lista, nueva
 
-    contenido = (f"Escena actual:\n{json.dumps(escena, ensure_ascii=False)}\n\n"
+    contenido = (f"Escena actual:\n{json.dumps(_escena_para_llm(escena), ensure_ascii=False)}\n\n"
                  f"Familias tipográficas disponibles: {sorted(familias)}\n\n"
                  f"Pedido: {mensaje}")
     salida, (lista, nueva) = _pedir_valido(
@@ -3080,7 +3102,7 @@ git add src/plantillas/chat.py tests/test_chat_editar.py
 git commit -m "feat(chat): editar devuelve ops validadas y resuelve buscar_asset en el servidor" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-Esperado: `14 passed`.
+Esperado: `15 passed`.
 
 ---
 
@@ -3206,6 +3228,28 @@ def test_handler_plantilla_de_otra_cuenta(con_marca):
                      {"template_id": tid, "mensaje": "x", "modo": "crear"}, creado_por=uid)
     with pytest.raises(ValueError):
         handlers.diseno_chat(cx, db.get(cx, "jobs", jid))
+
+
+def test_handler_error_no_guarda_version(con_marca, monkeypatch):
+    # §6: si el modelo falla dos veces o falta un asset, error en el chat y la escena no se toca.
+    _, cx, H, uid = con_marca
+    marca = _marca(cx, "prueba")
+    tid = _plantilla(cx, marca["id"])
+    antes = len(plantillas.versiones(cx, tid))
+    layout_antes = plantillas.obtener(cx, tid)["layout_json"]
+
+    def falla(*a, **k):
+        raise chat.ChatError("spec inválido tras reintento")
+
+    monkeypatch.setattr(chat, "crear", falla)
+    monkeypatch.setattr(chat, "editar", falla)
+    for payload in ({"template_id": tid, "mensaje": "x", "modo": "crear"},
+                    {"template_id": tid, "mensaje": "x", "modo": "editar", "escena": ESCENA}):
+        jid = jobs.crear(cx, "diseno.chat", marca["id"], payload, creado_por=uid)
+        with pytest.raises(chat.ChatError):
+            handlers.diseno_chat(cx, db.get(cx, "jobs", jid))
+    assert len(plantillas.versiones(cx, tid)) == antes
+    assert plantillas.obtener(cx, tid)["layout_json"] == layout_antes
 
 
 def test_get_historial(con_marca, monkeypatch):
@@ -3360,7 +3404,7 @@ git add src/jobs/handlers.py api/routers/plantillas.py src/plantillas/disenador.
 git commit -m "feat(chat): job diseno.chat y endpoints POST/GET /templates/{tid}/chat con historial en template_versions" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-Esperado: `7 passed` y la suite completa verde.
+Esperado: `8 passed` y la suite completa verde.
 
 ---
 
@@ -3370,15 +3414,16 @@ Esperado: `7 passed` y la suite completa verde.
 - Create: `frontend/hooks/use-chat-diseno.ts`
 - Create: `frontend/app/b/[slug]/templates/[id]/_components/panel-chat.tsx`
 - Modify: `frontend/app/b/[slug]/templates/[id]/page.tsx` (agregar la pestaña)
-- Test: `frontend/tests/unit/use-chat-diseno.test.ts`
+- Test: `frontend/hooks/__tests__/use-chat-diseno.test.ts` (donde el plan 2 pone las pruebas de hooks; vitest incluye `**/*.test.ts`)
 
 - [ ] **Step 1: prueba que falla (lógica pura del hook)**
 
-`frontend/tests/unit/use-chat-diseno.test.ts`:
+`frontend/hooks/__tests__/use-chat-diseno.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest";
-import { interpretarResultado } from "../../hooks/use-chat-diseno";
+import { describe, expect, it, vi } from "vitest";
+import { OpInvalida } from "@/lib/escena";
+import { aplicarResultado, interpretarResultado } from "../use-chat-diseno";
 
 describe("interpretarResultado", () => {
   it("crear devuelve escena", () => {
@@ -3395,10 +3440,39 @@ describe("interpretarResultado", () => {
     expect(interpretarResultado({ respuesta: "x" })).toBeNull();
   });
 });
+
+describe("aplicarResultado", () => {
+  it("escena va a cargar, ops a aplicar con etiqueta", () => {
+    const cargar = vi.fn();
+    const aplicar = vi.fn();
+    expect(aplicarResultado({ tipo: "escena", escena: { v: 2, capas: [] } as never, respuesta: "Listo", version: 1 },
+      { cargar, aplicar })).toBeNull();
+    expect(cargar).toHaveBeenCalledOnce();
+    const ops = [{ op: "del", capa: "a" }] as never;
+    expect(aplicarResultado({ tipo: "ops", ops, respuesta: "Hecho", version: 2 }, { cargar, aplicar })).toBeNull();
+    expect(aplicar).toHaveBeenCalledWith(ops, "IA: Hecho");
+  });
+  it("ops que ya no aplican no rompen", () => {
+    // La persona borró la capa mientras corría el job: aplicar lanza OpInvalida.
+    const aplicar = vi.fn(() => {
+      throw new OpInvalida("no existe la capa a");
+    });
+    const err = aplicarResultado({ tipo: "ops", ops: [{ op: "del", capa: "a" }] as never, respuesta: "x", version: 3 },
+      { cargar: vi.fn(), aplicar });
+    expect(err).toMatch(/cambió mientras/);
+  });
+  it("otro error sí se propaga", () => {
+    const aplicar = vi.fn(() => {
+      throw new TypeError("bug");
+    });
+    expect(() => aplicarResultado({ tipo: "ops", ops: [], respuesta: "x", version: 3 },
+      { cargar: vi.fn(), aplicar })).toThrow(TypeError);
+  });
+});
 ```
 
 ```bash
-cd /Users/ricardo/Work/personal/instagod/.claude/worktrees/editor-v2/frontend && pnpm vitest run tests/unit/use-chat-diseno.test.ts; cd ..
+cd /Users/ricardo/Work/personal/instagod/.claude/worktrees/editor-v2/frontend && pnpm test hooks/__tests__/use-chat-diseno.test.ts; cd ..
 ```
 
 Esperado: falla la resolución del módulo.
@@ -3412,7 +3486,7 @@ Esperado: falla la resolución del módulo.
 
 import { useCallback, useEffect, useState } from "react";
 import { get, post } from "@/lib/api";
-import type { Escena, Formato, Op } from "@/lib/escena";
+import { OpInvalida, type Escena, type Formato, type Op } from "@/lib/escena";
 import { useJob } from "@/hooks/use-job";
 import { resultadoDeJob } from "@/hooks/use-disenos";
 
@@ -3439,6 +3513,25 @@ export function interpretarResultado(r: unknown): ResultadoChat | null {
   }
   if (Array.isArray(o.ops)) return { tipo: "ops", ops: o.ops as Op[], respuesta, version };
   return null;
+}
+
+/** Lleva el resultado al store. Si la escena cambió mientras corría el job y las ops ya no
+ *  aplican, `aplicar` lanza `OpInvalida` sin registrar nada (plan 2): se devuelve el error
+ *  para el chat en vez de tumbar el editor. */
+export function aplicarResultado(
+  r: ResultadoChat,
+  store: { cargar: (e: Escena) => void; aplicar: (ops: Op[], etiqueta?: string) => void },
+): string | null {
+  try {
+    if (r.tipo === "escena") store.cargar(r.escena);
+    else store.aplicar(r.ops, `IA: ${r.respuesta.slice(0, 40)}`);
+    return null;
+  } catch (e) {
+    if (e instanceof OpInvalida) {
+      return "El diseño cambió mientras la IA trabajaba y su cambio ya no aplica. Pídelo de nuevo.";
+    }
+    throw e;
+  }
 }
 
 export function useChatDiseno(slug: string, tid: number, alResultado: (r: ResultadoChat) => void) {
@@ -3504,7 +3597,7 @@ export function useChatDiseno(slug: string, tid: number, alResultado: (r: Result
 
 import { useCallback, useState } from "react";
 import { useEditor } from "@/stores/editor";
-import { useChatDiseno, type ResultadoChat } from "@/hooks/use-chat-diseno";
+import { aplicarResultado, useChatDiseno, type ResultadoChat } from "@/hooks/use-chat-diseno";
 
 export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
   const escena = useEditor((s) => s.escena);
@@ -3513,11 +3606,13 @@ export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
   const [texto, setTexto] = useState("");
   const [modo, setModo] = useState<"crear" | "editar">(escena?.capas?.length ? "editar" : "crear");
   const [ultima, setUltima] = useState<string | null>(null);
+  const [errorAplicar, setErrorAplicar] = useState<string | null>(null);
 
   const alResultado = useCallback(
     (r: ResultadoChat) => {
-      if (r.tipo === "escena") cargar(r.escena);
-      else aplicar(r.ops, `IA: ${r.respuesta.slice(0, 40)}`);
+      const err = aplicarResultado(r, { cargar, aplicar });
+      setErrorAplicar(err);
+      if (err) return;
       setUltima(r.respuesta);
       setModo("editar");
     },
@@ -3561,7 +3656,7 @@ export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
         ))}
         {ocupado && (
           <li className="px-2 text-muted-foreground">
-            {progreso?.mensaje ?? "Pensando…"} {progreso?.progreso ? `${progreso.progreso}%` : ""}
+            Pensando… {progreso?.progreso ? `${progreso.progreso}%` : ""}
           </li>
         )}
         {ultima && !ocupado && historial.length === 0 && (
@@ -3569,7 +3664,7 @@ export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
         )}
       </ol>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {(error ?? errorAplicar) && <p className="text-destructive">{error ?? errorAplicar}</p>}
 
       <form
         onSubmit={(e) => {
@@ -3603,7 +3698,7 @@ export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
 }
 ```
 
-> ⚠️ Los nombres de los campos de progreso del `Job` (`mensaje` y `progreso`) se confirman en `hooks/use-job.ts`. Si son otros (p. ej. `progreso_msg`), se ajustan aquí.
+> El tipo `Job` del frontend trae `progreso` y `log`, **no** `mensaje` (verificado 2026-10-06). Por eso el panel muestra «Pensando…» más el porcentaje. Mostrar el texto de `jobs.progresar` exigiría exponerlo en el tipo; fuera de este plan.
 
 - [ ] **Step 4: pestaña en `page.tsx`**
 
@@ -3625,11 +3720,11 @@ y una entrada en el arreglo `pestanas` que se pasa a `PanelLateral`:
 
 ```bash
 cd /Users/ricardo/Work/personal/instagod/.claude/worktrees/editor-v2/frontend
-pnpm vitest run
+pnpm test
 pnpm tsc --noEmit
 pnpm lint
 cd ..
-git add frontend/hooks/use-chat-diseno.ts "frontend/app/b/[slug]/templates/[id]/_components/panel-chat.tsx" "frontend/app/b/[slug]/templates/[id]/page.tsx" frontend/tests/unit/use-chat-diseno.test.ts
+git add frontend/hooks/use-chat-diseno.ts frontend/hooks/__tests__/use-chat-diseno.test.ts "frontend/app/b/[slug]/templates/[id]/_components/panel-chat.tsx" "frontend/app/b/[slug]/templates/[id]/page.tsx"
 git commit -m "feat(editor): pestaña Chat que crea (cargar) y edita (aplicar ops como un paso de deshacer)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -3652,7 +3747,7 @@ git commit -m "feat(editor): pestaña Chat que crea (cargar) y edita (aplicar op
   ```bash
   /Users/ricardo/Work/personal/instagod/.venv/bin/pytest -q -m "not lento"
   /Users/ricardo/Work/personal/instagod/.venv/bin/pytest -q -m lento -k "round_trip"
-  cd frontend && pnpm vitest run && pnpm tsc --noEmit; cd ..
+  cd frontend && pnpm test && pnpm tsc --noEmit; cd ..
   ```
 - [ ] Nota de sesión en el vault: `instagod/Sessions/YYYY-MM-DD-editor-v2-plan4-chat-ia.md`, con:
   - el diff del round-trip por kind;
