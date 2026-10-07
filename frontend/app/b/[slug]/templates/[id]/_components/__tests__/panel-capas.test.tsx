@@ -79,4 +79,37 @@ describe("PanelCapas", () => {
     expect(useEditor.getState().pasado).toHaveLength(0);
     expect(screen.queryByRole("textbox")).toBeNull();
   });
+
+  it("los grupos no ofrecen candado", () => {
+    expect(screen.queryByRole("button", { name: "Bloquear Marca" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Bloquear Caja" })).not.toBeNull();
+  });
+
+  it("teclado: Enter selecciona y F2 renombra", () => {
+    const fila = screen.getByRole("option", { name: /Título/ });
+    fireEvent.keyDown(fila, { key: "Enter" });
+    expect(useEditor.getState().seleccion).toEqual(["titulo"]);
+    expect(fila.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(fila, { key: "F2" });
+    expect(screen.getByRole("textbox", { name: "Nombre de la capa" })).not.toBeNull();
+  });
+
+  it("Enter y el blur del desmontaje son un solo paso", () => {
+    fireEvent.doubleClick(screen.getByText("Título"));
+    const input = screen.getByRole("textbox", { name: "Nombre de la capa" });
+    fireEvent.change(input, { target: { value: "Encabezado" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    expect(useEditor.getState().pasado).toHaveLength(1);
+  });
+
+  it("las teclas del renombre no llegan al documento", () => {
+    let llegaron = 0;
+    const oir = () => llegaron++;
+    document.addEventListener("keydown", oir);
+    fireEvent.doubleClick(screen.getByText("Título"));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Nombre de la capa" }), { key: "Backspace" });
+    document.removeEventListener("keydown", oir);
+    expect(llegaron).toBe(0);
+  });
 });

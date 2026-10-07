@@ -98,11 +98,20 @@ function FilaCapa({ fila, elegida }: { fila: Fila; elegida: boolean }) {
     setRenombrando(false);
   };
 
+  const empezarRenombre = () => {
+    cancelado.current = false;
+    setValor(fila.nombre);
+    setRenombrando(true);
+  };
+
   return (
     <div
       ref={setNodeRef}
       data-fila={fila.id}
       data-seleccionada={elegida || undefined}
+      role="option"
+      aria-selected={elegida}
+      tabIndex={0}
       style={{ transform: CSS.Transform.toString(transform), transition, paddingLeft: 4 + fila.nivel * 12 }}
       className={cn(
         "group flex h-8 items-center gap-1 rounded-sm pr-1 text-sm select-none",
@@ -113,6 +122,17 @@ function FilaCapa({ fila, elegida }: { fila: Fila; elegida: boolean }) {
       onClick={(ev) => {
         const st = useEditor.getState();
         st.seleccionar(ev.shiftKey ? alternar(st.seleccion, [fila.id]) : [fila.id]);
+      }}
+      onKeyDown={(ev) => {
+        if (ev.target !== ev.currentTarget) return;
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          const st = useEditor.getState();
+          st.seleccionar(ev.shiftKey ? alternar(st.seleccion, [fila.id]) : [fila.id]);
+        } else if (ev.key === "F2") {
+          ev.preventDefault();
+          empezarRenombre();
+        }
       }}
     >
       <button
@@ -138,7 +158,11 @@ function FilaCapa({ fila, elegida }: { fila: Fila; elegida: boolean }) {
           onBlur={renombrar}
           onKeyDown={(ev) => {
             ev.stopPropagation();
-            if (ev.key === "Enter") renombrar();
+            if (ev.key === "Enter") {
+              renombrar();
+              // El blur del desmontaje no debe registrar un segundo paso.
+              cancelado.current = true;
+            }
             if (ev.key === "Escape") {
               cancelado.current = true;
               setRenombrando(false);
@@ -150,9 +174,7 @@ function FilaCapa({ fila, elegida }: { fila: Fila; elegida: boolean }) {
           className="min-w-0 flex-1 truncate"
           onDoubleClick={(ev) => {
             ev.stopPropagation();
-            cancelado.current = false;
-            setValor(fila.nombre);
-            setRenombrando(true);
+            empezarRenombre();
           }}
         >
           {fila.nombre}
@@ -169,17 +191,21 @@ function FilaCapa({ fila, elegida }: { fila: Fila; elegida: boolean }) {
       >
         {fila.oculta ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
       </button>
-      <button
+      {/* El lienzo y el store bloquean por hoja; un candado de grupo no tendría efecto. */}
+      {fila.tipo !== "group" && <button
         type="button"
         aria-label={`${fila.bloqueada ? "Desbloquear" : "Bloquear"} ${fila.nombre}`}
-        className={cn("text-muted-foreground hover:text-foreground", !fila.bloqueada && "opacity-0 group-hover:opacity-100")}
+        className={cn(
+          "text-muted-foreground hover:text-foreground",
+          !fila.bloqueada && "opacity-0 group-hover:opacity-100 focus:opacity-100",
+        )}
         onClick={(ev) => {
           ev.stopPropagation();
           set("bloqueada", !fila.bloqueada, fila.bloqueada ? "Desbloquear" : "Bloquear");
         }}
       >
         {fila.bloqueada ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
-      </button>
+      </button>}
     </div>
   );
 }
@@ -206,7 +232,7 @@ export function PanelCapas() {
   return (
     <DndContext sensors={sensores} collisionDetection={closestCenter} onDragEnd={soltar}>
       <SortableContext items={filas.map((f) => f.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-col gap-0.5 p-1">
+        <div role="listbox" aria-label="Capas" aria-multiselectable className="flex flex-col gap-0.5 p-1">
           {filas.map((f) => (
             <FilaCapa key={f.id} fila={f} elegida={seleccion.includes(f.id)} />
           ))}
