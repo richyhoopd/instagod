@@ -74,6 +74,7 @@ export function CapaVista({ capa, tokens, slug, colorMarca, editando = false }: 
           display: "flex",
           flexDirection: "column",
           justifyContent: VERTICAL[e.verticalAlign ?? "top"],
+          overflow: "hidden",
           // Mientras se edita, el textarea (Task 8) ocupa su lugar.
           visibility: editando ? "hidden" : undefined,
         }}
@@ -87,9 +88,14 @@ export function CapaVista({ capa, tokens, slug, colorMarca, editando = false }: 
             letterSpacing: e.letterSpacing,
             color: color(e.color),
             textAlign: e.textAlign,
-            textWrap: e.textWrap as CSSProperties["textWrap"],
             textTransform: e.textTransform,
-            whiteSpace: "pre-wrap",
+            // Paridad con escena.py: el texto fijo respeta saltos (pre-line,
+            // pre si nowrap); el dato del post no. whiteSpace va antes que
+            // textWrap porque el shorthand reinicia text-wrap-mode.
+            whiteSpace: capa.campo
+              ? (e.textWrap === "nowrap" ? "nowrap" : undefined)
+              : (e.textWrap === "nowrap" ? "pre" : "pre-line"),
+            textWrap: e.textWrap === "balance" || e.textWrap === "pretty" ? e.textWrap : undefined,
             overflowWrap: "break-word",
           }}
         >

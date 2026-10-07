@@ -16,6 +16,14 @@ describe("Escenario", () => {
     expect(screen.getByText("mundo", { exact: false }).style.color).toBe("");
   });
 
+  it("white-space igual que escena.py: pre-line, pre si nowrap; el dato del post no respeta saltos", () => {
+    const caja = (escena: Escena) => pintar(escena).querySelector<HTMLElement>('[data-id="titulo"] > div')!;
+    expect(caja(base).style.whiteSpace).toBe("pre-line");
+    expect(caja(con([{ op: "set", capa: "titulo", ruta: "estilo.textWrap", valor: "nowrap" }])).style.whiteSpace).toBe("pre");
+    expect(caja(con([{ op: "set", capa: "titulo", ruta: "campo", valor: "titulo" }])).style.whiteSpace).toBe("");
+    expect(pintar(base).querySelector<HTMLElement>('[data-id="titulo"]')!.style.overflow).toBe("hidden");
+  });
+
   it("no pinta una capa oculta", () => {
     const c = pintar(con([{ op: "set", capa: "titulo", ruta: "oculta", valor: true }]));
     expect(c.querySelector('[data-id="titulo"]')).toBeNull();
