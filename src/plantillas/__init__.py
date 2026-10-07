@@ -11,6 +11,7 @@ from typing import Any
 from .. import db
 from ..entidades import slugificar
 from . import contrato as _contrato
+from . import escena as _escena
 from . import fuentes_tipograficas
 from . import layout as _layout
 
@@ -26,6 +27,31 @@ def _slug_libre(cx, account_id: int, base: str) -> str:
     return candidato
 
 
+def _es_v2(layout_dict: Any) -> bool:
+    return isinstance(layout_dict, dict) and layout_dict.get("v") == 2
+
+
+def compilar(layout_dict: dict[str, Any], contrato_dict: dict[str, Any],
+             *, fuentes: list[dict[str, Any]] | None = None) -> str:
+    """HTML de un diseño con capas, sea v1 (layout.py) o v2 (escena.py).
+
+    Todo lo que no sea v2 va por el camino v1 tal cual: ahí una versión
+    desconocida o un diseño malformado sale como ContratoInvalido.
+    """
+    if _es_v2(layout_dict):
+        return _escena.a_html(layout_dict, contrato_dict, fuentes=fuentes)
+    return _layout.a_html(layout_dict, contrato_dict, fuentes=fuentes)
+
+
+def validar_diseno(layout_dict: dict[str, Any], contrato_dict: dict[str, Any],
+                   *, familias: set[str] | None = None) -> None:
+    """Valida sin compilar, despachando por versión."""
+    if _es_v2(layout_dict):
+        _escena.validar(layout_dict, contrato_dict, familias=familias)
+    else:
+        _layout.validar(layout_dict, contrato_dict, familias=familias)
+
+
 def _validado(cx, account_id: int, html: str, contrato_dict: dict[str, Any],
               layout_dict: dict[str, Any] | None) -> tuple[str, str]:
     """Valida todo y devuelve (html definitivo, contrato serializado).
@@ -37,7 +63,7 @@ def _validado(cx, account_id: int, html: str, contrato_dict: dict[str, Any],
     _contrato.validar(contrato_dict)
     fuentes = fuentes_tipograficas.catalogo(cx, account_id)
     if layout_dict is not None:
-        html = _layout.a_html(layout_dict, contrato_dict, fuentes=fuentes)
+        html = compilar(layout_dict, contrato_dict, fuentes=fuentes)
     _contrato.validar_html(html, contrato_dict)
     # Sin condicionar al layout: las 15 plantillas legacy de `templates/` pasan
     # esta validación contra el catálogo global, así que también protege al
@@ -56,6 +82,18 @@ def layout_de(fila: dict[str, Any]) -> dict[str, Any] | None:
     if not crudo:
         return None
     return json.loads(crudo)
+
+
+def escena_de(fila: dict[str, Any]) -> dict[str, Any] | None:
+    """El diseño de la fila como escena v2, o None si es legacy.
+
+    `layout_de` sigue crudo a propósito: `template.disenar` (jobs/handlers.py)
+    todavía trabaja en v1 hasta que el plan 4 lo reemplace.
+    """
+    crudo = layout_de(fila)
+    if crudo is None:
+        return None
+    return _escena.normalizar(crudo, fila["aspecto"])
 
 
 def es_editable(fila: dict[str, Any]) -> bool:

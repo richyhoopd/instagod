@@ -403,6 +403,26 @@ def test_template_preview_no_toca_ninguna_plantilla_guardada(cx, monkeypatch, tm
     assert antes == despues
 
 
+def test_template_preview_acepta_escena_v2(cx, monkeypatch, tmp_path) -> None:
+    from src.plantillas import escena
+    monkeypatch.setattr(handlers.config, "BASE_DIR", tmp_path)
+    capturado = {}
+
+    def falso_render(cx_, marca, plantilla, campos, *, out_path):
+        capturado["html"] = plantilla["html"]
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"png")
+        return out_path
+
+    monkeypatch.setattr(handlers.plantillas_render, "render", falso_render)
+    ct = {"aspecto": "4:5", "base": list(contrato.CAMPOS_BASE), "extras": []}
+    job = _job(cx, "template.preview", 1,
+               {"layout": escena.normalizar(None, "4:5"), "contrato": ct, "aspecto": "4:5"})
+    resultado = handlers.template_preview(cx, job)
+    assert resultado["url"].endswith(".png")
+    assert "capa-titular" in capturado["html"]
+
+
 # ---------- HANDLERS dict ----------
 
 def test_handlers_registrados() -> None:
