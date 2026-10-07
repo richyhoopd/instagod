@@ -86,4 +86,18 @@ describe("EditorTexto", () => {
     fireEvent.blur(ta);
     expect(titulo().estilo.spans).toEqual([{ desde: 1, hasta: 2, color: "token:tinta" }]);
   });
+
+  it("corta líneas igual que capa-vista", () => {
+    const ta = montar();
+    expect(ta.style.whiteSpace).toBe(titulo().campo ? "normal" : "pre-line");
+    expect(ta.style.overflowWrap).toBe("break-word");
+    expect(ta.style.fontFamily).toContain("sans-serif");
+  });
+
+  it("Escape durante la composición no cierra la edición", () => {
+    const ta = montar();
+    fireEvent.keyDown(ta, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(ta, { key: "Escape", keyCode: 229 });
+    expect(useEditor.getState().editandoTexto).toBe("titulo");
+  });
 });

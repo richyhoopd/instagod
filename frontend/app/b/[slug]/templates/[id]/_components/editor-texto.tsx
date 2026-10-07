@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_TEXTO, resolverColor, type CapaTexto, type Op, type Span, type Tokens } from "@/lib/escena";
+import { cortesDeTexto, familiaCss } from "./capa-vista";
 import { ajustarSpans, pintarSpan, utf16ACodePoint } from "@/lib/spans";
 import { useEditor } from "@/stores/editor";
 
@@ -53,6 +54,7 @@ export function EditorTexto({ capa, tokens, colorMarca, zoom }: Props) {
       <textarea
         ref={ref}
         data-editor-texto
+        wrap={e.textWrap === "nowrap" ? "off" : "soft"}
         aria-label={`Texto de ${capa.nombre}`}
         value={texto}
         maxLength={MAX_TEXTO}
@@ -66,6 +68,8 @@ export function EditorTexto({ capa, tokens, colorMarca, zoom }: Props) {
         onBlur={confirmar}
         onKeyDown={(ev) => {
           ev.stopPropagation();
+          // Durante la composición (IME, acentos muertos) Escape cancela la composición, no la edición.
+          if (ev.nativeEvent.isComposing || ev.keyCode === 229) return;
           if (ev.key === "Escape") {
             ev.preventDefault();
             confirmar();
@@ -86,7 +90,7 @@ export function EditorTexto({ capa, tokens, colorMarca, zoom }: Props) {
           overflow: "hidden",
           background: "transparent",
           outline: `${2 / zoom}px solid #3b82f6`,
-          fontFamily: e.fontFamily,
+          fontFamily: familiaCss(e.fontFamily),
           fontWeight: e.fontWeight,
           fontSize: e.fontSize,
           lineHeight: e.lineHeight,
@@ -94,6 +98,9 @@ export function EditorTexto({ capa, tokens, colorMarca, zoom }: Props) {
           textAlign: e.textAlign,
           textTransform: e.textTransform,
           color: resolverColor(e.color, tokens, colorMarca),
+          // Mismos cortes de línea que capa-vista para que el texto no salte al editar.
+          ...cortesDeTexto(capa),
+          overflowWrap: "break-word",
         }}
       />
       <div

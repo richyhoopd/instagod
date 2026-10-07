@@ -20,7 +20,7 @@ describe("Escenario", () => {
     const caja = (escena: Escena) => pintar(escena).querySelector<HTMLElement>('[data-id="titulo"] > div')!;
     expect(caja(base).style.whiteSpace).toBe("pre-line");
     expect(caja(con([{ op: "set", capa: "titulo", ruta: "estilo.textWrap", valor: "nowrap" }])).style.whiteSpace).toBe("pre");
-    expect(caja(con([{ op: "set", capa: "titulo", ruta: "campo", valor: "titulo" }])).style.whiteSpace).toBe("");
+    expect(caja(con([{ op: "set", capa: "titulo", ruta: "campo", valor: "titulo" }])).style.whiteSpace).toBe("normal");
     expect(pintar(base).querySelector<HTMLElement>('[data-id="titulo"]')!.style.overflow).toBe("hidden");
   });
 

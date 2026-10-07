@@ -8,6 +8,7 @@ import {
   resolverColor,
   urlDeAsset,
   type Capa,
+  type CapaTexto,
   type Escena,
   type Fondo,
   type Tokens,
@@ -81,7 +82,7 @@ export function CapaVista({ capa, tokens, slug, colorMarca, editando = false }: 
       >
         <div
           style={{
-            fontFamily: `'${e.fontFamily}', sans-serif`,
+            fontFamily: familiaCss(e.fontFamily),
             fontWeight: e.fontWeight,
             fontSize: e.fontSize,
             lineHeight: e.lineHeight,
@@ -92,10 +93,7 @@ export function CapaVista({ capa, tokens, slug, colorMarca, editando = false }: 
             // Paridad con escena.py: el texto fijo respeta saltos (pre-line,
             // pre si nowrap); el dato del post no. whiteSpace va antes que
             // textWrap porque el shorthand reinicia text-wrap-mode.
-            whiteSpace: capa.campo
-              ? (e.textWrap === "nowrap" ? "nowrap" : undefined)
-              : (e.textWrap === "nowrap" ? "pre" : "pre-line"),
-            textWrap: e.textWrap === "balance" || e.textWrap === "pretty" ? e.textWrap : undefined,
+            ...cortesDeTexto(capa),
             overflowWrap: "break-word",
           }}
         >
@@ -219,3 +217,14 @@ export function Escenario({ escena, slug, colorMarca, editandoTexto = null }: Pr
     </>
   );
 }
+
+/** white-space y text-wrap como escena.py; lo comparte el textarea de edición. */
+export function cortesDeTexto(capa: CapaTexto): CSSProperties {
+  const wrap = capa.estilo.textWrap;
+  return {
+    whiteSpace: capa.campo ? (wrap === "nowrap" ? "nowrap" : "normal") : wrap === "nowrap" ? "pre" : "pre-line",
+    textWrap: wrap === "balance" || wrap === "pretty" ? wrap : undefined,
+  };
+}
+
+export const familiaCss = (familia: string) => `'${familia}', sans-serif`;
