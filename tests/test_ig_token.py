@@ -152,3 +152,27 @@ def test_aplicar_token_sin_master_key_es_noop(tmp_path, monkeypatch):
     ig_token.aplicar_token("nuevo", slug="pensionmas", env_path=tmp_env,
                            _run=lambda *a, **k: None)
     assert "nuevo" in tmp_env.read_text()
+
+
+# --- En la VM el cron corre sin gh: basta con persistir en brand_secrets ---
+
+def test_aplicar_token_sin_gh_pero_en_db_no_falla(tmp_path, monkeypatch):
+    monkeypatch.setattr(ig_token, "_persistir_en_db", lambda slug, token: True)
+    monkeypatch.setattr(ig_token, "_gh_bin",
+                        lambda: (_ for _ in ()).throw(RuntimeError("gh CLI no encontrado")))
+    llamadas = []
+    tmp_env = tmp_path / ".env"
+    tmp_env.write_text("")
+    ig_token.aplicar_token("nuevo", env_path=tmp_env, _run=lambda *a, **k: llamadas.append(a))
+    assert llamadas == []
+    assert "nuevo" in tmp_env.read_text()
+
+
+def test_aplicar_token_sin_gh_ni_db_falla(tmp_path, monkeypatch):
+    monkeypatch.setattr(ig_token, "_persistir_en_db", lambda slug, token: False)
+    monkeypatch.setattr(ig_token, "_gh_bin",
+                        lambda: (_ for _ in ()).throw(RuntimeError("gh CLI no encontrado")))
+    tmp_env = tmp_path / ".env"
+    tmp_env.write_text("")
+    with pytest.raises(RuntimeError, match="gh CLI"):
+        ig_token.aplicar_token("nuevo", env_path=tmp_env, _run=lambda *a, **k: None)
