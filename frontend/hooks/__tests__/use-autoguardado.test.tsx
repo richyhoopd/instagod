@@ -123,15 +123,114 @@ describe("useAutoguardado", () => {
     expect(result.current.error?.message).toBe("409");
   });
 
-  it("beforeunload avisa solo con cambios sin guardar", () => {
+  it("beforeunload avisa solo con cambios sin guardar y activo", () => {
     const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
-    montar(guardar, false);
+    montar(guardar);
     const limpio = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(limpio);
     expect(limpio.defaultPrevented).toBe(false);
     editar(90);
-    const sucio = new Event("beforeunload", { cancelable: true });
+    const sucio = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
+    Object.defineProperty(sucio, "returnValue", { value: "x", writable: true });
     window.dispatchEvent(sucio);
     expect(sucio.defaultPrevented).toBe(true);
+    expect(sucio.returnValue).toBe("");
+  });
+
+  it("beforeunload no avisa si está inactivo", () => {
+    const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+    montar(guardar, false);
+    editar(90);
+    const ev = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it("guardarAhora con mensaje rechaza si está inactivo y no guarda", async () => {
+    const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+    const { result } = montar(guardar, false);
+    await act(async () => {
+      await expect(result.current.guardarAhora("Hito")).rejects.toThrow(/inactivo/i);
+    });
+    expect(guardar).not.toHaveBeenCalled();
+  });
+
+  it("guardarAhora con mensaje rechaza si no hay escena", async () => {
+    const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+    const { result } = montar(guardar);
+    act(() => st().vaciar());
+    await act(async () => {
+      await expect(result.current.guardarAhora("Hito")).rejects.toThrow(/escena/i);
+    });
+    expect(guardar).not.toHaveBeenCalled();
+  });
+
+  it("un guardado encolado lee activo al ejecutarse", async () => {
+    const primero = diferido();
+    const guardar = vi.fn<Guardar>().mockReturnValueOnce(primero.promesa).mockResolvedValue(undefined);
+    const { result, rerender } = montar(guardar);
+    editar(110);
+    await avanzar(2000);
+    expect(guardar).toHaveBeenCalledTimes(1);
+    let encolado!: Promise<void>;
+    act(() => {
+      encolado = result.current.guardarAhora("Hito");
+    });
+    encolado.catch(() => {});
+    rerender({ activo: false });
+    primero.resolver();
+    await avanzar(0);
+    await expect(encolado).rejects.toThrow(/inactivo/i);
+    expect(guardar).toHaveBeenCalledTimes(1);
+  });
+
+  it("al desmontar con cambios sucios y activo hace flush", async () => {
+    const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+    const { unmount } = montar(guardar);
+    editar(95);
+    unmount();
+    // El store se vacía justo después, como hace la página.
+    st().vaciar();
+    await avanzar(0);
+    expect(guardar).toHaveBeenCalledTimes(1);
+    expect(xGuardada(guardar, 0)).toBe(95);
+  });
+
+  it("al desmontar sin cambios o inactivo no guarda", async () => {
+    const guardar = vi.fn<Guardar>().mockResolvedValue(undefined);
+    montar(guardar).unmount();
+    const g2 = vi.fn<Guardar>().mockResolvedValue(undefined);
+    const inactivo = montar(g2, false);
+    editar(95);
+    inactivo.unmount();
+    await avanzar(0);
+    expect(guardar).not.toHaveBeenCalled();
+    expect(g2).not.toHaveBeenCalled();
+  });
+
+  it("un guardado en vuelo que termina tras cargar otra escena no toca el estado", async () => {
+    const primero = diferido();
+    const guardar = vi.fn<Guardar>().mockReturnValueOnce(primero.promesa).mockResolvedValue(undefined);
+    montar(guardar);
+    editar(110);
+    await avanzar(2000);
+    act(() => st().cargar(structuredClone(base)));
+    editar(120);
+    primero.resolver();
+    await avanzar(0);
+    expect(st().sucio).toBe(true);
+  });
+
+  it("un guardado en vuelo que termina tras vaciar no toca el estado", async () => {
+    const primero = diferido();
+    const guardar = vi.fn<Guardar>().mockReturnValueOnce(primero.promesa);
+    montar(guardar);
+    editar(110);
+    await avanzar(2000);
+    act(() => st().vaciar());
+    const antes = st();
+    primero.resolver();
+    await avanzar(0);
+    expect(st()).toBe(antes);
   });
 });

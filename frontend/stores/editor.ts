@@ -38,6 +38,9 @@ export type EstadoEditor = {
   pasado: Paso[];
   futuro: Paso[];
   revision: number;
+  // Cambia en cada cargar/vaciar; un guardado en vuelo lo compara para no
+  // marcar como guardada una escena que ya no es la que mandó.
+  idCarga: number;
   zoom: number;
   editandoTexto: string | null;
   portapapeles: Capa[];
@@ -80,6 +83,8 @@ function raicesDeSeleccion(escena: Escena, ids: string[]): string[] {
     return true;
   });
 }
+
+let contadorCarga = 0;
 
 export const useEditor = create<EstadoEditor>()((set, get) => {
   // Un paso de deshacer = un juego de parches de immer. Toda acción que cambia
@@ -131,12 +136,22 @@ export const useEditor = create<EstadoEditor>()((set, get) => {
     pasado: [],
     futuro: [],
     revision: 0,
+    idCarga: 0,
     zoom: 1,
     editandoTexto: null,
     portapapeles: [],
 
     cargar: (escena) =>
-      set({ escena, seleccion: [], sucio: false, pasado: [], futuro: [], revision: 0, editandoTexto: null }),
+      set({
+        escena,
+        seleccion: [],
+        sucio: false,
+        pasado: [],
+        futuro: [],
+        revision: 0,
+        idCarga: ++contadorCarga,
+        editandoTexto: null,
+      }),
 
     aplicar: (ops, etiqueta = "Editar") => {
       const { escena } = get();
@@ -247,6 +262,6 @@ export const useEditor = create<EstadoEditor>()((set, get) => {
 
     marcarGuardado: (revision) => set({ sucio: get().revision !== revision }),
 
-    vaciar: () => set(useEditor.getInitialState(), true),
+    vaciar: () => set({ ...useEditor.getInitialState(), idCarga: ++contadorCarga }, true),
   };
 });

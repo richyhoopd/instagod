@@ -40,8 +40,20 @@ export default function DisenoPage() {
     useEditor.getState().cargar(diseno.layout);
   }, [diseno]);
 
-  // Al salir del editor el store queda vacío para el siguiente diseño. En
-  // StrictMode el efecto corre dos veces; `sembrado` en null deja resembrar.
+  // Solo en un diseño editable con escena cargada; uno de solo lectura nunca
+  // siembra el store, así que tampoco guarda ni acepta atajos que lo muten.
+  const activo = !!diseno?.editable && diseno.layout !== null && diseno.estado === "borrador" && listo;
+  const { guardando, error, guardarAhora } = useAutoguardado({
+    activo,
+    guardar: (escena, mensaje) =>
+      guardarMut.mutateAsync(mensaje ? { layout: escena, mensaje } : { layout: escena }),
+  });
+  useAtajos(activo);
+
+  // Al salir del editor el store queda vacío para el siguiente diseño. Va
+  // después del autoguardado a propósito: los cleanups corren en orden y su
+  // flush debe leer el store antes de que se vacíe. En StrictMode el efecto
+  // corre dos veces; `sembrado` en null deja resembrar.
   useEffect(
     () => () => {
       sembrado.current = null;
@@ -49,15 +61,6 @@ export default function DisenoPage() {
     },
     [],
   );
-
-  const { guardando, error, guardarAhora } = useAutoguardado({
-    // Solo en un diseño editable con escena cargada; uno de solo lectura nunca
-    // siembra el store, así que tampoco guarda.
-    activo: !!diseno?.editable && diseno.layout !== null && diseno.estado === "borrador" && listo,
-    guardar: (escena, mensaje) =>
-      guardarMut.mutateAsync(mensaje ? { layout: escena, mensaje } : { layout: escena }),
-  });
-  useAtajos();
   const [activando, setActivando] = useState(false);
 
   async function activar() {

@@ -55,18 +55,31 @@ function ignorar(e: KeyboardEvent, s: EstadoEditor): boolean {
   return e.target instanceof Element && e.target.closest('[role="dialog"],[role="alertdialog"]') !== null;
 }
 
-export function useAtajos() {
+// Cuántas veces se repite una tecla mantenida sin sentido: ⌘D, ⌘V, ⌘G y ⌘Z.
+const SIN_REPETIR = new Set(["z", "y", "v", "d", "g"]);
+
+function huella(s: EstadoEditor): [unknown, unknown, string] {
+  return [s.escena, s.portapapeles, s.seleccion.join("\0")];
+}
+
+export function useAtajos(activo = true) {
   useEffect(() => {
+    if (!activo) return;
     const alTeclear = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
       const s = useEditor.getState();
       if (ignorar(e, s)) return;
       const accion = accionDe(e);
       if (!accion) return;
-      e.preventDefault();
+      if (e.repeat && (e.metaKey || e.ctrlKey) && SIN_REPETIR.has(e.key.toLowerCase())) return;
+      const antes = huella(s);
       accion(s);
+      // Solo se bloquea el comportamiento nativo si la acción hizo algo: sin
+      // selección, las flechas siguen haciendo scroll y ⌘C copia texto.
+      const despues = huella(useEditor.getState());
+      if (antes.some((v, i) => v !== despues[i])) e.preventDefault();
     };
     window.addEventListener("keydown", alTeclear);
     return () => window.removeEventListener("keydown", alTeclear);
-  }, []);
+  }, [activo]);
 }

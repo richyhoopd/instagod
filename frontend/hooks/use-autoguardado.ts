@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Escena } from "@/lib/escena";
 import { useEditor } from "@/stores/editor";
 
+type Estado = ReturnType<typeof useEditor.getState>;
 type Guardar = (escena: Escena, mensaje?: string) => Promise<unknown>;
 
 // Guarda la escena 2 s después de la última edición. Los guardados van en
@@ -31,14 +32,31 @@ export function useAutoguardado({
   });
   const cola = useRef<Promise<void>>(Promise.resolve());
 
-  const guardarAhora = useCallback((mensaje?: string): Promise<void> => {
+  const activoRef = useRef(activo);
+  useEffect(() => {
+    activoRef.current = activo;
+  });
+
+  // `instantanea` fija la escena y la revisión al llamar (el flush de
+  // desmontaje, que corre antes de que la página vacíe el store).
+  const guardarAhora = useCallback((mensaje?: string, instantanea?: Estado): Promise<void> => {
     const correr = async () => {
-      const { escena, sucio, revision } = useEditor.getState();
-      if (!escena || (!sucio && !mensaje)) return;
+      if (!activoRef.current) {
+        if (mensaje) throw new Error("El autoguardado está inactivo: no se puede guardar este diseño.");
+        return;
+      }
+      const { escena, sucio, revision, idCarga } = instantanea ?? useEditor.getState();
+      if (!escena) {
+        if (mensaje) throw new Error("No hay escena cargada que guardar.");
+        return;
+      }
+      if (!sucio && !mensaje) return;
       setGuardando(true);
       try {
         await guardarRef.current(escena, mensaje);
-        useEditor.getState().marcarGuardado(revision);
+        // Si mientras tanto se cargó o vació otra escena, este guardado ya no
+        // habla del estado actual.
+        if (useEditor.getState().idCarga === idCarga) useEditor.getState().marcarGuardado(revision);
         setError(null);
       } catch (e) {
         setError(e instanceof Error ? e : new Error(String(e)));
@@ -60,12 +78,24 @@ export function useAutoguardado({
     return () => clearTimeout(t);
   }, [activo, sucio, revision, retraso, guardarAhora]);
 
+  // Navegación SPA: lo que quedó sucio al desmontar se manda ahora.
+  useEffect(
+    () => () => {
+      const s = useEditor.getState();
+      if (activoRef.current && s.sucio && s.escena) void guardarAhora(undefined, s);
+    },
+    [guardarAhora],
+  );
+
   useEffect(() => {
-    if (!sucio) return;
-    const avisar = (e: BeforeUnloadEvent) => e.preventDefault();
+    if (!activo || !sucio) return;
+    const avisar = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
     window.addEventListener("beforeunload", avisar);
     return () => window.removeEventListener("beforeunload", avisar);
-  }, [sucio]);
+  }, [activo, sucio]);
 
   return { guardando, error, guardarAhora };
 }

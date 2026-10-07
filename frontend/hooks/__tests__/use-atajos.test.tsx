@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import datos from "@/lib/__fixtures__/ops-casos.json";
 import { ordenadas, type Escena } from "@/lib/escena";
@@ -12,8 +12,8 @@ const hojas = (e: Escena) => ordenadas(e).filter((c) => c.tipo !== "group").map(
 const tecla = (key: string, extra: Partial<KeyboardEventInit> & { code?: string } = {}) =>
   fireEvent.keyDown(window, { key, ...extra });
 
-function Arnes() {
-  useAtajos();
+function Arnes({ activo = true }: { activo?: boolean }) {
+  useAtajos(activo);
   return <input aria-label="nombre" />;
 }
 
@@ -147,5 +147,71 @@ describe("useAtajos", () => {
     expect(fireEvent.keyDown(screen.getByRole("button", { name: "ok" }), { key: "Delete" })).toBe(true);
     expect(st().escena!.capas).toHaveLength(4);
     unmount();
+  });
+
+  it("sin selección no bloquea flechas, Supr, ⌘C, ⌘D ni ⌘G", () => {
+    st().seleccionar([]);
+    const antes = JSON.stringify(st().escena);
+    for (const init of [
+      { key: "ArrowDown" },
+      { key: "ArrowLeft", shiftKey: true },
+      { key: "Delete" },
+      { key: "Backspace" },
+      { key: "c", metaKey: true },
+      { key: "d", metaKey: true },
+      { key: "g", metaKey: true },
+      { key: "Escape" },
+    ]) {
+      expect(fireEvent.keyDown(window, init)).toBe(true);
+    }
+    expect(JSON.stringify(st().escena)).toBe(antes);
+  });
+
+  it("⌘V sin portapapeles y ⌘Z sin historia no bloquean", () => {
+    expect(fireEvent.keyDown(window, { key: "v", metaKey: true })).toBe(true);
+    expect(fireEvent.keyDown(window, { key: "z", metaKey: true })).toBe(true);
+  });
+
+  it("con selección sí bloquea flechas y ⌘C", () => {
+    st().seleccionar(["titulo"]);
+    expect(fireEvent.keyDown(window, { key: "ArrowRight" })).toBe(false);
+    expect(fireEvent.keyDown(window, { key: "c", metaKey: true })).toBe(false);
+  });
+
+  it("con activo=false no muta el store ni bloquea teclas", () => {
+    cleanup();
+    render(<Arnes activo={false} />);
+    st().seleccionar(["titulo"]);
+    const antes = JSON.stringify(st().escena);
+    for (const init of [
+      { key: "ArrowRight" },
+      { key: "Delete" },
+      { key: "d", metaKey: true },
+      { key: "z", metaKey: true },
+      { key: "g", metaKey: true },
+    ]) {
+      expect(fireEvent.keyDown(window, init)).toBe(true);
+    }
+    expect(JSON.stringify(st().escena)).toBe(antes);
+  });
+
+  it("ignora teclas de composición (IME)", () => {
+    st().seleccionar(["titulo"]);
+    tecla("ArrowRight", { isComposing: true });
+    tecla("Delete", { keyCode: 229 });
+    expect(capa("titulo").x).toBe(80);
+    expect(st().escena!.capas).toHaveLength(4);
+  });
+
+  it("e.repeat se ignora en ⌘D/⌘V/⌘G/⌘Z pero no en flechas", () => {
+    st().seleccionar(["titulo"]);
+    tecla("d", { metaKey: true, repeat: true });
+    expect(st().escena!.capas).toHaveLength(4);
+    tecla("z", { metaKey: true, repeat: true });
+    st().aplicar([{ op: "set", capa: "titulo", ruta: "x", valor: 10 }]);
+    tecla("z", { metaKey: true, repeat: true });
+    expect(capa("titulo").x).toBe(10);
+    tecla("ArrowRight", { repeat: true });
+    expect(capa("titulo").x).toBe(11);
   });
 });
