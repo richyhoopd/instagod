@@ -10,6 +10,7 @@ ninguno de los dos es de fiar.
 """
 from __future__ import annotations
 
+import copy
 import re
 from typing import Any
 
@@ -362,3 +363,131 @@ def validar(escena: dict[str, Any], contrato: dict[str, Any],
                 raise EscenaInvalida("los grupos forman un ciclo")
             vistos.add(actual)
             actual = padre_de[actual]
+
+
+# ---------------------------------------------------------------------------
+# v1 -> v2
+# ---------------------------------------------------------------------------
+
+_ALINEAR_V1 = {"izq": "left", "centro": "center", "der": "right"}
+_VERTICAL_V1 = {"arriba": "top", "centro": "center", "abajo": "bottom"}
+
+
+def _color_v1(valor: Any) -> Any:
+    return "token:marca" if valor == "marca" else valor
+
+
+def _anclaje_de(capa: dict[str, Any], ancho: int, alto: int) -> str:
+    """Hacia dónde se mueve la capa al cambiar de formato.
+
+    Lo que cubre el lienzo entero (la foto de fondo) se queda arriba: el
+    reformateo lo estira. Lo demás, por el tercio en que cae su centro.
+    """
+    x, y, w, h = capa.get("x", 0), capa.get("y", 0), capa.get("w", 0), capa.get("h", 0)
+    if x <= 0 and y <= 0 and x + w >= ancho and y + h >= alto:
+        return "top"
+    centro = y + h / 2
+    if centro < alto / 3:
+        return "top"
+    if centro > alto * 2 / 3:
+        return "bottom"
+    return "center"
+
+
+def _comunes_v1(capa: dict[str, Any], ancho: int, alto: int) -> dict[str, Any]:
+    return {
+        "id": capa["id"], "nombre": capa["id"],
+        "x": capa.get("x", 0), "y": capa.get("y", 0),
+        "w": capa.get("w", 1), "h": capa.get("h", 1),
+        "rot": capa.get("rot", 0), "opacity": capa.get("opacidad", 1),
+        "z": capa.get("z", 0), "bloqueada": False, "oculta": False,
+        "anclaje": _anclaje_de(capa, ancho, alto),
+    }
+
+
+def _texto_v1(capa: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
+    nueva = {**base, "tipo": "text"}
+    if capa.get("campo"):
+        nueva["campo"] = capa["campo"]
+        nueva["texto"] = ""
+    else:
+        nueva["texto"] = capa.get("texto", "")
+    nueva["estilo"] = {
+        "fontFamily": capa.get("fuente"),
+        "fontWeight": capa.get("peso", 400),
+        "fontSize": capa.get("tam"),
+        "lineHeight": capa.get("interlinea", 1.2),
+        "color": _color_v1(capa.get("color", "#000000")),
+        "textAlign": _ALINEAR_V1.get(capa.get("alinear", "centro"), "center"),
+        "verticalAlign": _VERTICAL_V1.get(capa.get("vertical", "centro"), "center"),
+        "textTransform": "uppercase" if capa.get("mayusculas") else "none",
+        "textWrap": "wrap",
+        "spans": [],
+    }
+    nueva["auto"] = bool(capa.get("auto", False))
+    nueva["resaltar"] = bool(capa.get("resaltar", False))
+    return nueva
+
+
+def _imagen_v1(capa: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
+    nueva = {**base, "tipo": "image"}
+    if capa.get("campo"):
+        nueva["campo"] = capa["campo"]
+    else:
+        nueva["src"] = f"fotos/{capa.get('archivo')}"
+    radio = capa.get("radio", 0) or 0
+    nueva.update(recorte=False, ajuste=capa.get("ajuste", "cover"),
+                 mascara=f"rounded:{radio}" if radio else "none",
+                 estilo={"objectPosition": capa.get("anclaje", "center")})
+    return nueva
+
+
+def _caja_v1(capa: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
+    return {**base, "tipo": "shape", "forma": "rect",
+            "estilo": {"fill": _color_v1(capa.get("color", "#000000")),
+                       "radius": capa.get("radio", 0) or 0}}
+
+
+_DE_V1 = {"texto": _texto_v1, "imagen": _imagen_v1, "caja": _caja_v1}
+
+
+def v1_a_v2(layout: dict[str, Any], aspecto: str) -> dict[str, Any]:
+    """Convierte un layout v1 (`layout.py`) a escena v2 sin mutar la entrada.
+
+    No valida: el v1 ya pasó por `layout.validar` al guardarse. Quien necesite
+    la garantía llama a `validar` sobre el resultado.
+    """
+    if not isinstance(aspecto, str) or aspecto not in FORMATO_DE_ASPECTO:
+        raise EscenaInvalida(f"aspecto desconocido {aspecto!r}")
+    formato = FORMATO_DE_ASPECTO[aspecto]
+    ancho, alto = FORMATOS[formato]
+    lienzo_v1 = layout.get("lienzo") or {}
+    escena = {
+        "v": 2,
+        "lienzo": {"w": ancho, "h": alto, "formato": formato,
+                   "fondo": {"tipo": "color",
+                             "valor": _color_v1(lienzo_v1.get("fondo", "#ffffff"))}},
+        "tokens": {"colores": {}},
+        "capas": [_DE_V1[c["tipo"]](c, _comunes_v1(c, ancho, alto))
+                  for c in layout.get("capas") or [] if isinstance(c.get("tipo"), str) and c["tipo"] in _DE_V1],
+    }
+    if layout.get("guias"):
+        escena["guias"] = copy.deepcopy(layout["guias"])
+    return escena
+
+
+def normalizar(layout: dict[str, Any] | None, aspecto: str) -> dict[str, Any]:
+    """Cualquier cosa guardada en layout_json -> escena v2 (copia nueva).
+
+    None arranca el lienzo en blanco de siempre (`layout.vacio`) ya convertido.
+    """
+    if layout is None:
+        if not isinstance(aspecto, str) or aspecto not in _layout.LIENZO:
+            raise EscenaInvalida(f"aspecto desconocido {aspecto!r}")
+        return v1_a_v2(_layout.vacio(aspecto), aspecto)
+    version = layout.get("v") if isinstance(layout, dict) else None
+    if version == 1:
+        return v1_a_v2(layout, aspecto)
+    if version == 2:
+        return copy.deepcopy(layout)
+    raise EscenaInvalida(f"versión de diseño desconocida: {version!r}")
