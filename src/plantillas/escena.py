@@ -451,14 +451,42 @@ def _caja_v1(capa: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
 _DE_V1 = {"texto": _texto_v1, "imagen": _imagen_v1, "caja": _caja_v1}
 
 
+def _guardar_v1(layout: Any) -> None:
+    """Estructura mínima de un v1 para poder convertirlo; si no, EscenaInvalida."""
+    if not isinstance(layout, dict):
+        raise EscenaInvalida("el layout v1 debe ser un objeto")
+    if layout.get("lienzo") is not None and not isinstance(layout["lienzo"], dict):
+        raise EscenaInvalida("lienzo del layout v1 debe ser un objeto")
+    capas = layout.get("capas")
+    if capas is None:
+        return
+    if not isinstance(capas, list):
+        raise EscenaInvalida("capas del layout v1 debe ser una lista")
+    for i, capa in enumerate(capas):
+        if not isinstance(capa, dict):
+            raise EscenaInvalida(f"capa {i} del layout v1 debe ser un objeto")
+        if not isinstance(capa.get("id"), str):
+            raise EscenaInvalida(f"capa {i} del layout v1 sin id de texto")
+        tipo = capa.get("tipo")
+        if not isinstance(tipo, str):
+            raise EscenaInvalida(f"capa {capa['id']!r}: falta el tipo de capa")
+        if tipo not in _DE_V1:
+            raise EscenaInvalida(f"tipo de capa desconocido en v1: {tipo!r} (capa {capa['id']!r})")
+        if tipo == "imagen" and not capa.get("campo") and not capa.get("archivo"):
+            raise EscenaInvalida(f"capa {capa['id']!r}: imagen v1 sin campo ni archivo")
+
+
 def v1_a_v2(layout: dict[str, Any], aspecto: str) -> dict[str, Any]:
     """Convierte un layout v1 (`layout.py`) a escena v2 sin mutar la entrada.
 
     No valida: el v1 ya pasó por `layout.validar` al guardarse. Quien necesite
-    la garantía llama a `validar` sobre el resultado.
+    la garantía llama a `validar` sobre el resultado. Lo que sí hace es no
+    reventar con KeyError/TypeError si `layout_json` (que sale de la DB) viene
+    malformado: eso es `EscenaInvalida`.
     """
     if not isinstance(aspecto, str) or aspecto not in FORMATO_DE_ASPECTO:
         raise EscenaInvalida(f"aspecto desconocido {aspecto!r}")
+    _guardar_v1(layout)
     formato = FORMATO_DE_ASPECTO[aspecto]
     ancho, alto = FORMATOS[formato]
     lienzo_v1 = layout.get("lienzo") or {}
@@ -468,8 +496,10 @@ def v1_a_v2(layout: dict[str, Any], aspecto: str) -> dict[str, Any]:
                    "fondo": {"tipo": "color",
                              "valor": _color_v1(lienzo_v1.get("fondo", "#ffffff"))}},
         "tokens": {"colores": {}},
-        "capas": [_DE_V1[c["tipo"]](c, _comunes_v1(c, ancho, alto))
-                  for c in layout.get("capas") or [] if isinstance(c.get("tipo"), str) and c["tipo"] in _DE_V1],
+        "capas": [
+            _DE_V1[c["tipo"]](c, _comunes_v1(c, ancho, alto))
+            for c in layout.get("capas") or []
+        ],
     }
     if layout.get("guias"):
         escena["guias"] = copy.deepcopy(layout["guias"])
@@ -480,6 +510,7 @@ def normalizar(layout: dict[str, Any] | None, aspecto: str) -> dict[str, Any]:
     """Cualquier cosa guardada en layout_json -> escena v2 (copia nueva).
 
     None arranca el lienzo en blanco de siempre (`layout.vacio`) ya convertido.
+    Con v2 solo copia: no valida, eso lo hace `validar`.
     """
     if layout is None:
         if not isinstance(aspecto, str) or aspecto not in _layout.LIENZO:

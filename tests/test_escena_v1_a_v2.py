@@ -124,3 +124,30 @@ def test_normalizar():
         E.normalizar({"v": 7}, "4:5")
     with pytest.raises(E.EscenaInvalida):
         E.normalizar(layout.vacio("4:5"), "16:9")
+
+
+@pytest.mark.parametrize("v1,fragmento", [
+    ([], "layout"),
+    ({"v": 1, "lienzo": "x", "capas": []}, "lienzo"),
+    ({"v": 1, "capas": "x"}, "capas"),
+    ({"v": 1, "capas": ["x"]}, "capa 0"),
+    ({"v": 1, "capas": [{"tipo": "caja"}]}, "id"),
+    ({"v": 1, "capas": [{"id": "a"}]}, "tipo"),
+    ({"v": 1, "capas": [{"id": "a", "tipo": "video"}]}, "tipo de capa desconocido en v1"),
+    ({"v": 1, "capas": [{"id": "a", "tipo": ["x"]}]}, "tipo"),
+    ({"v": 1, "capas": [{"id": "a", "tipo": "imagen", "x": 0, "y": 0}]}, "campo"),
+])
+def test_v1_malformado_da_escena_invalida(v1, fragmento):
+    with pytest.raises(E.EscenaInvalida, match=fragmento):
+        E.v1_a_v2(v1, "4:5")
+    if isinstance(v1, dict):
+        with pytest.raises(E.EscenaInvalida):
+            E.normalizar(v1, "4:5")
+
+
+def test_normalizar_none_en_1x1():
+    if "1:1" in contrato.ASPECTOS:
+        assert E.normalizar(None, "1:1")["lienzo"]["formato"] == "1x1"
+    else:
+        with pytest.raises(E.EscenaInvalida):
+            E.normalizar(None, "1:1")
