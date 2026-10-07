@@ -22,6 +22,7 @@ export function CampoNumero({
   onCommit,
   min,
   max,
+  entero = false,
   deshabilitado = false,
 }: {
   etiqueta: string;
@@ -29,6 +30,7 @@ export function CampoNumero({
   onCommit: (n: number) => void;
   min?: number;
   max?: number;
+  entero?: boolean;
   deshabilitado?: boolean;
 }) {
   const [texto, setTexto] = useState(String(valor));
@@ -43,10 +45,13 @@ export function CampoNumero({
   const confirmar = () => {
     const n = Number(texto);
     if (texto.trim() === "" || !Number.isFinite(n)) return setTexto(String(valor));
-    let v = n;
+    let v = entero ? Math.round(n) : n;
     if (min !== undefined) v = Math.max(min, v);
     if (max !== undefined) v = Math.min(max, v);
-    setTexto(String(v));
+    // Tras commitear, el campo muestra el valor REAL del store: si el store
+    // lo acota o lo ignora (capa bloqueada) la prop no cambia y esto lo deja
+    // en `valor`; si cambia, el estado derivado de arriba lo sigue.
+    setTexto(String(valor));
     if (v !== valor) onCommit(v);
   };
 
@@ -63,9 +68,44 @@ export function CampoNumero({
         onBlur={confirmar}
         onKeyDown={(ev) => {
           if (ev.key === "Enter") confirmar();
+          if (ev.key === "Escape") setTexto(String(valor));
         }}
       />
     </label>
+  );
+}
+
+const FUENTE_INVALIDA = /['"\\]/;
+
+function CampoFuente({ valor, deshabilitado, onCommit }: { valor: string; deshabilitado: boolean; onCommit: (v: string) => void }) {
+  const [texto, setTexto] = useState(valor);
+  const [previo, setPrevio] = useState(valor);
+  if (previo !== valor) {
+    setPrevio(valor);
+    setTexto(valor);
+  }
+  const confirmar = () => {
+    const v = texto.trim();
+    if (!v || FUENTE_INVALIDA.test(v)) return setTexto(valor);
+    setTexto(v);
+    if (v !== valor) onCommit(v);
+  };
+  return (
+    <Label className="flex flex-col items-stretch gap-1 text-xs text-muted-foreground">
+      Fuente
+      <input
+        aria-label="Fuente"
+        value={texto}
+        disabled={deshabilitado}
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground disabled:opacity-50"
+        onChange={(ev) => setTexto(ev.target.value)}
+        onBlur={confirmar}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") confirmar();
+          if (ev.key === "Escape") setTexto(valor);
+        }}
+      />
+    </Label>
   );
 }
 
@@ -75,29 +115,45 @@ export function CampoColor({
   tokens,
   colorMarca,
   onCommit,
+  deshabilitado = false,
 }: {
   etiqueta: string;
   valor: string;
   tokens: Tokens;
   colorMarca: string;
   onCommit: (v: string) => void;
+  deshabilitado?: boolean;
 }) {
   const nombres = Object.keys(tokens.colores);
   if (!nombres.includes("marca")) nombres.push("marca");
   const esToken = valor.startsWith("token:");
   const resuelto = resolverColor(valor, tokens, colorMarca);
-  const [propio, setPropio] = useState(HEX.test(resuelto) ? resuelto : "#000000");
+  const hexActual = HEX.test(resuelto) ? resuelto : null;
+  const [propio, setPropio] = useState<string | null>(hexActual);
+  const [hayCambio, setHayCambio] = useState(false);
+  const [previo, setPrevio] = useState(valor);
+  // Si el valor cambia por fuera (deshacer), «propio» lo sigue.
+  if (previo !== valor) {
+    setPrevio(valor);
+    setPropio(hexActual);
+    setHayCambio(false);
+  }
 
   return (
     <div className="flex flex-col gap-1">
-      <Label className="text-xs text-muted-foreground">
+      <Label className="flex flex-col items-stretch gap-1 text-xs text-muted-foreground">
         {etiqueta}
         <select
           aria-label={etiqueta}
           className={SELECT}
           value={esToken ? valor : "propio"}
-          onChange={(ev) => onCommit(ev.target.value === "propio" ? propio : ev.target.value)}
+          disabled={deshabilitado}
+          onChange={(ev) => {
+            if (ev.target.value !== "propio") return onCommit(ev.target.value);
+            if (propio) onCommit(propio);
+          }}
         >
+          {esToken && !nombres.includes(valor.slice(6)) && <option value={valor}>{valor.slice(6)}</option>}
           {nombres.map((k) => (
             <option key={k} value={`token:${k}`}>
               {k}
@@ -110,10 +166,17 @@ export function CampoColor({
         <input
           type="color"
           aria-label={`${etiqueta} propio`}
-          value={HEX.test(valor) ? valor : propio}
-          className="h-8 w-full cursor-pointer rounded-md border"
-          onChange={(ev) => setPropio(ev.target.value)}
-          onBlur={() => propio !== valor && onCommit(propio)}
+          value={HEX.test(valor) ? valor : (propio ?? "#000000")}
+          disabled={deshabilitado}
+          className="h-8 w-full cursor-pointer rounded-md border disabled:opacity-50"
+          onChange={(ev) => {
+            setPropio(ev.target.value);
+            setHayCambio(true);
+          }}
+          onBlur={() => {
+            if (hayCambio && propio && propio !== valor) onCommit(propio);
+            setHayCambio(false);
+          }}
         />
       )}
     </div>
@@ -132,14 +195,19 @@ function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) 
 function Selector<T extends string | number>({
   etiqueta,
   valor,
-  opciones,
+  opciones: opcionesBase,
   onCambio,
+  deshabilitado = false,
 }: {
   etiqueta: string;
   valor: T;
   opciones: { valor: T; nombre: string }[];
   onCambio: (v: T) => void;
+  deshabilitado?: boolean;
 }) {
+  const opciones = opcionesBase.some((o) => o.valor === valor)
+    ? opcionesBase
+    : [{ valor, nombre: String(valor) }, ...opcionesBase];
   return (
     <Label className="flex flex-col items-stretch gap-1 text-xs text-muted-foreground">
       {etiqueta}
@@ -147,6 +215,7 @@ function Selector<T extends string | number>({
         aria-label={etiqueta}
         className={SELECT}
         value={String(valor)}
+        disabled={deshabilitado}
         onChange={(ev) => {
           const o = opciones.find((x) => String(x.valor) === ev.target.value);
           if (o) onCambio(o.valor);
@@ -211,26 +280,29 @@ export function PanelPropiedades({ colorMarca }: { colorMarca: string }) {
   const set = (ruta: string, valor: unknown, etiqueta = "Propiedades") =>
     st().aplicar([{ op: "set", capa: c.id, ruta, valor } satisfies Op], etiqueta);
   const grupo = c.tipo === "group";
+  const bloq = c.bloqueada;
 
   return (
     <div key={c.id}>
       <Seccion titulo={c.nombre}>
         <div className="grid grid-cols-2 gap-2">
-          <CampoNumero etiqueta="X" valor={c.x} onCommit={(n) => st().mover(Math.round(n) - c.x, 0)} />
-          <CampoNumero etiqueta="Y" valor={c.y} onCommit={(n) => st().mover(0, Math.round(n) - c.y)} />
-          <CampoNumero etiqueta="Ancho" valor={c.w} min={1} deshabilitado={grupo} onCommit={(n) => set("w", Math.round(n))} />
-          <CampoNumero etiqueta="Alto" valor={c.h} min={1} deshabilitado={grupo} onCommit={(n) => set("h", Math.round(n))} />
-          <CampoNumero etiqueta="Rotación" valor={c.rot} deshabilitado={grupo} onCommit={(n) => set("rot", n)} />
+          <CampoNumero etiqueta="X" valor={c.x} entero deshabilitado={bloq} onCommit={(n) => st().mover(n - c.x, 0)} />
+          <CampoNumero etiqueta="Y" valor={c.y} entero deshabilitado={bloq} onCommit={(n) => st().mover(0, n - c.y)} />
+          <CampoNumero etiqueta="Ancho" valor={c.w} min={1} entero deshabilitado={grupo || bloq} onCommit={(n) => set("w", n)} />
+          <CampoNumero etiqueta="Alto" valor={c.h} min={1} entero deshabilitado={grupo || bloq} onCommit={(n) => set("h", n)} />
+          <CampoNumero etiqueta="Rotación" valor={c.rot} deshabilitado={grupo || bloq} onCommit={(n) => set("rot", n)} />
           <CampoNumero
             etiqueta="Opacidad"
             valor={Math.round(c.opacity * 100)}
             min={0}
             max={100}
+            entero
+            deshabilitado={bloq}
             onCommit={(n) => set("opacity", n / 100)}
           />
         </div>
       </Seccion>
-      <PropiedadesDeTipo capa={c} tokens={tokens} colorMarca={colorMarca} set={set} />
+      <PropiedadesDeTipo capa={c} tokens={tokens} colorMarca={colorMarca} set={set} bloq={bloq} />
     </div>
   );
 }
@@ -240,7 +312,9 @@ function PropiedadesDeTipo({
   tokens,
   colorMarca,
   set,
+  bloq,
 }: {
+  bloq: boolean;
   capa: Capa;
   tokens: Tokens;
   colorMarca: string;
@@ -250,24 +324,14 @@ function PropiedadesDeTipo({
     const e = c.estilo;
     return (
       <Seccion titulo="Texto">
-        <Label className="flex flex-col items-stretch gap-1 text-xs text-muted-foreground">
-          Fuente
-          <input
-            aria-label="Fuente"
-            defaultValue={e.fontFamily}
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-            onBlur={(ev) => {
-              const v = ev.target.value.trim();
-              if (v && v !== e.fontFamily) set("estilo.fontFamily", v);
-            }}
-          />
-        </Label>
+        <CampoFuente valor={e.fontFamily} deshabilitado={bloq} onCommit={(v) => set("estilo.fontFamily", v)} />
         <div className="grid grid-cols-2 gap-2">
-          <CampoNumero etiqueta="Tamaño" valor={e.fontSize} min={6} max={400} onCommit={(n) => set("estilo.fontSize", n)} />
+          <CampoNumero etiqueta="Tamaño" valor={e.fontSize} min={6} max={400} deshabilitado={bloq} onCommit={(n) => set("estilo.fontSize", n)} />
           <Selector
             etiqueta="Peso"
             valor={e.fontWeight}
             opciones={PESOS.map((p) => ({ valor: p, nombre: String(p) }))}
+            deshabilitado={bloq}
             onCambio={(p) => set("estilo.fontWeight", p)}
           />
           <CampoNumero
@@ -275,6 +339,7 @@ function PropiedadesDeTipo({
             valor={e.lineHeight}
             min={0.5}
             max={3}
+            deshabilitado={bloq}
             onCommit={(n) => set("estilo.lineHeight", n)}
           />
           <Selector
@@ -286,6 +351,7 @@ function PropiedadesDeTipo({
               { valor: "right", nombre: "Derecha" },
               { valor: "justify", nombre: "Justificado" },
             ]}
+            deshabilitado={bloq}
             onCambio={(v) => set("estilo.textAlign", v)}
           />
         </div>
@@ -294,6 +360,7 @@ function PropiedadesDeTipo({
           valor={e.color}
           tokens={tokens}
           colorMarca={colorMarca}
+          deshabilitado={bloq}
           onCommit={(v) => set("estilo.color", v)}
         />
       </Seccion>
@@ -307,9 +374,10 @@ function PropiedadesDeTipo({
           valor={c.estilo.fill}
           tokens={tokens}
           colorMarca={colorMarca}
+          deshabilitado={bloq}
           onCommit={(v) => set("estilo.fill", v)}
         />
-        <CampoNumero etiqueta="Radio" valor={c.estilo.radius ?? 0} min={0} onCommit={(n) => set("estilo.radius", n)} />
+        <CampoNumero etiqueta="Radio" valor={c.estilo.radius ?? 0} min={0} deshabilitado={bloq} onCommit={(n) => set("estilo.radius", n)} />
       </Seccion>
     );
   }
@@ -323,6 +391,7 @@ function PropiedadesDeTipo({
             { valor: "cover", nombre: "Llenar" },
             { valor: "contain", nombre: "Contener" },
           ]}
+          deshabilitado={bloq}
           onCambio={(v) => set("ajuste", v)}
         />
       </Seccion>

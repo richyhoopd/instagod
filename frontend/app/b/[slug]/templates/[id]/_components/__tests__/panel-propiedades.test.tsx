@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import datos from "@/lib/__fixtures__/ops-casos.json";
 import type { CapaTexto, Escena } from "@/lib/escena";
@@ -84,5 +84,131 @@ describe("PanelPropiedades", () => {
     montar(["titulo"]);
     fireEvent.change(screen.getByRole("combobox", { name: "Color" }), { target: { value: "token:marca" } });
     expect((capa("titulo") as CapaTexto).estilo.color).toBe("token:marca");
+  });
+
+  it("X acotada: tras commitear muestra el valor real del store", () => {
+    montar(["titulo"]);
+    fireEvent.change(campo("X"), { target: { value: "9999" } });
+    fireEvent.blur(campo("X"));
+    expect(capa("titulo").x).toBe(4000);
+    expect(campo("X").value).toBe("4000");
+    fireEvent.change(campo("X"), { target: { value: "9999" } });
+    fireEvent.blur(campo("X"));
+    expect(campo("X").value).toBe("4000");
+  });
+
+  it("X con decimales se redondea y el campo lo muestra", () => {
+    montar(["titulo"]);
+    fireEvent.change(campo("X"), { target: { value: "100.6" } });
+    fireEvent.blur(campo("X"));
+    expect(capa("titulo").x).toBe(101);
+    expect(campo("X").value).toBe("101");
+  });
+
+  it("capa bloqueada: todos los campos deshabilitados", () => {
+    montar(["titulo"]);
+    act(() =>
+      st().editarEscena((d) => {
+        d.capas.find((c) => c.id === "titulo")!.bloqueada = true;
+      }),
+    );
+    const pasos = st().pasado.length;
+    expect(campo("Ancho").disabled).toBe(true);
+    expect(campo("X").disabled).toBe(true);
+    expect(campo("Opacidad").disabled).toBe(true);
+    expect((screen.getByRole("textbox", { name: "Fuente" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Peso" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Color" }) as HTMLSelectElement).disabled).toBe(true);
+    expect(st().pasado).toHaveLength(pasos);
+  });
+
+  it("Escape revierte al valor del store", () => {
+    montar(["titulo"]);
+    fireEvent.change(campo("X"), { target: { value: "555" } });
+    fireEvent.keyDown(campo("X"), { key: "Escape" });
+    expect(campo("X").value).toBe("80");
+    expect(st().pasado).toHaveLength(0);
+  });
+
+  it("Enter y luego blur es un solo paso", () => {
+    montar(["titulo"]);
+    fireEvent.change(campo("X"), { target: { value: "100" } });
+    fireEvent.keyDown(campo("X"), { key: "Enter" });
+    fireEvent.blur(campo("X"));
+    expect(st().pasado).toHaveLength(1);
+  });
+
+  const fuente = () => screen.getByRole("textbox", { name: "Fuente" }) as HTMLInputElement;
+
+  it("Fuente sigue al store tras deshacer y foco+blur no reaplica", () => {
+    montar(["titulo"]);
+    fireEvent.change(fuente(), { target: { value: "Lora" } });
+    fireEvent.blur(fuente());
+    expect((capa("titulo") as CapaTexto).estilo.fontFamily).toBe("Lora");
+    act(() => st().deshacer());
+    expect(fuente().value).toBe("Inter");
+    const pasos = st().pasado.length;
+    fireEvent.focus(fuente());
+    fireEvent.blur(fuente());
+    expect(st().pasado).toHaveLength(pasos);
+    expect((capa("titulo") as CapaTexto).estilo.fontFamily).toBe("Inter");
+  });
+
+  it("Fuente rechaza comillas, barra invertida y vacío", () => {
+    montar(["titulo"]);
+    for (const malo of ["Foo'Bar", 'Foo"Bar', "Foo\\Bar", "  "]) {
+      fireEvent.change(fuente(), { target: { value: malo } });
+      fireEvent.blur(fuente());
+      expect((capa("titulo") as CapaTexto).estilo.fontFamily).toBe("Inter");
+      expect(fuente().value).toBe("Inter");
+    }
+    expect(st().pasado).toHaveLength(0);
+  });
+
+  const propio = () => screen.getByLabelText("Relleno propio") as HTMLInputElement;
+
+  it("Color propio: foco+blur sin cambio no commitea", () => {
+    montar(["caja"]);
+    act(() =>
+      st().editarEscena((d) => {
+        const c = d.capas.find((x) => x.id === "caja")!;
+        if (c.tipo === "shape") c.estilo.fill = "#123456";
+      }),
+    );
+    st().seleccionar(["caja"]);
+    const pasos = st().pasado.length;
+    fireEvent.focus(propio());
+    fireEvent.blur(propio());
+    expect(st().pasado).toHaveLength(pasos);
+  });
+
+  it("Color propio se resincroniza tras deshacer", () => {
+    montar(["caja"]);
+    act(() =>
+      st().editarEscena((d) => {
+        const c = d.capas.find((x) => x.id === "caja")!;
+        if (c.tipo === "shape") c.estilo.fill = "#123456";
+      }),
+    );
+    fireEvent.change(propio(), { target: { value: "#abcdef" } });
+    fireEvent.blur(propio());
+    expect(propio().value).toBe("#abcdef");
+    act(() => st().deshacer());
+    expect(propio().value).toBe("#123456");
+    const pasos = st().pasado.length;
+    fireEvent.focus(propio());
+    fireEvent.blur(propio());
+    expect(st().pasado).toHaveLength(pasos);
+  });
+
+  it("Peso fuera de la lista muestra el valor actual", () => {
+    montar(["titulo"]);
+    act(() =>
+      st().editarEscena((d) => {
+        const c = d.capas.find((x) => x.id === "titulo")!;
+        if (c.tipo === "text") c.estilo.fontWeight = 350;
+      }),
+    );
+    expect((screen.getByRole("combobox", { name: "Peso" }) as HTMLSelectElement).value).toBe("350");
   });
 });
