@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useBrand } from "@/hooks/use-brands";
 import { useDiseno, useFuentes, useStickers } from "@/hooks/use-disenos";
 import { conCapa, sinCapa, type Capa, type Layout } from "@/lib/layout";
-import { Lienzo } from "./_components/lienzo";
+import { Lienzo } from "./_components/v1/lienzo";
 
 export default function DisenoPage() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
