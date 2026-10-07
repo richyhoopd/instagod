@@ -27,7 +27,8 @@ DEFAULT_HANDLE = "@gdlscene"
 
 # H2: el post simple soporta 4:5 (feed) y 9:16 (stories). El default es el
 # tamaño histórico, así que ningún llamador viejo cambia de comportamiento.
-ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (WIDTH, HEIGHT), "9:16": (1080, 1920)}
+ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (WIDTH, HEIGHT), "9:16": (1080, 1920),
+                                        "1:1": (1080, 1080)}
 
 # Plantillas disponibles → archivo HTML. La key es la que se elige desde el bot.
 TEMPLATES = {

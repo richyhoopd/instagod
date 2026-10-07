@@ -76,7 +76,7 @@ def preview_template(slug: str, tid: int, user: dict = Depends(usuario_actual),
 
 class DisenoNuevo(BaseModel):
     nombre: str = Field(min_length=1, max_length=80)
-    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
     layout: dict[str, Any] | None = None
     contrato: dict[str, Any] | None = None
 
@@ -90,12 +90,12 @@ class DisenoGuardado(BaseModel):
 class VistaPrevia(BaseModel):
     layout: dict[str, Any]
     contrato: dict[str, Any] | None = None
-    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
 
 
 class PedirDiseno(BaseModel):
     instruccion: str = Field(min_length=1, max_length=2000)
-    aspecto: str = Field(pattern="^(4:5|9:16)$")
+    aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
     template_id: int | None = None
 
 

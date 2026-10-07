@@ -461,6 +461,99 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     finally:
         cx.execute("PRAGMA foreign_keys=ON")
 
+# DDL de destino de brand_templates. Copia literal de src/schema.sql con el
+# nombre _new: si cambia una columna allá, se cambia aquí también.
+_BRAND_TEMPLATES_REBUILD_DDL = """
+    CREATE TABLE brand_templates_new (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        slug           TEXT    NOT NULL,
+        nombre         TEXT    NOT NULL,
+        descripcion    TEXT,
+        aspecto        TEXT    NOT NULL DEFAULT '4:5',
+        contrato_json  TEXT    NOT NULL,
+        html           TEXT    NOT NULL,
+        layout_json    TEXT,
+        estado         TEXT    NOT NULL DEFAULT 'borrador',
+        version_actual INTEGER NOT NULL DEFAULT 1,
+        origen         TEXT    NOT NULL DEFAULT 'manual',
+        creado_por     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        creado_en      TEXT    NOT NULL DEFAULT (datetime('now')),
+        actualizado_en TEXT    NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (account_id, slug),
+        CHECK (aspecto IN ('4:5','9:16','1:1')),
+        CHECK (estado  IN ('borrador','activa','archivada')),
+        CHECK (origen  IN ('seed','llm','manual'))
+    )
+"""
+_BRAND_TEMPLATES_REBUILD_COLS = (
+    "id", "account_id", "slug", "nombre", "descripcion", "aspecto", "contrato_json",
+    "html", "layout_json", "estado", "version_actual", "origen", "creado_por",
+    "creado_en", "actualizado_en",
+)
+
+
+def _migrar_check_aspecto_templates(cx: sqlite3.Connection) -> None:
+    """Ensancha CHECK(aspecto) de brand_templates para aceptar '1:1'.
+
+    Mismo procedimiento que `_migrar_check_tipo_queue` (sqlite.org, "Making
+    Other Kinds Of Table Schema Changes"). Idempotente: si el DDL guardado ya
+    trae '1:1' no hace nada. template_versions apunta a brand_templates por
+    nombre, así que su FK sobrevive al DROP + RENAME. Todo corre en una sola
+    transacción: si algo falla, la tabla vieja queda intacta.
+    """
+    row = cx.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='brand_templates'"
+    ).fetchone()
+    if row is None or "'1:1'" in row[0]:
+        return
+
+    viejas = {r["name"] for r in cx.execute("PRAGMA table_info(brand_templates)")}
+    huerfanas = viejas - set(_BRAND_TEMPLATES_REBUILD_COLS)
+    if huerfanas:
+        raise RuntimeError(
+            "_migrar_check_aspecto_templates no conoce estas columnas de "
+            f"brand_templates: {sorted(huerfanas)}. Actualiza "
+            "_BRAND_TEMPLATES_REBUILD_DDL y _BRAND_TEMPLATES_REBUILD_COLS en db.py "
+            "antes de correr esta migración: el rebuild las tiraría en silencio.")
+    col_list = ", ".join(c for c in _BRAND_TEMPLATES_REBUILD_COLS if c in viejas)
+
+    # foreign_keys solo se puede tocar FUERA de una transacción: se cierra la
+    # que pudiera haber abierta, se apaga antes del BEGIN y se restaura en el
+    # finally pase lo que pase.
+    if cx.in_transaction:
+        cx.commit()
+    cx.execute("PRAGMA foreign_keys=OFF")
+    try:
+        cx.execute("BEGIN")
+        # Sobrante de una corrida abortada antes del COMMIT (p. ej. kill -9):
+        # con el DDL pelón el CREATE reventaría con "table already exists".
+        cx.execute("DROP TABLE IF EXISTS brand_templates_new")
+        cx.execute(_BRAND_TEMPLATES_REBUILD_DDL)
+        cx.execute(f"INSERT INTO brand_templates_new ({col_list}) "
+                   f"SELECT {col_list} FROM brand_templates")
+        cx.execute("DROP TABLE brand_templates")
+        cx.execute("ALTER TABLE brand_templates_new RENAME TO brand_templates")
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_templates_cuenta "
+                   "ON brand_templates(account_id, estado)")
+        # Con foreign_keys=OFF nada valida las FK del rebuild solas. Solo se
+        # cuentan las que tocan brand_templates: una violación ajena y previa
+        # no debe impedir (ni es culpa de) esta migración.
+        violaciones = [tuple(v) for v in cx.execute("PRAGMA foreign_key_check")
+                       if v[0] == "brand_templates" or v[2] == "brand_templates"]
+        if violaciones:
+            raise RuntimeError("foreign_key_check falló tras el rebuild de "
+                               f"brand_templates: {violaciones}")
+        cx.execute("COMMIT")
+    except BaseException:
+        try:
+            cx.execute("ROLLBACK")
+        except sqlite3.OperationalError:
+            pass  # sin transacción activa (p. ej. el propio BEGIN falló)
+        raise
+    finally:
+        cx.execute("PRAGMA foreign_keys=ON")
+
 
 def init_db(cx: sqlite3.Connection) -> None:
     """Crea/actualiza el esquema. Idempotente: seguro de correr varias veces."""
@@ -472,6 +565,7 @@ def init_db(cx: sqlite3.Connection) -> None:
             if col not in existentes:
                 cx.execute(f"ALTER TABLE {tabla} ADD COLUMN {col} {ddl}")
     _migrar_check_tipo_queue(cx)
+    _migrar_check_aspecto_templates(cx)
     # Multi-cuenta Fase A: seed de la cuenta original e índices post-migración
     # (los índices van aquí y no en schema.sql: en DBs viejas la columna
     # account_id no existe todavía cuando corre executescript).

@@ -107,3 +107,9 @@ def test_assets_dir_es_variable_de_sistema() -> None:
         "<html><body><div class='card' "
         "style=\"background:url('{{ assets_dir }}/a.png')\"></div></body></html>",
         _contrato_minimo())
+
+
+def test_contrato_acepta_1_1():
+    from src.plantillas import contrato as _c
+    _c.validar({"aspecto": "1:1", "base": list(_c.CAMPOS_BASE), "extras": []})
+    assert _c.dimensiones("1:1") == (1080, 1080)

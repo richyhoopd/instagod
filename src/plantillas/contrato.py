@@ -24,7 +24,8 @@ CAMPOS_BASE: tuple[str, ...] = ("titular", "imagen", "handle", "logo", "color_ma
 CAMPOS_SISTEMA: tuple[str, ...] = ("fonts_dir", "fotos_dir", "assets_dir")
 TIPOS: tuple[str, ...] = ("texto", "texto_largo", "lista", "numero",
                           "imagen", "booleano")
-ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (1080, 1350), "9:16": (1080, 1920)}
+ASPECTOS: dict[str, tuple[int, int]] = {"4:5": (1080, 1350), "9:16": (1080, 1920),
+                                        "1:1": (1080, 1080)}
 
 # Un LLM descarrilado puede devolver cientos de kilobytes. Las cuatro
 # plantillas de gdlscene rondan los 3 KB, así que 60 KB es holgado y ataja

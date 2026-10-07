@@ -531,7 +531,7 @@ CREATE TABLE IF NOT EXISTS brand_templates (
     creado_en      TEXT    NOT NULL DEFAULT (datetime('now')),
     actualizado_en TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (account_id, slug),
-    CHECK (aspecto IN ('4:5','9:16')),
+    CHECK (aspecto IN ('4:5','9:16','1:1')),
     CHECK (estado  IN ('borrador','activa','archivada')),
     CHECK (origen  IN ('seed','llm','manual'))
 );

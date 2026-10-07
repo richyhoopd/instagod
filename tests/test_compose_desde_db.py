@@ -69,3 +69,15 @@ def test_sigue_esperando_el_autofit_cuando_si_lo_declara(tmp_path) -> None:
     </body></html>"""
     png = compose.render_html(html, aspecto="4:5", out_path=tmp_path / "con.png")
     assert png.exists() and png.stat().st_size > 5_000
+
+
+def test_render_html_acepta_1_1(monkeypatch, tmp_path):
+    capturado = {}
+
+    def falso(html, **kw):
+        capturado.update(kw)
+        return kw.get("out_path")
+
+    monkeypatch.setattr(compose, "_screenshot_card", falso)
+    compose.render_html("<div class='card'></div>", aspecto="1:1", out_path=tmp_path / "x.png")
+    assert (capturado["ancho"], capturado["alto"]) == (1080, 1080)
