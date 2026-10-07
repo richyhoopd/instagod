@@ -10,6 +10,7 @@ import { useAtajos } from "@/hooks/use-atajos";
 import { useAutoguardado } from "@/hooks/use-autoguardado";
 import { useBrand } from "@/hooks/use-brands";
 import { useActivarDiseno, useDiseno, useGuardarDiseno } from "@/hooks/use-disenos";
+import { ETIQUETA_DE_ASPECTO } from "@/lib/aspecto";
 import { useEditor } from "@/stores/editor";
 import { BarraSuperior } from "./_components/barra-superior";
 import { DialogoVersiones } from "./_components/dialogo-versiones";
@@ -138,9 +139,7 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
   const encabezado = (
     <div>
       <h1 className="text-xl font-semibold">{diseno.nombre}</h1>
-      <p className="text-sm text-muted-foreground">
-        {diseno.aspecto === "9:16" ? "Vertical" : "Cuadrada alta"}
-      </p>
+      <p className="text-sm text-muted-foreground">{ETIQUETA_DE_ASPECTO[diseno.aspecto]}</p>
     </div>
   );
 

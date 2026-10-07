@@ -65,8 +65,9 @@ export function resultadoDeJob<T>(job: Job | undefined): T | null {
 }
 
 // GET /brands/{slug}/templates?estado= — por omisión el backend filtra por
-// "activa"; se manda solo cuando el llamador pide algo distinto.
-export function useDisenos(slug: string, estado?: "activa" | "borrador" | "archivada") {
+// "activa"; se manda solo cuando el llamador pide algo distinto. "todas"
+// trae los tres estados (plan 1).
+export function useDisenos(slug: string, estado?: PlantillaLista["estado"] | "todas") {
   return useQuery<PlantillaLista[], ApiError>({
     queryKey: ["disenos", slug, estado],
     queryFn: () =>

@@ -4,11 +4,12 @@ import { useState } from "react";
 import { Check } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { RELACION_DE_ASPECTO } from "@/lib/aspecto";
 import type { Plantilla } from "@/hooks/use-templates";
 
 function PreviewPlantilla({ slug, plantilla }: { slug: string; plantilla: Plantilla }) {
   const [falló, setFalló] = useState(false);
-  const relacion = plantilla.aspecto === "9:16" ? "9/16" : "4/5";
+  const relacion = RELACION_DE_ASPECTO[plantilla.aspecto];
 
   if (!falló) {
     return (
