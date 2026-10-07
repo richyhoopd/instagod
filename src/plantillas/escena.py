@@ -11,6 +11,7 @@ ninguno de los dos es de fiar.
 from __future__ import annotations
 
 import copy
+import html as _html
 import re
 from typing import Any
 
@@ -522,3 +523,254 @@ def normalizar(layout: dict[str, Any] | None, aspecto: str) -> dict[str, Any]:
     if version == 2:
         return copy.deepcopy(layout)
     raise EscenaInvalida(f"versión de diseño desconocida: {version!r}")
+
+
+# ---------------------------------------------------------------------------
+# Compilador: escena -> HTML+CSS+Jinja
+#
+# Seguridad: aquí solo se compila lo que `validar` ya aprobó con listas
+# blancas (regex con fullmatch, enumeraciones, números acotados). Nada de la
+# escena entra a `style="..."`, `url('...')` o Jinja por otra vía; el texto
+# fijo se escapa con html.escape y `validar` le prohíbe `{{`, `{%` y `{#`.
+# ---------------------------------------------------------------------------
+
+_JUSTIFY = {"left": "flex-start", "center": "center", "right": "flex-end",
+            "justify": "flex-start"}
+_ALIGN = {"top": "flex-start", "center": "center", "bottom": "flex-end"}
+
+
+def _resolver(color: str, colores: dict[str, str]) -> str:
+    """token:marca se resuelve al renderizar; los demás tokens, aquí."""
+    m = _TOKEN.fullmatch(color)
+    if not m:
+        return color
+    return "{{ color_marca }}" if m.group(1) == "marca" else colores[m.group(1)]
+
+
+def _url(src: str) -> str:
+    """assets/x -> {{ assets_dir }}/x ; fotos/x -> {{ fotos_dir }}/x."""
+    carpeta, archivo = src.split("/", 1)
+    return "{{ %s_dir }}/%s" % (carpeta, archivo)
+
+
+def _origen(capa: dict[str, Any]) -> str:
+    """El dato del post si viene; si viene vacío, el archivo fijo de la capa."""
+    campo, src = capa.get("campo"), capa.get("src")
+    if campo and src:
+        carpeta, archivo = src.split("/", 1)
+        return "{{ %s or (%s_dir ~ '/%s') }}" % (campo, carpeta, archivo)
+    if campo:
+        return "{{ %s }}" % campo
+    return _url(src)
+
+
+def _caja(capa: dict[str, Any]) -> list[str]:
+    partes = ["position:absolute",
+              f"left:{capa['x']:g}px", f"top:{capa['y']:g}px",
+              f"width:{capa['w']:g}px", f"height:{capa['h']:g}px",
+              f"z-index:{capa.get('z', 0)}"]
+    if capa.get("rot"):
+        partes.append(f"transform:rotate({capa['rot']:g}deg)")
+    if capa.get("opacity", 1) != 1:
+        partes.append(f"opacity:{capa['opacity']:g}")
+    return partes
+
+
+def _mascara(valor: str) -> list[str]:
+    if valor == "circle":
+        return ["border-radius:50%", "overflow:hidden"]
+    if valor.startswith("rounded:") and int(valor.split(":")[1]):
+        return [f"border-radius:{int(valor.split(':')[1])}px", "overflow:hidden"]
+    return []
+
+
+def _visual(estilo: dict[str, Any]) -> list[str]:
+    partes = []
+    if estilo.get("filter") not in (None, "", "none"):
+        partes.append(f"filter:{estilo['filter']}")
+    if estilo.get("mixBlendMode", "normal") != "normal":
+        partes.append(f"mix-blend-mode:{estilo['mixBlendMode']}")
+    return partes
+
+
+def _div(capa: dict[str, Any], css: list[str], dentro: str = "") -> str:
+    return f'<div id="capa-{capa["id"]}" class="capa" style="{";".join(css)}">{dentro}</div>'
+
+
+# desde/hasta son puntos de código de Python (str slicing), no UTF-16: el frontend convierte.
+def _texto_con_spans(texto: str, spans: list[dict[str, Any]], colores: dict[str, str]) -> str:
+    piezas, cursor = [], 0
+    for s in sorted(spans, key=lambda s: s["desde"]):
+        piezas.append(_html.escape(texto[cursor:s["desde"]], quote=False))
+        trozo = _html.escape(texto[s["desde"]:s["hasta"]], quote=False)
+        piezas.append(f'<span style="color:{_resolver(s["color"], colores)}">{trozo}</span>')
+        cursor = s["hasta"]
+    piezas.append(_html.escape(texto[cursor:], quote=False))
+    return "".join(piezas)
+
+
+def _pintar_text(capa: dict[str, Any], colores: dict[str, str]) -> str:
+    e = capa.get("estilo", {})
+    if capa.get("campo"):
+        contenido = ("{{ %s|resaltar }}" if capa.get("resaltar") else "{{ %s }}") % capa["campo"]
+    else:
+        contenido = _texto_con_spans(capa.get("texto", ""), e.get("spans", []), colores)
+    alinear = e.get("textAlign", "left")
+    caja = _caja(capa) + ["display:flex", f"justify-content:{_JUSTIFY[alinear]}",
+                          f"align-items:{_ALIGN[e.get('verticalAlign', 'top')]}",
+                          "overflow:hidden"]
+    texto = [f"font-family:'{_html.escape(e['fontFamily'], quote=True)}',sans-serif",
+             f"font-size:{e['fontSize']:g}px",
+             f"font-weight:{e.get('fontWeight', 400)}",
+             f"color:{_resolver(e.get('color', '#000000'), colores)}",
+             f"line-height:{e.get('lineHeight', 1.2):g}",
+             f"text-align:{alinear}",
+             "width:100%"]
+    if e.get("letterSpacing"):
+        texto.append(f"letter-spacing:{e['letterSpacing']}")
+    wrap = e.get("textWrap", "wrap")
+    if not capa.get("campo"):
+        # Los saltos de línea del texto fijo son intencionales; los del dato
+        # del post no (paridad con v1, que no los respetaba).
+        texto.append("white-space:pre" if wrap == "nowrap" else "white-space:pre-line")
+    elif wrap == "nowrap":
+        texto.append("white-space:nowrap")
+    if wrap in ("balance", "pretty"):
+        texto.append(f"text-wrap:{wrap}")
+    if e.get("textTransform") == "uppercase":
+        texto.append("text-transform:uppercase")
+    fit = " data-fit" if capa.get("auto") else ""
+    return _div(capa, caja, f'<div{fit} style="{";".join(texto)}">{contenido}</div>')
+
+
+def _pintar_image(capa: dict[str, Any], colores: dict[str, str]) -> str:
+    e = capa.get("estilo", {})
+    css = (_caja(capa)
+           + [f"background-image:url('{_origen(capa)}')",
+              f"background-size:{capa.get('ajuste', 'cover')}",
+              f"background-position:{e.get('objectPosition', 'center')}",
+              "background-repeat:no-repeat"]
+           + _mascara(capa.get("mascara", "none")) + _visual(e))
+    return _div(capa, css)
+
+
+def _pintar_video(capa: dict[str, Any], colores: dict[str, str]) -> str:
+    """El PNG sale con el primer cuadro; la animación es del subproyecto de video."""
+    e = capa.get("estilo", {})
+    css = _caja(capa) + _mascara(capa.get("mascara", "none")) + _visual(e)
+    poster = f' poster="{_url(capa["poster"])}"' if capa.get("poster") else ""
+    video = (f'<video src="{_origen(capa)}"{poster} muted playsinline preload="auto" '
+             f'style="width:100%;height:100%;display:block;'
+             f'object-fit:{capa.get("ajuste", "cover")};'
+             f'object-position:{e.get("objectPosition", "center")}"></video>')
+    return _div(capa, css, video)
+
+
+def _pintar_svg(capa: dict[str, Any], colores: dict[str, str]) -> str:
+    # Como imagen de fondo y nunca en línea: un SVG en línea podría traer <script>.
+    e = capa.get("estilo", {})
+    css = (_caja(capa)
+           + [f"background-image:url('{_url(capa['src'])}')",
+              f"background-size:{capa.get('ajuste', 'contain')}",
+              "background-position:center", "background-repeat:no-repeat"]
+           + _visual(e))
+    return _div(capa, css)
+
+
+def _pintar_shape(capa: dict[str, Any], colores: dict[str, str]) -> str:
+    e = capa.get("estilo", {})
+    css = _caja(capa) + [f"background:{_resolver(e.get('fill', '#000000'), colores)}"]
+    if capa.get("forma") == "ellipse":
+        css.append("border-radius:50%")
+    elif e.get("radius"):
+        css.append(f"border-radius:{e['radius']:g}px")
+    if e.get("borderWidth"):
+        borde = _resolver(e.get("borderColor", "#000000"), colores)
+        css.append(f"border:{e['borderWidth']:g}px solid {borde}")
+    return _div(capa, css + _visual(e))
+
+
+_PINTORES = {"text": _pintar_text, "image": _pintar_image, "video": _pintar_video,
+             "svg": _pintar_svg, "shape": _pintar_shape}
+
+
+def _ocultas(capas: list[dict[str, Any]]) -> set[str]:
+    """Las capas ocultas y, si es un grupo, todo lo que cuelga de él."""
+    hijos = {c["id"]: c.get("hijos", []) for c in capas if c["tipo"] == "group"}
+    fuera: set[str] = set()
+    pendientes = [c["id"] for c in capas if c.get("oculta")]
+    while pendientes:
+        cid = pendientes.pop()
+        if cid not in fuera:
+            fuera.add(cid)
+            pendientes.extend(hijos.get(cid, []))
+    return fuera
+
+
+def _fondo_css(fondo: dict[str, Any], colores: dict[str, str]) -> str:
+    if fondo["tipo"] == "color":
+        return _resolver(fondo["valor"], colores)
+    if fondo["tipo"] == "gradiente":
+        return fondo["valor"]
+    return f"url('{_url(fondo['valor'])}') center/cover no-repeat"
+
+
+def _font_faces(capas: list[dict[str, Any]], fuentes: list[dict[str, Any]] | None) -> str:
+    """Solo las tipografías que se pintan (mismo criterio que layout.py)."""
+    if not fuentes:
+        return ""
+    usadas = {c["estilo"]["fontFamily"] for c in capas if c["tipo"] == "text"}
+    piezas = []
+    for f in sorted(fuentes, key=lambda x: x["familia"]):
+        if f["familia"] not in usadas:
+            continue
+        familia = _html.escape(f["familia"], quote=True)
+        archivo = _html.escape(f["archivo"], quote=True)
+        ruta = archivo if f.get("propia") else "{{ fonts_dir }}/" + archivo
+        piezas.append(f"@font-face{{font-family:'{familia}';src:url('{ruta}');"
+                      "font-display:block;}")
+    return "\n  ".join(piezas)
+
+
+def a_html(escena: dict[str, Any], contrato: dict[str, Any],
+           *, fuentes: list[dict[str, Any]] | None = None) -> str:
+    """Compila una escena v2 a HTML+CSS+Jinja. Determinista.
+
+    Cumple lo mismo que `layout.a_html`: un único `.card` (lo fotografía
+    `compose._screenshot_card`), solo variables declaradas o de sistema (lo
+    valida `contrato.validar_html`) y el literal `window.__captionFitted` cuando
+    hay auto-ajuste (lo espera `compose._screenshot_card`).
+    """
+    familias = {f["familia"] for f in fuentes} if fuentes else None
+    validar(escena, contrato, familias=familias)
+
+    lienzo = escena["lienzo"]
+    ancho, alto = lienzo["w"], lienzo["h"]
+    colores = (escena.get("tokens") or {}).get("colores") or {}
+    fuera = _ocultas(escena["capas"])
+    capas = sorted((c for c in escena["capas"]
+                    if c["id"] not in fuera and c["tipo"] != "group"),
+                   key=lambda c: (c.get("z", 0), c["id"]))
+    cuerpo = "\n    ".join(_PINTORES[c["tipo"]](c, colores) for c in capas)
+    script = "\n  " + _layout._SCRIPT_AUTO if any(
+        c["tipo"] == "text" and c.get("auto") for c in capas) else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  {_font_faces(capas, fuentes)}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  html, body {{ width:{ancho}px; height:{alto}px; }}
+  .card {{ width:{ancho}px; height:{alto}px; background:{_fondo_css(lienzo["fondo"], colores)};
+          position:relative; overflow:hidden; }}
+  .capa {{ position:absolute; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    {cuerpo}
+  </div>{script}
+</body>
+</html>"""
