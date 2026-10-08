@@ -3,8 +3,10 @@ biblioteca, subir, descartar y quitar fondo (job). Los bytes se sirven en
 GET /brands/{slug}/files/assets/{archivo} (plan 1), no aquí."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
+import requests
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
 
@@ -13,6 +15,7 @@ from api.errors import ApiError, no_encontrado
 from src import db, jobs
 from src.assets import Candidata, biblioteca, buscar
 from src.assets.proveedores import PROVEEDORES
+from src.plantillas import fontsource
 
 router = APIRouter(prefix="/brands/{slug}", tags=["assets"])
 
@@ -48,6 +51,11 @@ class CandidataIn(BaseModel):
 
 class AssetPatch(BaseModel):
     descartada: bool
+
+
+class TipografiaIn(BaseModel):
+    id: str = Field(max_length=80)
+    peso: int = Field(400, ge=100, le=900)
 
 
 @router.get("/assets/buscar")
@@ -139,3 +147,31 @@ def recortar_asset(slug: str, aid: int, user: dict = Depends(usuario_actual),
     jid = jobs.crear(cx, "asset.recorte", marca["id"], {"asset_id": aid},
                      creado_por=user["id"])
     return {"job_id": jid}
+
+
+@router.get("/tipografias/catalogo")
+def catalogo_tipografias(slug: str, q: str = Query("", max_length=60),
+                         user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> list[dict]:
+    marca_para(slug, cx, user, minimo="manager")
+    try:
+        return fontsource.catalogo(q)
+    except requests.RequestException as e:
+        raise ApiError(502, "origen", "Fontsource no respondió") from e
+
+
+@router.post("/tipografias", status_code=201)
+def instalar_tipografia(slug: str, datos: TipografiaIn, user: dict = Depends(usuario_actual),
+                        cx=Depends(get_cx)) -> dict:
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    try:
+        fila = fontsource.instalar(cx, marca["id"], marca["slug"], datos.id, datos.peso)
+        # La ruta absoluta queda en brand_fonts; la respuesta solo lleva el nombre.
+        return {**fila, "archivo": Path(fila["archivo"]).name}
+    except requests.RequestException as e:
+        raise ApiError(502, "origen", "Fontsource no respondió") from e
+    except biblioteca.AssetInvalido as e:
+        if str(e).startswith("descarga falló"):
+            raise ApiError(502, "origen", str(e)[:200]) from e
+        raise ApiError(422, "validacion", str(e)[:200], "id") from e
+    except ValueError as e:
+        raise ApiError(422, "validacion", str(e)[:200], "id") from e

@@ -1,0 +1,4 @@
+[
+  {"id": "bebas-neue", "family": "Bebas Neue", "subsets": ["latin"], "weights": [400], "styles": ["normal"], "category": "display", "license": "OFL-1.1", "type": "google"},
+  {"id": "inter", "family": "Inter", "subsets": ["latin"], "weights": [100, 400, 700, 900], "styles": ["normal", "italic"], "category": "sans-serif", "license": "OFL-1.1", "type": "google"}
+]

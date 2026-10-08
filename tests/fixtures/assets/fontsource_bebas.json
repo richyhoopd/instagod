@@ -1,0 +1,4 @@
+{"id": "bebas-neue", "family": "Bebas Neue", "weights": [400], "styles": ["normal"], "license": "OFL-1.1",
+ "variants": {"400": {"normal": {"latin": {"url": {
+   "woff2": "https://cdn.jsdelivr.net/fontsource/fonts/bebas-neue@latest/latin-400-normal.woff2",
+   "ttf": "https://cdn.jsdelivr.net/fontsource/fonts/bebas-neue@latest/latin-400-normal.ttf"}}}}}}
