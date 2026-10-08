@@ -161,8 +161,13 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
     );
   }
 
+  // El editor ocupa toda la ventana bajo el encabezado: dentro del max-w-6xl y
+  // junto al menú de la marca, la columna del lienzo quedaba en ~310 px de ancho.
   return (
-    <div className="flex h-[calc(100dvh-7rem)] min-h-[600px] flex-col gap-3">
+    <div
+      data-testid="editor"
+      className="fixed inset-x-0 top-[calc(3.5rem+1px)] bottom-0 z-30 flex flex-col gap-3 bg-background px-4 py-3"
+    >
       <div className="flex flex-wrap items-center gap-4">
         {volver}
         {encabezado}
