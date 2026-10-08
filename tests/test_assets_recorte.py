@@ -167,6 +167,7 @@ def test_opencv_sigue_cargando_haar() -> None:
 
 @pytest.mark.lento
 def test_modelo_real_birefnet(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("rembg")
     monkeypatch.setattr(recorte, "_remover", recorte._remover_real)
     origen = tmp_path / "o.png"
     im = Image.new("RGB", (256, 256), "white")
