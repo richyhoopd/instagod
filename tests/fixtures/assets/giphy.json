@@ -1,0 +1,5 @@
+{"data": [
+  {"id": "g1", "url": "https://giphy.com/gifs/g1", "username": "estudio",
+   "images": {"original": {"url": "https://media2.giphy.com/media/g1/giphy.gif", "mp4": "https://media2.giphy.com/media/g1/giphy.mp4", "width": "480", "height": "270"},
+              "fixed_width": {"url": "https://media2.giphy.com/media/g1/200w.gif"}}}
+], "pagination": {"count": 1}}

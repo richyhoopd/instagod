@@ -278,3 +278,47 @@ def test_coverr_error_de_tracking_no_filtra_el_bearer(monkeypatch) -> None:
     with pytest.raises(base.ErrorHttp) as e:
         _prov("coverr", {"COVERR_API_KEY": "SECRETO123"}).registrar_descarga(c)
     assert "SECRETO123" not in str(e.value) and "api.coverr.co" in str(e.value)
+
+
+def test_giphy_gif_mp4_y_stickers(llamadas) -> None:
+    """Fixture giphy.json: forma conocida de la API v1, sin verificar contra la real (R8)."""
+    llamadas.resp = _grabado("giphy.json")
+    [g] = _prov("giphy", {"GIPHY_API_KEY": "GK"}).buscar("wow", tipo="imagen", n=5)
+    assert g.url.endswith("giphy.gif") and (g.ancho, g.alto) == (480, 270)
+    assert g.preview_url.endswith("200w.gif") and g.licencia == "GIPHY"
+    assert (g.tipo, g.autor) == ("imagen", "estudio")
+    metodo, url, params, _ = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://api.giphy.com/v1/gifs/search")
+    assert params["api_key"] == "GK" and params["rating"] == "g" and params["q"] == "wow"
+    [v] = _prov("giphy", {"GIPHY_API_KEY": "GK"}).buscar("wow", tipo="video", n=5)
+    assert v.url.endswith("giphy.mp4") and v.tipo == "video"
+    _prov("giphy", {"GIPHY_API_KEY": "GK"}, {"stickers": True}).buscar("wow", tipo="imagen", n=5)
+    assert llamadas.hechas[-1][:2] == ("GET", "https://api.giphy.com/v1/stickers/search")
+
+
+def test_giphy_item_malformado_tipo_y_sin_llave(llamadas) -> None:
+    """Dato sintético armado en el test (no es respuesta real)."""
+    llamadas.resp = {"data": [None, {"images": {"original": {"url": "https://g.com/sin-id.gif"}}},
+                              {"id": "a"}, {"id": "b", "images": None},
+                              {"id": "c", "images": {"original": {"url": "https://g.com/c.gif",
+                                                                  "width": "x"}}}]}
+    p = _prov("giphy", {"GIPHY_API_KEY": "GK"})
+    [c] = p.buscar("x", tipo="imagen", n=5)
+    assert c.id_origen == "c" and c.ancho is None and c.preview_url == "https://g.com/c.gif"
+    assert p.buscar("x", tipo="video", n=5) == []  # ninguno trae mp4
+    n_llamadas = len(llamadas.hechas)
+    assert p.buscar("x", tipo="audio", n=5) == [] and len(llamadas.hechas) == n_llamadas
+    with pytest.raises(base.SinLlave):
+        _prov("giphy").buscar("x", tipo="imagen", n=5)
+
+
+def test_giphy_error_http_no_filtra_la_llave(monkeypatch) -> None:
+    """api_key va en la query; el error que sale pasa por el saneo de base (estado + host)."""
+    import requests
+
+    def get_roto(url, params=None, headers=None, timeout=None):
+        raise requests.HTTPError(f"429 for url: {url}?api_key=SECRETO123&q=wow")
+    monkeypatch.setattr(base.requests, "get", get_roto)
+    with pytest.raises(base.ErrorHttp) as e:
+        _prov("giphy", {"GIPHY_API_KEY": "SECRETO123"}).buscar("wow", tipo="imagen", n=5)
+    assert "SECRETO123" not in str(e.value) and "api.giphy.com" in str(e.value)
