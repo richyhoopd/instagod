@@ -1,0 +1,6 @@
+{"total": 1, "totalHits": 1, "hits": [
+  {"id": 404, "pageURL": "https://pixabay.com/videos/y-404/", "user": "lola",
+   "videos": {"large": {"url": "https://cdn.pixabay.com/video/404_large.mp4", "width": 3840, "height": 2160, "thumbnail": "https://cdn.pixabay.com/video/404_large.jpg"},
+              "medium": {"url": "https://cdn.pixabay.com/video/404_medium.mp4", "width": 1920, "height": 1080, "thumbnail": "https://cdn.pixabay.com/video/404_medium.jpg"},
+              "small": {"url": "https://cdn.pixabay.com/video/404_small.mp4", "width": 1280, "height": 720, "thumbnail": "https://cdn.pixabay.com/video/404_small.jpg"}}}
+]}

@@ -113,3 +113,91 @@ def test_pexels_sin_llave(llamadas) -> None:
     with pytest.raises(base.SinLlave):
         _prov("pexels").buscar("x", tipo="imagen", n=5)
     assert llamadas.hechas == []
+
+
+def test_pixabay_fotos_y_cache_sin_llave_en_hash(llamadas, tmp_path, monkeypatch) -> None:
+    """Fixture pixabay_fotos.json: forma del plan, sin verificar contra la API real (R8)."""
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+    llamadas.resp = _grabado("pixabay_fotos.json")
+    [c] = _prov("pixabay", {"PIXABAY_API_KEY": "K1"}).buscar("sol", tipo="imagen", n=5)
+    assert c.url.endswith("303_1280.jpg") and c.preview_url.endswith("303_640.jpg")
+    assert (c.autor, c.licencia) == ("pepe", "Pixabay Content License")
+    metodo, url, params, _ = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://pixabay.com/api/")
+    assert params["key"] == "K1" and params["per_page"] >= 3
+    assert params["image_type"] == "photo" and params["q"] == "sol"
+    # misma consulta con otra key: sale de caché, no hay segunda llamada
+    _prov("pixabay", {"PIXABAY_API_KEY": "K2"}).buscar("sol", tipo="imagen", n=5)
+    assert len(llamadas.hechas) == 1
+    cacheados = list((tmp_path / "cache" / "pixabay").glob("*.json"))
+    assert len(cacheados) == 1 and "K1" not in cacheados[0].read_text()
+
+
+def test_pixabay_cache_vencida_o_corrupta_vuelve_a_pedir(llamadas, tmp_path, monkeypatch) -> None:
+    import os
+    import time
+
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+    llamadas.resp = _grabado("pixabay_fotos.json")
+    p = _prov("pixabay", {"PIXABAY_API_KEY": "K"})
+    p.buscar("sol", tipo="imagen", n=5)
+    [arch] = (tmp_path / "cache" / "pixabay").glob("*.json")
+    viejo = time.time() - 25 * 3600
+    os.utime(arch, (viejo, viejo))
+    p.buscar("sol", tipo="imagen", n=5)
+    assert len(llamadas.hechas) == 2  # venció a las 24 h
+    arch.write_text("{no es json")
+    [c] = p.buscar("sol", tipo="imagen", n=5)
+    assert len(llamadas.hechas) == 3 and c.id_origen == "303"
+
+
+def test_pixabay_video_usa_medium(llamadas, tmp_path, monkeypatch) -> None:
+    """Fixture pixabay_videos.json: forma del plan, sin verificar contra la API real (R8)."""
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+    llamadas.resp = _grabado("pixabay_videos.json")
+    [c] = _prov("pixabay", {"PIXABAY_API_KEY": "K"}).buscar("mar", tipo="video", n=5)
+    assert c.url.endswith("404_medium.mp4") and (c.ancho, c.alto) == (1920, 1080)
+    assert c.preview_url.endswith("404_medium.jpg") and c.tipo == "video"
+    metodo, url, params, _ = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://pixabay.com/api/videos/")
+    assert params["key"] == "K"
+
+
+def test_pixabay_item_malformado_se_salta(llamadas, tmp_path, monkeypatch) -> None:
+    """Dato sintético armado en el test (no es respuesta real)."""
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+    bueno = _grabado("pixabay_fotos.json")["hits"][0]
+    llamadas.resp = {"hits": [None, "x", {"largeImageURL": "https://pixabay.com/a.jpg"}, bueno]}
+    res = _prov("pixabay", {"PIXABAY_API_KEY": "K"}).buscar("sol", tipo="imagen", n=5)
+    assert [c.id_origen for c in res] == ["303"]
+    llamadas.resp = {"hits": [{"videos": {}}, {"id": 1, "videos": None}, "x"]}
+    assert _prov("pixabay", {"PIXABAY_API_KEY": "K"}).buscar("otra", tipo="video", n=5) == []
+
+
+def test_pixabay_tipo_no_soportado_y_sin_llave(llamadas, tmp_path, monkeypatch) -> None:
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+    assert _prov("pixabay", {"PIXABAY_API_KEY": "K"}).buscar("x", tipo="audio", n=5) == []
+    with pytest.raises(base.SinLlave):
+        _prov("pixabay").buscar("x", tipo="imagen", n=5)
+    assert llamadas.hechas == []
+
+
+def test_pixabay_error_http_no_filtra_la_llave(tmp_path, monkeypatch) -> None:
+    """La key va en la query; el error que sale pasa por el saneo de base (estado + host)."""
+    import requests
+
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+
+    def get_roto(url, params=None, headers=None, timeout=None):
+        raise requests.HTTPError(f"500 Server Error for url: {url}?key=SECRETO123&q=sol")
+    monkeypatch.setattr(base.requests, "get", get_roto)
+    with pytest.raises(base.ErrorHttp) as e:
+        _prov("pixabay", {"PIXABAY_API_KEY": "SECRETO123"}).buscar("sol", tipo="imagen", n=5)
+    assert "SECRETO123" not in str(e.value) and "pixabay.com" in str(e.value)
+    assert not (tmp_path / "cache" / "pixabay").exists()
