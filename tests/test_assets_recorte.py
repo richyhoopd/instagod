@@ -83,8 +83,83 @@ def test_recorte_rechaza_asset_de_otra_marca(cx) -> None:
     assert not list((assets.BRANDS_DIR / "m1").glob("**/*-recorte.png"))
 
 
+def _job(cx, aid, payload):
+    jid = jobs.crear(cx, "asset.recorte", aid, payload, creado_por=None)
+    return db.get(cx, "jobs", jid)
+
+
+def test_recorte_rechaza_imagen_gigante_por_dims_de_la_fila(cx, monkeypatch) -> None:
+    aid = _cuenta(cx, "m1")
+    fila, _ = biblioteca.guardar_bytes(cx, aid, "m1", _png(), proveedor="subida")
+    db.update(cx, "brand_assets", fila["id"], ancho=8000, alto=6000)
+    monkeypatch.setattr(recorte, "_remover", lambda d: pytest.fail("no debe llamar a rembg"))
+    with pytest.raises(ValueError, match="imagen demasiado grande para recortar"):
+        handlers.asset_recorte(cx, _job(cx, aid, {"asset_id": fila["id"]}))
+
+
+def test_quitar_fondo_rechaza_gigante_leyendo_cabecera(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(recorte, "_remover", lambda d: pytest.fail("no debe llamar a rembg"))
+    monkeypatch.setattr(recorte, "MAX_PIXELES", 100)
+    origen = tmp_path / "o.png"
+    origen.write_bytes(_png(40, 30))
+    with pytest.raises(ValueError, match="imagen demasiado grande para recortar"):
+        recorte.quitar_fondo(origen, tmp_path / "d.png")
+
+
+def test_quitar_fondo_archivo_ausente_sin_ruta(tmp_path) -> None:
+    with pytest.raises(ValueError) as e:
+        recorte.quitar_fondo(tmp_path / "secreto" / "no.png", tmp_path / "d.png")
+    assert str(e.value) == "archivo del asset no encontrado"
+
+
+def test_quitar_fondo_envuelve_errores_sin_ruta(tmp_path, monkeypatch) -> None:
+    origen = tmp_path / "corrupto.png"
+    origen.write_bytes(b"no soy una imagen")
+    with pytest.raises(ValueError) as e:
+        recorte.quitar_fondo(origen, tmp_path / "d.png")
+    assert str(e.value) == "no se pudo recortar la imagen"
+    assert e.value.__cause__ is not None
+
+    def _boom(datos):
+        raise RuntimeError(f"onnx falló en {origen}")
+    monkeypatch.setattr(recorte, "_remover", _boom)
+    origen.write_bytes(_png())
+    with pytest.raises(ValueError) as e:
+        recorte.quitar_fondo(origen, tmp_path / "d.png")
+    assert str(e.value) == "no se pudo recortar la imagen"
+
+
+def test_quitar_fondo_sin_rembg_conserva_mensaje(tmp_path, monkeypatch) -> None:
+    def _sin(datos):
+        raise recorte.RembgNoInstalado("rembg no instalado: el recorte de fondo no está disponible")
+    monkeypatch.setattr(recorte, "_remover", _sin)
+    origen = tmp_path / "o.png"
+    origen.write_bytes(_png())
+    with pytest.raises(RuntimeError, match="rembg no instalado"):
+        recorte.quitar_fondo(origen, tmp_path / "d.png")
+
+
+def test_quitar_fondo_falla_al_guardar_no_deja_temporales(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(recorte, "_remover", lambda d: _png_con_alfa())
+    origen = tmp_path / "o.png"
+    origen.write_bytes(_png())
+    destino = tmp_path / "d" / "r.png"
+    monkeypatch.setattr(recorte.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("x")))
+    with pytest.raises(OSError):
+        recorte.quitar_fondo(origen, destino)
+    assert not list((tmp_path / "d").glob("*"))
+
+
+@pytest.mark.parametrize("payload", [{}, {"asset_id": "abc"}, {"asset_id": None},
+                                     {"asset_id": True}, {"asset_id": 1.5}])
+def test_recorte_asset_id_invalido(cx, payload) -> None:
+    aid = _cuenta(cx, "m1")
+    with pytest.raises(ValueError, match="asset_id inválido"):
+        handlers.asset_recorte(cx, _job(cx, aid, payload))
+
+
 def test_opencv_sigue_cargando_haar() -> None:
-    """rembg trae opencv-python-headless: el clasificador de caras v1 debe seguir vivo."""
+    """Línea base: rembg no declara opencv, pero el clasificador de caras v1 debe seguir vivo."""
     import cv2
     ruta = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     assert not cv2.CascadeClassifier(ruta).empty()

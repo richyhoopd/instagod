@@ -25,8 +25,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt \
     && playwright install --with-deps chromium \
-    && rembg d birefnet-general \
     && rm -rf /var/lib/apt/lists/*
+
+# Modelo de recorte en capa propia (cientos de MB), separada del pip install.
+RUN rembg d birefnet-general
 
 COPY . .
 

@@ -750,12 +750,17 @@ def asset_recorte(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]
     valida, pero aquí se repite porque el job es la frontera que escribe a disco.
     """
     payload = json.loads(job["payload_json"] or "{}")
+    asset_id = payload.get("asset_id")
+    if type(asset_id) is not int:
+        raise ValueError("asset_id inválido")
     slug = _marca_de(cx, job["account_id"])
-    asset = db.get(cx, "brand_assets", int(payload["asset_id"]))
+    asset = db.get(cx, "brand_assets", asset_id)
     if asset is None or asset["account_id"] != job["account_id"]:
         raise ValueError("el asset no existe en esta marca")
     if asset["tipo"] != "imagen":
         raise ValueError("solo se recortan imágenes")
+    if (asset["ancho"] or 0) * (asset["alto"] or 0) > assets_recorte.MAX_PIXELES:
+        raise ValueError("imagen demasiado grande para recortar")
     jobs.progresar(cx, job["id"], 10, "Quitando el fondo")
     nombre = asset["archivo"].rsplit(".", 1)[0] + "-recorte.png"
     assets_recorte.quitar_fondo(assets_biblioteca.ruta_de(slug, asset["archivo"]),
