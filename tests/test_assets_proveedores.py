@@ -232,3 +232,49 @@ def test_openverse_licencias_libres_item_malformado_y_tipo(llamadas) -> None:
     assert llamadas.hechas[0][2]["page_size"] == 20  # tope de page_size
     assert p.buscar("x", tipo="video", n=5) == []
     assert len(llamadas.hechas) == 1
+
+
+def test_coverr_video_y_tracking(llamadas) -> None:
+    """Fixture coverr.json: forma de la doc/plan, sin verificar contra la API real (R8)."""
+    llamadas.resp = _grabado("coverr.json")
+    p = _prov("coverr", {"COVERR_API_KEY": "CK"})
+    assert p.buscar("noche", tipo="imagen", n=5) == []
+    assert llamadas.hechas == []
+    [c] = p.buscar("noche", tipo="video", n=5)
+    assert c.url.endswith("1080p.mp4") and (c.ancho, c.alto) == (1920, 1080)
+    assert c.licencia == "Coverr License" and c.preview_url.endswith("thumbnail.jpg")
+    metodo, url, params, headers = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://api.coverr.co/videos")
+    assert params["urls"] == "true" and params["query"] == "noche"
+    assert headers["Authorization"] == "Bearer CK"
+    p.registrar_descarga(c)
+    metodo, url, _, headers = llamadas.hechas[-1]
+    assert (metodo, url) == ("PATCH", "https://api.coverr.co/videos/cvr1/stats/downloads")
+    assert headers["Authorization"] == "Bearer CK"
+
+
+def test_coverr_item_malformado_y_sin_llave(llamadas) -> None:
+    """Dato sintético armado en el test (no es respuesta real)."""
+    llamadas.resp = {"hits": [None, {"urls": {"mp4": "https://c.co/sin-id.mp4"}},
+                              {"id": "x"}, {"id": "y", "urls": None},
+                              {"id": "ok", "urls": {"mp4": "https://c.co/ok.mp4",
+                                                    "mp4_preview": "https://c.co/p.mp4"}}]}
+    [c] = _prov("coverr", {"COVERR_API_KEY": "CK"}).buscar("x", tipo="video", n=5)
+    assert c.id_origen == "ok" and c.preview_url == "https://c.co/p.mp4"
+    with pytest.raises(base.SinLlave):
+        _prov("coverr").buscar("x", tipo="video", n=5)
+
+
+def test_coverr_error_de_tracking_no_filtra_el_bearer(monkeypatch) -> None:
+    """El Bearer va en header; un fallo de red sale solo con estado + host."""
+    import requests
+
+    from src.assets import Candidata
+
+    def roto(metodo, url, headers=None, timeout=None):
+        raise requests.HTTPError(f"500 {headers['Authorization']} {url}")
+    monkeypatch.setattr(base.requests, "request", roto)
+    c = Candidata("coverr", "cvr1", "video", "https://c.co/a.mp4", "", None, None, None, None, None)
+    with pytest.raises(base.ErrorHttp) as e:
+        _prov("coverr", {"COVERR_API_KEY": "SECRETO123"}).registrar_descarga(c)
+    assert "SECRETO123" not in str(e.value) and "api.coverr.co" in str(e.value)
