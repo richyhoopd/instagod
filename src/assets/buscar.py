@@ -71,10 +71,10 @@ def buscar_con_avisos(cx, account_id: int, slug: str, q: str, *, tipo: str = "im
         if cls is None or tipo not in cls.tipos:
             continue
         fila = fila_de.get(nombre)
-        conf = json.loads(fila["config_json"] or "{}") if fila else {}
-        prov = cls(cx=cx, account_id=account_id, slug=slug, creds=creds, config=conf)
         error = None
         try:
+            conf = json.loads(fila["config_json"] or "{}") if fila else {}
+            prov = cls(cx=cx, account_id=account_id, slug=slug, creds=creds, config=conf)
             res = list(prov.buscar(q, tipo=tipo, n=n))
         except SinLlave as e:
             res, error = [], f"falta {e.args[0]}"

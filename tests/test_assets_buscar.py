@@ -127,3 +127,58 @@ def test_sin_llave_se_reporta_por_nombre(cx, monkeypatch) -> None:
 def test_tipo_invalido(cx) -> None:
     with pytest.raises(ValueError):
         buscar.buscar(cx, _cuenta(cx), "m1", "x", tipo="audio")
+
+
+def test_config_json_corrupto_no_tumba_la_busqueda(cx, monkeypatch) -> None:
+    aid = _cuenta(cx)
+    _registrar(monkeypatch, "pa")
+    _registrar(monkeypatch, "pb")
+    sid = db.insert(cx, "brand_sources", account_id=aid, kind="imagen", provider="pa",
+                    config_json="{bad")
+    db.insert(cx, "brand_sources", account_id=aid, kind="imagen", provider="pb")
+    res, avisos = buscar.buscar_con_avisos(cx, aid, "m1", "x")
+    assert {c.proveedor for c in res} == {"pb"}
+    assert any(a.startswith("pa:") for a in avisos)
+    assert db.get(cx, "brand_sources", sid)["ultimo_error"]
+
+
+def test_error_http_saneado_en_aviso(cx, monkeypatch) -> None:
+    aid = _cuenta(cx)
+
+    class Http(base.Proveedor):
+        tipos = ("imagen",)
+
+        def buscar(self, q, *, tipo="imagen", n=20):
+            raise base.ErrorHttp("HTTP 401 en api.x")
+
+    _registrar(monkeypatch, "http", cls=Http)
+    db.insert(cx, "brand_sources", account_id=aid, kind="imagen", provider="http")
+    _, avisos = buscar.buscar_con_avisos(cx, aid, "m1", "x")
+    assert "HTTP 401" in avisos[0] and SECRETO not in avisos[0]
+
+
+def test_keyerror_de_proveedor_se_contiene(cx, monkeypatch) -> None:
+    aid = _cuenta(cx)
+
+    class Mal(base.Proveedor):
+        tipos = ("imagen",)
+
+        def buscar(self, q, *, tipo="imagen", n=20):
+            raise KeyError("id")
+
+    _registrar(monkeypatch, "mal", cls=Mal)
+    _registrar(monkeypatch, "pa")
+    db.insert(cx, "brand_sources", account_id=aid, kind="imagen", provider="mal")
+    db.insert(cx, "brand_sources", account_id=aid, kind="imagen", provider="pa")
+    res, avisos = buscar.buscar_con_avisos(cx, aid, "m1", "x")
+    assert len(res) == 3 and any(a.startswith("mal:") for a in avisos)
+
+
+def test_de_pago_no_se_toma_de_otra_marca(cx, monkeypatch) -> None:
+    a = _cuenta(cx)
+    b = db.insert(cx, "accounts", slug="m2", ig_handle="@m2", nombre="M2", ciudad="GDL")
+    _registrar(monkeypatch, "ia_imagen", de_pago=True)
+    db.insert(cx, "brand_sources", account_id=b, kind="imagen", provider="ia_imagen")
+    res, avisos = buscar.buscar_con_avisos(cx, a, "m1", "x", proveedores=["ia_imagen"])
+    assert res == [] and _Falso.llamadas == []
+    assert avisos and "es de pago" in avisos[0]
