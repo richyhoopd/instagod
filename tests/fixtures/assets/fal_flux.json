@@ -1,0 +1,3 @@
+{"images": [{"url": "https://v3.fal.media/files/x/a.jpeg", "width": 1024, "height": 768, "content_type": "image/jpeg"},
+            {"url": "https://v3.fal.media/files/x/b.jpeg", "width": 1024, "height": 768, "content_type": "image/jpeg"}],
+ "seed": 42, "has_nsfw_concepts": [false, true], "prompt": "taco"}

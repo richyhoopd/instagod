@@ -358,3 +358,68 @@ def test_pixabay_error_al_escribir_cache_no_pierde_resultados(llamadas, tmp_path
     [c] = _prov("pixabay", {"PIXABAY_API_KEY": "K"}).buscar("sol", tipo="imagen", n=5)
     assert c.id_origen == "303" and c.url.endswith("303_1280.jpg")
     assert not list((tmp_path / "cache" / "pixabay").glob("*.json"))
+
+
+def test_ia_imagen_genera_y_tope_4(llamadas) -> None:
+    """Fixture fal_flux.json: forma del plan, sin verificar contra fal.ai (R8; de pago, nunca se llama)."""
+    llamadas.resp = _grabado("fal_flux.json")
+    p = _prov("ia_imagen", {"FAL_KEY": "FK"})
+    assert PROVEEDORES["ia_imagen"].de_pago is True
+    res = p.buscar("taco al pastor", tipo="imagen", n=20)
+    assert [c.id_origen for c in res] == ["42-0"]      # el nsfw se descarta
+    assert res[0].licencia == "Generada (fal.ai)"
+    metodo, url, body, headers = llamadas.hechas[0]
+    assert (metodo, url) == ("POST", "https://fal.run/fal-ai/flux/schnell")
+    assert body["num_images"] == 4 and body["prompt"] == "taco al pastor"
+    assert headers["Authorization"] == "Key FK"
+    assert p.buscar("x", tipo="video", n=2) == []
+    assert len(llamadas.hechas) == 1                   # tipo no soportado no gasta
+
+
+@pytest.mark.parametrize("q,n", [("", 4), ("   ", 4), ("taco", 0), ("taco", -3)])
+def test_ia_imagen_sin_consulta_o_sin_n_no_llama(llamadas, q, n) -> None:
+    llamadas.resp = _grabado("fal_flux.json")
+    assert _prov("ia_imagen", {"FAL_KEY": "FK"}).buscar(q, tipo="imagen", n=n) == []
+    assert llamadas.hechas == []                       # guarda anti-gasto
+
+
+def test_ia_imagen_n_minimo_y_prompt_recortado(llamadas) -> None:
+    llamadas.resp = _grabado("fal_flux.json")
+    _prov("ia_imagen", {"FAL_KEY": "FK"}).buscar("a" * 900, n=1)
+    body = llamadas.hechas[0][2]
+    assert body["num_images"] == 1 and len(body["prompt"]) == 500
+
+
+def test_ia_imagen_items_malformados_se_saltan(llamadas) -> None:
+    llamadas.resp = {"seed": 7, "images": [None, "x", {"width": 1}, {"url": ""},
+                                           {"url": "https://v3.fal.media/files/x/ok.jpeg",
+                                            "width": "no", "height": None}]}
+    [c] = _prov("ia_imagen", {"FAL_KEY": "FK"}).buscar("taco", n=4)
+    assert c.id_origen == "7-4" and (c.ancho, c.alto) == (None, None)
+    llamadas.resp = ["no es dict"]
+    assert _prov("ia_imagen", {"FAL_KEY": "FK"}).buscar("taco", n=4) == []
+    llamadas.resp = {"images": "raro", "has_nsfw_concepts": "raro"}
+    assert _prov("ia_imagen", {"FAL_KEY": "FK"}).buscar("taco", n=4) == []
+
+
+def test_ia_imagen_sin_llave_no_llama(llamadas) -> None:
+    with pytest.raises(base.SinLlave):
+        _prov("ia_imagen", {}).buscar("taco", n=4)
+    assert llamadas.hechas == []
+
+
+def test_ia_imagen_error_http_no_filtra_la_llave(monkeypatch) -> None:
+    import requests
+
+    class Resp:
+        status_code = 401
+
+    def boom(url, **kw):
+        assert kw["headers"]["Authorization"] == "Key FK-SECRETA"
+        raise requests.HTTPError("401 for url", response=Resp())
+
+    monkeypatch.setattr(requests, "post", boom)
+    with pytest.raises(base.ErrorHttp) as e:
+        _prov("ia_imagen", {"FAL_KEY": "FK-SECRETA"}).buscar("taco", n=2)
+    assert "FK-SECRETA" not in str(e.value) and "FK-SECRETA" not in repr(e.value)
+    assert str(e.value) == "HTTP 401 en fal.run"
