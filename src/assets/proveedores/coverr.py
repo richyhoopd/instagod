@@ -1,6 +1,8 @@
 """Coverr: stock de video gratis. Bearer auth; registrar la descarga con PATCH stats."""
 from __future__ import annotations
 
+import urllib.parse
+
 from src.assets import Candidata
 from src.assets.proveedores import base
 
@@ -38,5 +40,6 @@ class Coverr(base.Proveedor):
         return out
 
     def registrar_descarga(self, cand: Candidata) -> None:
-        base.enviar("PATCH", f"{_API}/videos/{cand.id_origen}/stats/downloads",
+        id_seguro = urllib.parse.quote(str(cand.id_origen), safe="")
+        base.enviar("PATCH", f"{_API}/videos/{id_seguro}/stats/downloads",
                     headers=self._headers())

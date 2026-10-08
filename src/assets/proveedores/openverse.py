@@ -27,7 +27,10 @@ class Openverse(base.Proveedor):
         for r in resultados or []:
             if not isinstance(r, dict) or r.get("id") is None or not r.get("url"):
                 continue
-            lic = (r.get("license") or "").lower()
+            lic = r.get("license")
+            if not isinstance(lic, str):
+                continue  # licencia no textual: se descarta el item, no el lote
+            lic = lic.lower()
             # sin licencia declarada no se puede usar; ND no, porque el editor modifica la imagen
             if not lic or r.get("mature") or "nd" in lic.split("-"):
                 continue

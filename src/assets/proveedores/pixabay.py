@@ -24,10 +24,13 @@ def _cacheado(url: str, params: dict, llave: str) -> dict:
         except ValueError:
             pass  # caché corrupta: se vuelve a pedir y se reescribe
     datos = base.get_json(url, params={**sin_llave, "key": llave})
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ruta.with_name(ruta.name + ".part")
-    tmp.write_text(json.dumps(datos))
-    os.replace(tmp, ruta)
+    try:
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ruta.with_name(ruta.name + ".part")
+        tmp.write_text(json.dumps(datos))
+        os.replace(tmp, ruta)
+    except OSError:
+        pass  # sin caché la consulta se repite después; el dato ya vino y se devuelve
     return datos
 
 

@@ -322,3 +322,39 @@ def test_giphy_error_http_no_filtra_la_llave(monkeypatch) -> None:
     with pytest.raises(base.ErrorHttp) as e:
         _prov("giphy", {"GIPHY_API_KEY": "SECRETO123"}).buscar("wow", tipo="imagen", n=5)
     assert "SECRETO123" not in str(e.value) and "api.giphy.com" in str(e.value)
+
+
+def test_coverr_id_origen_se_escapa_en_el_path(llamadas) -> None:
+    """Un id con '../' no debe escapar del path /videos/{id}/stats/downloads."""
+    from src.assets import Candidata
+    c = Candidata("coverr", "../x", "video", "https://c.co/a.mp4", "", None, None, None, None, None)
+    _prov("coverr", {"COVERR_API_KEY": "CK"}).registrar_descarga(c)
+    metodo, url, _, _ = llamadas.hechas[-1]
+    assert metodo == "PATCH"
+    assert "/../" not in url and url == "https://api.coverr.co/videos/..%2Fx/stats/downloads"
+
+
+def test_openverse_licencia_no_str_descarta_solo_ese_item(llamadas) -> None:
+    """Dato sintético armado en el test (no es respuesta real)."""
+    llamadas.resp = {"results": [
+        {"id": "mala", "url": "https://x.org/m.jpg", "license": 123, "mature": False},
+        {"id": "ok", "url": "https://x.org/ok.jpg", "license": "by", "license_version": "4.0",
+         "mature": False},
+    ]}
+    res = _prov("openverse").buscar("x", tipo="imagen", n=5)
+    assert [c.id_origen for c in res] == ["ok"] and res[0].licencia == "CC BY 4.0"
+
+
+def test_pixabay_error_al_escribir_cache_no_pierde_resultados(llamadas, tmp_path,
+                                                              monkeypatch) -> None:
+    """Fixture pixabay_fotos.json: forma del plan, sin verificar contra la API real (R8)."""
+    from src import assets
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+
+    def escribir_roto(self, *a, **k):
+        raise OSError("disco lleno")
+    monkeypatch.setattr(Path, "write_text", escribir_roto)
+    llamadas.resp = _grabado("pixabay_fotos.json")
+    [c] = _prov("pixabay", {"PIXABAY_API_KEY": "K"}).buscar("sol", tipo="imagen", n=5)
+    assert c.id_origen == "303" and c.url.endswith("303_1280.jpg")
+    assert not list((tmp_path / "cache" / "pixabay").glob("*.json"))
