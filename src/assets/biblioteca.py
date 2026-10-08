@@ -18,6 +18,8 @@ import logging
 import os
 import re
 import socket
+import sqlite3
+import tempfile
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -65,6 +67,14 @@ def _exigir_slug(slug: str) -> None:
         raise AssetInvalido("marca inválida")
 
 
+def _exigir_cuenta(cx, account_id: int, slug: str) -> None:
+    """slug válido Y perteneciente a account_id, antes de tocar disco o red."""
+    _exigir_slug(slug)
+    filas = db.rows(cx, "SELECT 1 FROM accounts WHERE id = ? AND slug = ?", (account_id, slug))
+    if not filas:
+        raise AssetInvalido("la marca no corresponde a la cuenta")
+
+
 def tipo_de_bytes(cabeza: bytes) -> tuple[str, str] | None:
     if cabeza.startswith(b"\xff\xd8\xff"):
         return "imagen", "jpg"
@@ -105,7 +115,27 @@ def _validar_url(url: str, hosts: tuple[str, ...] | None) -> None:
         raise AssetInvalido(f"IP inválida para {host}") from e
 
 
+def _host_de(url: str) -> str:
+    try:
+        return urlsplit(url).hostname or "?"
+    except ValueError:
+        return "?"
+
+
 def descargar(url: str, *, hosts: tuple[str, ...] | None, tope: int) -> bytes:
+    """Descarga cerrada. Todo fallo sale como AssetInvalido sin URL ni query en el mensaje."""
+    try:
+        return _descargar(url, hosts, tope)
+    except AssetInvalido:
+        raise
+    except requests.HTTPError as e:
+        estado = getattr(getattr(e, "response", None), "status_code", None)
+        raise AssetInvalido(f"descarga falló: HTTP {estado} en {_host_de(url)}") from None
+    except (requests.RequestException, ValueError) as e:
+        raise AssetInvalido(f"descarga falló: {type(e).__name__} en {_host_de(url)}") from None
+
+
+def _descargar(url: str, hosts: tuple[str, ...] | None, tope: int) -> bytes:
     for _ in range(_MAX_REDIRECTS + 1):
         _validar_url(url, hosts)
         with requests.get(url, stream=True, allow_redirects=False, timeout=base.TIMEOUT,
@@ -143,7 +173,7 @@ def _dims_imagen(datos: bytes) -> tuple[int, int]:
 def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: str,
                   meta: dict | None = None, tags: list[str] | None = None
                   ) -> tuple[dict, bool]:
-    _exigir_slug(slug)
+    _exigir_cuenta(cx, account_id, slug)
     detectado = tipo_de_bytes(datos[:16])
     if detectado is None:
         raise AssetInvalido("formato no soportado (jpg, png, webp, gif, mp4, webm)")
@@ -162,9 +192,12 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
     destino.parent.mkdir(parents=True, exist_ok=True)
     _ruta(slug, archivo)   # re-valida contención ya con el directorio creado
     creado = not destino.exists()
-    tmp = destino.with_name(destino.name + ".part")
+    # Nombre temporal único (O_EXCL, sin seguir symlinks) en el mismo directorio.
+    fd, tmp_nombre = tempfile.mkstemp(dir=destino.parent, prefix=archivo + ".", suffix=".part")
+    tmp = Path(tmp_nombre)
     try:
-        tmp.write_bytes(datos)
+        with os.fdopen(fd, "wb") as f:
+            f.write(datos)
         os.replace(tmp, destino)
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -177,6 +210,16 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
                         source_post_id=meta.get("source_post_id"),
                         ancho=ancho, alto=alto,
                         tags_json=json.dumps(tags, ensure_ascii=False) if tags else None)
+    except sqlite3.IntegrityError:
+        # Carrera: otra llamada guardó los mismos bytes entre el SELECT y el INSERT
+        # (UNIQUE account_id, sha). El archivo es el mismo y lo referencia su fila: no se borra.
+        previas = db.rows(cx, "SELECT * FROM brand_assets WHERE account_id = ? AND sha = ?",
+                          (account_id, sha))
+        if previas:
+            return dict(previas[0]), False
+        if creado:
+            destino.unlink(missing_ok=True)
+        raise
     except BaseException:
         if creado:   # no dejar un archivo huérfano que ninguna fila referencia
             destino.unlink(missing_ok=True)
@@ -186,7 +229,7 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
 
 
 def _importar_local(cx, account_id: int, slug: str, cand: Candidata, tags) -> dict:
-    _exigir_slug(slug)
+    _exigir_cuenta(cx, account_id, slug)
     carpeta, _, nombre = cand.url[len("local:"):].partition("/")
     if carpeta == "assets":
         _ruta(slug, nombre)  # valida el nombre
@@ -212,9 +255,11 @@ def _importar_local(cx, account_id: int, slug: str, cand: Candidata, tags) -> di
 
 def importar(cx, account_id: int, slug: str, cand: Candidata, *,
              tags: list[str] | None = None) -> dict:
-    _exigir_slug(slug)
+    _exigir_cuenta(cx, account_id, slug)
     if cand.url.startswith("local:"):
         return _importar_local(cx, account_id, slug, cand, tags)
+    if cand.proveedor == "carpeta":   # carpeta es solo local: jamás sale a la red
+        raise AssetInvalido("carpeta solo admite archivos locales")
     cls = PROVEEDORES.get(cand.proveedor)
     if cls is None or cand.tipo not in cls.tipos:
         raise AssetInvalido("proveedor inválido")

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import io
+import os
+import sqlite3
 
 import pytest
+import requests
 from PIL import Image
 
 from src import assets, db
@@ -48,7 +51,7 @@ class _Resp:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise RuntimeError(self.status_code)
+            raise requests.HTTPError(f"{self.status_code} for url", response=self)
 
     def iter_content(self, n):
         for i in range(0, len(self._body), n):
@@ -265,3 +268,103 @@ def test_importar_foto_symlink_se_rechaza(cx, tmp_path) -> None:
                      autor=None, licencia="propia", url_origen=None)
     with pytest.raises(AssetInvalido):
         biblioteca.importar(cx, aid, "m1", cand)
+
+
+def test_guardar_bytes_carrera_unique_no_borra_el_archivo(cx, monkeypatch) -> None:
+    aid = _cuenta(cx)
+    datos = _png(9, 9)
+    ganadora, _ = biblioteca.guardar_bytes(cx, aid, "m1", datos, proveedor="subida")
+    destino = biblioteca.ruta_de("m1", ganadora["archivo"])
+    destino.unlink()   # la perdedora lo escribirá de nuevo: creado=True en su vista
+    real_rows = biblioteca.db.rows
+    estado = {"primera": True}
+
+    def rows_ciego(cx_, sql, params=()):
+        if "FROM brand_assets WHERE account_id = ? AND sha" in sql and estado["primera"]:
+            estado["primera"] = False
+            return []   # el SELECT previo no ve la fila de la ganadora
+        return real_rows(cx_, sql, params)
+    monkeypatch.setattr(biblioteca.db, "rows", rows_ciego)
+    fila, nueva = biblioteca.guardar_bytes(cx, aid, "m1", datos, proveedor="subida")
+    assert not nueva and fila["id"] == ganadora["id"]
+    assert destino.read_bytes() == datos          # el archivo de la fila sigue ahí
+    assert sorted(p.name for p in destino.parent.iterdir()) == [ganadora["archivo"]]
+
+
+def test_guardar_bytes_integrity_sin_fila_borra_huerfano(cx, monkeypatch) -> None:
+    aid = _cuenta(cx)
+
+    def choca(*a, **k):
+        raise sqlite3.IntegrityError("otra restricción")
+    monkeypatch.setattr(biblioteca.db, "insert", choca)
+    with pytest.raises(sqlite3.IntegrityError):
+        biblioteca.guardar_bytes(cx, aid, "m1", _png(3, 3), proveedor="subida")
+    assert list((assets.BRANDS_DIR / "m1" / "assets").iterdir()) == []
+
+
+def test_cuenta_y_slug_deben_coincidir(cx, tmp_path) -> None:
+    a, b = _cuenta(cx, "m1"), _cuenta(cx, "m2")
+    with pytest.raises(AssetInvalido):
+        biblioteca.guardar_bytes(cx, a, "m2", _png(), proveedor="subida")
+    with pytest.raises(AssetInvalido):
+        biblioteca.guardar_bytes(cx, 999, "m1", _png(), proveedor="subida")
+    fotos = assets.BRANDS_DIR / "m2" / "fotos"
+    fotos.mkdir(parents=True)
+    (fotos / "x.png").write_bytes(_png())
+    cand = Candidata(proveedor="carpeta", id_origen="x.png", tipo="imagen",
+                     url="local:fotos/x.png", preview_url="", ancho=None, alto=None,
+                     autor=None, licencia="propia", url_origen=None)
+    with pytest.raises(AssetInvalido):
+        biblioteca.importar(cx, a, "m2", cand)
+    assert not (assets.BRANDS_DIR / "m1").exists()
+    assert not (assets.BRANDS_DIR / "m2" / "assets").exists()
+    assert biblioteca.importar(cx, b, "m2", cand)["account_id"] == b
+
+
+def test_carpeta_nunca_descarga_por_red(cx, red) -> None:
+    aid = _cuenta(cx)
+    red.dns["cdn.com"] = ["93.184.216.34"]
+    red.resp["https://cdn.com/x.png"] = _Resp(body=_png())
+    cand = Candidata(proveedor="carpeta", id_origen="x", tipo="imagen",
+                     url="https://cdn.com/x.png", preview_url="", ancho=None, alto=None,
+                     autor=None, licencia="propia", url_origen=None)
+    with pytest.raises(AssetInvalido):
+        biblioteca.importar(cx, aid, "m1", cand)
+    assert red.pedidas == []
+
+
+def test_descarga_errores_salen_como_asset_invalido_sin_url(red) -> None:
+    red.dns["cdn.com"] = ["93.184.216.34"]
+    red.resp["https://cdn.com/x.png?token=SECRETO"] = _Resp(500)
+    with pytest.raises(AssetInvalido) as e:
+        biblioteca.descargar("https://cdn.com/x.png?token=SECRETO", hosts=None, tope=100)
+    assert "HTTP 500" in str(e.value) and "cdn.com" in str(e.value)
+    assert "SECRETO" not in str(e.value) and "x.png" not in str(e.value)
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+    for exc in (requests.Timeout("t"), requests.ConnectionError("c?token=SECRETO")):
+        def boom(url, **kw):
+            raise exc
+        red.resp.clear()
+        import src.assets.biblioteca as bib
+        orig = bib.requests.get
+        bib.requests.get = boom
+        try:
+            with pytest.raises(AssetInvalido) as e2:
+                biblioteca.descargar("https://cdn.com/x.png?token=SECRETO", hosts=None, tope=100)
+        finally:
+            bib.requests.get = orig
+        assert "SECRETO" not in str(e2.value)
+    with pytest.raises(AssetInvalido):
+        biblioteca.descargar("https://[::1/x", hosts=None, tope=100)
+
+
+def test_part_se_limpia_si_falla_la_escritura(cx, monkeypatch) -> None:
+    aid = _cuenta(cx)
+
+    def falla(*a, **k):
+        raise OSError("disco lleno")
+    monkeypatch.setattr(os, "replace", falla)
+    with pytest.raises(OSError):
+        biblioteca.guardar_bytes(cx, aid, "m1", _png(2, 2), proveedor="subida")
+    assert list((assets.BRANDS_DIR / "m1" / "assets").iterdir()) == []
+    assert db.rows(cx, "SELECT id FROM brand_assets") == []
