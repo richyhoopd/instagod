@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-import requests
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
 
@@ -33,7 +32,7 @@ def _asset_de_marca(cx, account_id: int, aid: int) -> dict:
 
 class CandidataIn(BaseModel):
     proveedor: str
-    id_origen: str = Field(max_length=200)
+    id_origen: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,128}$")
     tipo: Literal["imagen", "video"]
     url: str = Field(max_length=2000)
     preview_url: str = Field("", max_length=2000)
@@ -92,10 +91,8 @@ def importar_asset(slug: str, datos: CandidataIn, user: dict = Depends(usuario_a
         fila = biblioteca.importar(cx, marca["id"], marca["slug"], cand, tags=tags)
     except biblioteca.AssetInvalido as e:
         if str(e).startswith("descarga falló"):
-            raise ApiError(502, "origen", "No se pudo descargar del proveedor") from e
+            raise ApiError(502, "origen", str(e)[:200]) from e
         raise ApiError(422, "validacion", str(e)[:200], "url") from e
-    except requests.RequestException as e:
-        raise ApiError(502, "origen", "No se pudo descargar del proveedor") from e
     return _con_src(fila)
 
 
@@ -104,14 +101,16 @@ def subir_asset(slug: str, archivo: UploadFile = File(...),
                 user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     tope = max(biblioteca.TOPES.values())
-    piezas, total = [], 0
+    demasiado = ApiError(413, "validacion", "archivo demasiado grande", "archivo")
+    if archivo.size is not None and archivo.size > tope:
+        raise demasiado
+    datos = bytearray()
     while chunk := archivo.file.read(_CHUNK):
-        total += len(chunk)
-        if total > tope:
-            raise ApiError(422, "validacion", "archivo demasiado grande", "archivo")
-        piezas.append(chunk)
+        datos += chunk
+        if len(datos) > tope:
+            raise demasiado
     try:
-        fila, _ = biblioteca.guardar_bytes(cx, marca["id"], marca["slug"], b"".join(piezas),
+        fila, _ = biblioteca.guardar_bytes(cx, marca["id"], marca["slug"], bytes(datos),
                                            proveedor="subida", meta={"licencia": "propia"})
     except biblioteca.AssetInvalido as e:
         raise ApiError(422, "validacion", str(e)[:200], "archivo") from e
@@ -135,6 +134,8 @@ def recortar_asset(slug: str, aid: int, user: dict = Depends(usuario_actual),
     asset = _asset_de_marca(cx, marca["id"], aid)
     if asset["tipo"] != "imagen":
         raise ApiError(422, "validacion", "Solo se puede quitar el fondo a imágenes", "tipo")
+    if asset["descartada"]:
+        raise ApiError(409, "conflicto", "El asset está descartado")
     jid = jobs.crear(cx, "asset.recorte", marca["id"], {"asset_id": aid},
                      creado_por=user["id"])
     return {"job_id": jid}

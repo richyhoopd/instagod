@@ -129,12 +129,13 @@ def test_importar_descarga_fallida_es_502(entorno, monkeypatch) -> None:
     cli, cx, a1, _ = entorno
 
     def cae(*a, **k):
-        raise biblioteca.AssetInvalido("descarga falló: HTTP 500")
+        raise biblioteca.AssetInvalido("descarga falló: HTTP 500 en images.pexels.com")
     monkeypatch.setattr(biblioteca, "importar", cae)
     base = {"proveedor": "pexels", "id_origen": "1", "tipo": "imagen",
             "url": "https://images.pexels.com/1.jpg"}
     r = cli.post("/brands/m1/assets/importar", json=base)
-    assert r.status_code == 502 and "/" not in r.json()["detalle"].replace("HTTP 500", "")
+    assert r.status_code == 502 and r.json()["detalle"] == "descarga falló: HTTP 500 en images.pexels.com"
+    assert "/" not in r.json()["detalle"] and "?" not in r.json()["detalle"]
 
 
 def test_manager_de_a_no_toca_assets_de_b(entorno) -> None:
@@ -147,3 +148,56 @@ def test_manager_de_a_no_toca_assets_de_b(entorno) -> None:
     assert cli.patch(f"/brands/m2/assets/{ajeno['id']}",
                      json={"descartada": True}).status_code == 403
     assert db.get(cx, "brand_assets", ajeno["id"])["descartada"] == 0
+
+
+def test_subir_sobre_el_tope_es_413(entorno, monkeypatch) -> None:
+    cli, cx, a1, _ = entorno
+    monkeypatch.setitem(biblioteca.TOPES, "video", 1000)
+    monkeypatch.setitem(biblioteca.TOPES, "imagen", 500)
+    r = cli.post("/brands/m1/assets/subir",
+                 files={"archivo": ("x.bin", b"\x00" * 1001, "application/octet-stream")})
+    assert r.status_code == 413
+    assert db.rows(cx, "SELECT id FROM brand_assets") == []
+
+
+def test_importar_id_origen_con_path_es_422(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    base = {"proveedor": "unsplash", "id_origen": "../../me?x=", "tipo": "imagen",
+            "url": "https://images.unsplash.com/1.jpg"}
+    assert cli.post("/brands/m1/assets/importar", json=base).status_code == 422
+    assert cli.post("/brands/m1/assets/importar",
+                    json={**base, "id_origen": "x" * 129}).status_code == 422
+
+
+def test_recorte_de_asset_descartado_es_409(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    fila, _ = biblioteca.guardar_bytes(cx, a1, "m1", _png(), proveedor="subida")
+    cli.patch(f"/brands/m1/assets/{fila['id']}", json={"descartada": True})
+    assert cli.post(f"/brands/m1/assets/{fila['id']}/recorte").status_code == 409
+    assert db.rows(cx, "SELECT id FROM jobs WHERE tipo = 'asset.recorte'") == []
+
+
+def test_recorte_de_video_es_422(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    fila, _ = biblioteca.guardar_bytes(cx, a1, "m1", _png(), proveedor="subida")
+    db.update(cx, "brand_assets", fila["id"], tipo="video")
+    cx.commit()
+    assert cli.post(f"/brands/m1/assets/{fila['id']}/recorte").status_code == 422
+    assert db.rows(cx, "SELECT id FROM jobs WHERE tipo = 'asset.recorte'") == []
+
+
+def test_importar_ia_imagen_host_fuera_de_allowlist_se_rechaza(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    r = cli.post("/brands/m1/assets/importar", json={
+        "proveedor": "ia_imagen", "id_origen": "1-0", "tipo": "imagen",
+        "url": "https://evil.example.com/a.png"})
+    assert r.status_code == 422
+    assert db.rows(cx, "SELECT id FROM brand_assets") == []
+
+
+def test_importar_carpeta_con_https_se_rechaza(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    r = cli.post("/brands/m1/assets/importar", json={
+        "proveedor": "carpeta", "id_origen": "a.png", "tipo": "imagen",
+        "url": "https://images.pexels.com/1.jpg"})
+    assert r.status_code == 422

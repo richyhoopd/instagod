@@ -2,5 +2,9 @@
 # Si no hay dominio, API_DOMAIN=":80" y Caddy sirve por IP sin TLS (sólo para pruebas).
 {$API_DOMAIN} {
     encode zstd gzip
+    # Tope del cuerpo: un poco arriba del mayor tope de asset (100 MB, biblioteca.TOPES).
+    request_body {
+        max_size 110MB
+    }
     reverse_proxy api:8100
 }
