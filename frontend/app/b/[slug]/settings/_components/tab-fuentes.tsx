@@ -10,6 +10,8 @@ export function TabFuentes({ slug, puedeEditar }: { slug: string; puedeEditar: b
     <div className="max-w-2xl space-y-6">
       <FuentesLista slug={slug} kind="imagen" titulo="Fuentes de imagen" puedeEditar={puedeEditar} />
       <Separator />
+      <FuentesLista slug={slug} kind="video" titulo="Fuentes de video" puedeEditar={puedeEditar} />
+      <Separator />
       <FuentesLista slug={slug} kind="info" titulo="Fuentes de información" puedeEditar={puedeEditar} />
       <Separator />
       <FotosPanel slug={slug} puedeEditar={puedeEditar} />

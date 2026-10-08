@@ -8,7 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { NoDisponible } from "@/components/no-disponible";
 import { colorSwatch, estiloLabel } from "@/lib/estilos";
 import { usePresets } from "@/hooks/use-presets";
+import { Separator } from "@/components/ui/separator";
 import { PresetEditor } from "./preset-editor";
+import { TipografiasPanel } from "./tipografias-panel";
 import { cn } from "@/lib/utils";
 
 export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: boolean }) {
@@ -126,6 +128,14 @@ export function TabEstilos({ slug, puedeEditar }: { slug: string; puedeEditar: b
           onGuardado={() => setSeleccionado(null)}
           onCancelar={() => setSeleccionado(null)}
         />
+      )}
+
+      {/* Los endpoints de tipografías exigen rol manager: sin edición, el panel no se ofrece. */}
+      {puedeEditar && (
+        <>
+          <Separator />
+          <TipografiasPanel slug={slug} />
+        </>
       )}
     </div>
   );

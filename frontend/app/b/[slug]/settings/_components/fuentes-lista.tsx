@@ -37,6 +37,7 @@ import { ApiError } from "@/lib/api";
 import { fuenteLabel } from "@/lib/fuentes";
 import {
   useSources,
+  useTodasSources,
   useEditarSource,
   useBorrarSource,
   useOrdenarSources,
@@ -166,11 +167,10 @@ export function FuentesLista({
   titulo: string;
   puedeEditar: boolean;
 }) {
-  const otroKind: SourceKind = kind === "imagen" ? "info" : "imagen";
   const sourcesQuery = useSources(slug, kind);
-  // PUT /sources/orden exige el set COMPLETO de fuentes de la marca (los dos
-  // kinds); se pide el otro kind solo para tener sus ids a mano al reordenar.
-  const otroQuery = useSources(slug, otroKind);
+  // PUT /sources/orden exige el set COMPLETO de fuentes de la marca (todos los
+  // kinds); se piden todas solo para tener los ids de los demás al reordenar.
+  const todasQuery = useTodasSources(slug);
   const editar = useEditarSource(slug);
   const borrar = useBorrarSource(slug);
   const ordenar = useOrdenarSources(slug);
@@ -208,8 +208,8 @@ export function FuentesLista({
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    if (!otroQuery.data) {
-      toast.error("No se pudo reordenar: falta cargar las fuentes del otro tipo");
+    if (!todasQuery.data) {
+      toast.error("No se pudo reordenar: faltan cargar las demás fuentes");
       return;
     }
     const oldIndex = orden.findIndex((s) => s.id === active.id);
@@ -217,7 +217,10 @@ export function FuentesLista({
     if (oldIndex === -1 || newIndex === -1) return;
     const nuevo = arrayMove(orden, oldIndex, newIndex);
     setOrden(nuevo);
-    const idsCompletos = [...nuevo.map((s) => s.id), ...otroQuery.data.map((s) => s.id)];
+    const idsCompletos = [
+      ...nuevo.map((s) => s.id),
+      ...todasQuery.data.filter((s) => s.kind !== kind).map((s) => s.id),
+    ];
     ordenar.mutate(
       { ids: idsCompletos },
       {

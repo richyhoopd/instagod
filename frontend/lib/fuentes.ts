@@ -13,6 +13,11 @@ const FUENTE_LABELS: Record<string, string> = {
   rss: "RSS",
   newsapi: "NewsAPI",
   manual: "Manual",
+  pixabay: "Pixabay",
+  openverse: "Openverse",
+  coverr: "Coverr",
+  giphy: "GIPHY",
+  ia_imagen: "IA (fal.ai, de pago)",
 };
 
 const DEFAULT_FUENTES = ["pexels"];

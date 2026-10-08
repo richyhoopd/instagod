@@ -49,6 +49,10 @@ export const SECRETO_INFO: Record<string, { label: string; ayuda: string; grupo:
     ayuda: "Modelo concreto a usar. Si no se define, se usa el general.",
     grupo: "ia",
   },
+  PIXABAY_API_KEY: { label: "Fotos y video de Pixabay", ayuda: "Gratis en pixabay.com/api/docs", grupo: "imagenes" },
+  COVERR_API_KEY: { label: "Video de Coverr", ayuda: "Gratis en coverr.co/developers", grupo: "imagenes" },
+  GIPHY_API_KEY: { label: "GIFs de GIPHY", ayuda: "Gratis en developers.giphy.com", grupo: "imagenes" },
+  FAL_KEY: { label: "IA de imágenes (fal.ai)", ayuda: "De pago, se cobra por imagen generada. fal.ai/dashboard/keys", grupo: "imagenes" },
   PEXELS_API_KEY: {
     label: "Fotos de Pexels",
     ayuda: "Permite buscar fotos de stock en Pexels para los carruseles.",

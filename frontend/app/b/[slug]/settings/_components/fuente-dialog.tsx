@@ -27,19 +27,23 @@ import { ApiError } from "@/lib/api";
 import { fuenteLabel } from "@/lib/fuentes";
 import { useCrearSource, type SourceKind } from "@/hooks/use-sources";
 
-// src/fuentes.py::PROVIDERS_IMAGEN/PROVIDERS_INFO — catálogo real por kind.
-// ig_accounts es de kind "imagen" (alimenta la cascada de imágenes vía
-// scraping de posts), no "info". "manual" no existe como provider.
+// src/fuentes.py::PROVIDERS_* — catálogo real por kind. ig_accounts es de kind
+// "imagen" (alimenta la cascada vía scraping de posts), no "info".
+// Pinterest sigue en el backend (slideshow v1) pero ya no se ofrece: su scraping
+// no es estable. ig_seguidos lo agrega el plan 5.
 const PROVIDERS: Record<SourceKind, string[]> = {
-  imagen: ["carpeta", "ig_accounts", "pinterest", "pexels", "unsplash", "banco", "covers"],
+  imagen: ["carpeta", "pexels", "unsplash", "pixabay", "openverse", "giphy",
+           "ig_accounts", "banco", "covers", "ia_imagen"],
   info: ["rss", "newsapi"],
+  video: ["carpeta", "pexels", "pixabay", "coverr", "giphy"],
 };
 
 // Providers sin esquema de config estricto en el backend (validar_config
 // los deja pasar con cualquier dict); se dejan sin campos por ahora, el
 // resto (rss/ig_accounts/newsapi) sí se valida server-side y se construye
 // a mano abajo.
-const SIN_CONFIG_ESTRICTA = new Set(["carpeta", "pinterest", "pexels", "unsplash", "banco", "covers"]);
+const SIN_CONFIG_ESTRICTA = new Set(["carpeta", "pinterest", "pexels", "unsplash", "banco",
+  "covers", "pixabay", "openverse", "coverr", "giphy", "ia_imagen"]);
 
 interface EstadoConfig {
   urls: string; // rss: una URL por línea → config.urls: string[]
@@ -150,7 +154,7 @@ export function FuenteDialog({ slug, kind }: { slug: string; kind: SourceKind })
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Nueva fuente de {kind === "imagen" ? "imagen" : "información"}</DialogTitle>
+          <DialogTitle>Nueva fuente de {{ imagen: "imagen", info: "información", video: "video" }[kind]}</DialogTitle>
           <DialogDescription>Elige el proveedor y completa su configuración.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -175,6 +179,13 @@ export function FuenteDialog({ slug, kind }: { slug: string; kind: SourceKind })
               </SelectContent>
             </Select>
           </div>
+
+          {provider === "ia_imagen" && (
+            <p className="text-xs text-amber-600">
+              De pago: cada búsqueda genera hasta 4 imágenes con fal.ai y cobra a la llave FAL_KEY de
+              la marca. Solo corre cuando se pide «Generar con IA» en el editor.
+            </p>
+          )}
 
           {provider === "rss" && (
             <div className="space-y-2">

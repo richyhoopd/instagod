@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, del, get, patch, post, put } from "@/lib/api";
 
-export type SourceKind = "imagen" | "info";
+export type SourceKind = "imagen" | "info" | "video";
 
 // api/routers/fuentes_api.py::_resumen_fuente — brand_sources (src/db.py)
 // NO tiene columna "nombre": la fuente se identifica por provider (+ id),
@@ -29,6 +29,17 @@ export function useSources(slug: string, kind: SourceKind) {
   });
 }
 
+// Todas las fuentes de la marca (los tres kinds). El reordenamiento manda la
+// lista COMPLETA de ids al backend, así que la lista de un kind necesita los demás.
+export function useTodasSources(slug: string) {
+  return useQuery<Source[], ApiError>({
+    queryKey: ["sources", slug, "todas"],
+    queryFn: () => get<Source[]>(`/brands/${slug}/sources`),
+    enabled: !!slug,
+    retry: false,
+  });
+}
+
 export interface NuevaSource {
   kind: SourceKind;
   provider: string;
@@ -39,7 +50,7 @@ export function useCrearSource(slug: string) {
   const qc = useQueryClient();
   return useMutation<Source, ApiError, NuevaSource>({
     mutationFn: (datos) => post<Source>(`/brands/${slug}/sources`, datos),
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["sources", slug, vars.kind] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", slug] }),
   });
 }
 
@@ -57,7 +68,7 @@ export function useEditarSource(slug: string) {
       void kind;
       return patch<Source>(`/brands/${slug}/sources/${id}`, datos);
     },
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["sources", slug, vars.kind] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", slug] }),
   });
 }
 
@@ -65,22 +76,19 @@ export function useBorrarSource(slug: string) {
   const qc = useQueryClient();
   return useMutation<void, ApiError, { id: number; kind: SourceKind }>({
     mutationFn: ({ id }) => del<void>(`/brands/${slug}/sources/${id}`),
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["sources", slug, vars.kind] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", slug] }),
   });
 }
 
 // PUT /sources/orden (src/fuentes.py::reordenar) exige el set COMPLETO de
-// brand_sources de la marca (los dos kinds juntos, ver ValueError("ids") si
+// brand_sources de la marca (todos los kinds juntos, ver ValueError("ids") si
 // falta/sobra alguno) — por eso el caller arma `ids` con TODAS las fuentes,
-// no solo las del kind visible, y por eso acá invalidamos ambos kinds.
+// no solo las del kind visible; la invalidación por prefijo cubre todos los kinds.
 export function useOrdenarSources(slug: string) {
   const qc = useQueryClient();
   return useMutation<void, ApiError, { ids: number[] }>({
     mutationFn: ({ ids }) => put<void>(`/brands/${slug}/sources/orden`, { ids }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["sources", slug, "imagen"] });
-      qc.invalidateQueries({ queryKey: ["sources", slug, "info"] });
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources", slug] }),
   });
 }
 
