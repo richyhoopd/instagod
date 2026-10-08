@@ -419,7 +419,7 @@ CREATE TABLE IF NOT EXISTS brand_sources (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     kind        TEXT NOT NULL,            -- 'imagen' | 'info' | 'video'
-    provider    TEXT NOT NULL,            -- imagen: carpeta|ig_accounts|pinterest|pexels|unsplash|banco|covers ; info: rss|newsapi
+    provider    TEXT NOT NULL,            -- imagen: carpeta|ig_accounts|pinterest|pexels|unsplash|banco|covers|pixabay|openverse|giphy|ia_imagen ; video: carpeta|pexels|pixabay|coverr|giphy ; info: rss|newsapi|reddit
     config_json TEXT,
     activa      INTEGER NOT NULL DEFAULT 1,
     orden       INTEGER NOT NULL DEFAULT 0,

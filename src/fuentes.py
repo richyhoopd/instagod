@@ -13,13 +13,16 @@ import re
 
 from src import db, topics
 
-PROVIDERS_IMAGEN = ("carpeta", "ig_accounts", "pinterest", "pexels", "unsplash", "banco", "covers")
+PROVIDERS_IMAGEN = ("carpeta", "ig_accounts", "pinterest", "pexels", "unsplash", "banco", "covers",
+                    "pixabay", "openverse", "giphy", "ia_imagen")
+# Editor v2 (plan 3): fuentes de video del panel de assets. 'ig_seguidos' lo agrega el plan 5.
+PROVIDERS_VIDEO = ("carpeta", "pexels", "pixabay", "coverr", "giphy")
 # 'reddit' (motor de video, spec 2026-10-01): historias narrables vía el RSS
 # público de un subreddit. Mismo kind='info' que rss/newsapi: alimenta
 # `topic_suggestions`, pero su `resumen` trae la historia completa.
 PROVIDERS_INFO = ("rss", "newsapi", "reddit")
 
-_CATALOGO = {"imagen": PROVIDERS_IMAGEN, "info": PROVIDERS_INFO}
+_CATALOGO = {"imagen": PROVIDERS_IMAGEN, "info": PROVIDERS_INFO, "video": PROVIDERS_VIDEO}
 
 # Ruta de fuente de Reddit: path relativo (no URL) para que el host quede
 # fijado en `topics.fetch_reddit` y una fuente no pueda redirigir el fetch.

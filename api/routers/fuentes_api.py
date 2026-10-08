@@ -101,7 +101,8 @@ def _fuente_de_marca(cx, account_id: int, sid: int) -> dict:
 
 
 _MOTIVO_KEY = {"pexels": "PEXELS_API_KEY", "unsplash": "UNSPLASH_ACCESS_KEY",
-               "newsapi": "NEWSAPI_KEY"}
+               "newsapi": "NEWSAPI_KEY", "pixabay": "PIXABAY_API_KEY",
+               "coverr": "COVERR_API_KEY", "giphy": "GIPHY_API_KEY", "ia_imagen": "FAL_KEY"}
 
 
 def estado_fuentes(slug: str) -> dict[str, dict]:
@@ -111,7 +112,8 @@ def estado_fuentes(slug: str) -> dict[str, dict]:
     creds = config.account_creds(slug)
     out: dict[str, dict] = {}
     for prov in ("pexels", "unsplash", "pinterest", "newsapi", "rss", "banco",
-                 "covers", "carpeta", "ig_accounts", "manual"):
+                 "covers", "carpeta", "ig_accounts", "manual",
+                 "pixabay", "openverse", "coverr", "giphy", "ia_imagen"):
         motivo = None
         if prov in config.FUENTES_NO_DISPONIBLES:
             motivo = "no disponible en este servidor"

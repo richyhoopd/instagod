@@ -471,6 +471,7 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
 _BRAND_SOURCES_REBUILD_COLS = ("id", "account_id", "kind", "provider", "config_json", "activa",
                                "orden", "ultimo_run", "ultimo_error", "created_at")
 
+# kind: 'imagen' | 'info' | 'video'. Providers por kind: ver src/fuentes.py (PROVIDERS_*).
 _BRAND_SOURCES_REBUILD_DDL = """
 CREATE TABLE brand_sources_new (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
