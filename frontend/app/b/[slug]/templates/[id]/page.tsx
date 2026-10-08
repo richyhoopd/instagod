@@ -15,6 +15,7 @@ import { useEditor } from "@/stores/editor";
 import { BarraSuperior } from "./_components/barra-superior";
 import { DialogoVersiones } from "./_components/dialogo-versiones";
 import { Lienzo } from "./_components/lienzo";
+import { PanelAssets } from "./_components/panel-assets";
 import { PanelCapas } from "./_components/panel-capas";
 import { PanelLateral } from "./_components/panel-lateral";
 import { camposDeContrato, PanelPropiedades } from "./_components/panel-propiedades";
@@ -34,6 +35,7 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
   const activarMut = useActivarDiseno(slug, disenoId);
   const listo = useEditor((s) => s.escena !== null);
   const colorMarca = marcaQuery.data?.color_marca ?? "#000000";
+  const puedeAssets = !!marcaQuery.data && marcaQuery.data.rol !== "editor";
 
   // Se siembra una sola vez por diseño: un refetch en segundo plano no puede
   // pisar lo que la persona lleva acomodado.
@@ -197,7 +199,15 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
       />
       <div className="flex min-h-0 flex-1 gap-3">
         <aside className="w-60 shrink-0 overflow-hidden rounded-lg border">
-          <PanelLateral pestanas={[{ id: "capas", etiqueta: "Capas", contenido: <PanelCapas /> }]} />
+          <PanelLateral
+            pestanas={[
+              { id: "capas", etiqueta: "Capas", contenido: <PanelCapas /> },
+              // Los endpoints de assets exigen rol manager: sin él, la pestaña no se ofrece.
+              ...(puedeAssets
+                ? [{ id: "assets", etiqueta: "Assets", contenido: <PanelAssets slug={slug} puedeEditar /> }]
+                : []),
+            ]}
+          />
         </aside>
         <div className="min-w-0 flex-1 overflow-hidden rounded-lg border bg-muted/40">
           <Lienzo slug={slug} colorMarca={colorMarca} />
