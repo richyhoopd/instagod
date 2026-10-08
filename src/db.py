@@ -112,6 +112,11 @@ TABLES: dict[str, set[str]] = {
         "account_id", "kind", "provider", "config_json", "activa", "orden",
         "ultimo_run", "ultimo_error",
     },
+    "brand_assets": {
+        "account_id", "tipo", "archivo", "sha", "proveedor", "autor", "licencia",
+        "url_origen", "ig_handle", "source_post_id", "ancho", "alto", "tags_json",
+        "recorte_archivo", "usada", "descartada",
+    },
     "topic_suggestions": {
         "account_id", "titulo", "resumen", "url", "fuente", "publicado_en",
         "usado_en_queue_id", "descartado",
@@ -461,6 +466,72 @@ def _migrar_check_tipo_queue(cx: sqlite3.Connection) -> None:
     finally:
         cx.execute("PRAGMA foreign_keys=ON")
 
+# DDL de destino de brand_sources (kind admite 'video'). Copia de schema.sql con
+# el nombre _new: si cambia una columna allá, se cambia aquí también.
+_BRAND_SOURCES_REBUILD_COLS = ("id", "account_id", "kind", "provider", "config_json", "activa",
+                               "orden", "ultimo_run", "ultimo_error", "created_at")
+
+_BRAND_SOURCES_REBUILD_DDL = """
+CREATE TABLE brand_sources_new (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    config_json TEXT,
+    activa      INTEGER NOT NULL DEFAULT 1,
+    orden       INTEGER NOT NULL DEFAULT 0,
+    ultimo_run  TEXT,
+    ultimo_error TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (kind IN ('imagen','info','video')), CHECK (activa IN (0,1))
+)
+"""
+
+
+def _migrar_check_kind_sources(cx: sqlite3.Connection) -> None:
+    """Ensancha CHECK(kind) de brand_sources para aceptar 'video' (editor v2).
+
+    Mismo procedimiento que `_migrar_check_tipo_queue`: reconstruir la tabla con
+    foreign_keys=OFF, copiar, renombrar, recrear el índice y validar las FK antes
+    del COMMIT. Idempotente: si el SQL ya trae 'video' es no-op.
+    """
+    row = cx.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='brand_sources'"
+    ).fetchone()
+    if row is None or "'video'" in row[0]:
+        return
+    viejas = {r[1] for r in cx.execute("PRAGMA table_info(brand_sources)")}
+    huerfanas = viejas - set(_BRAND_SOURCES_REBUILD_COLS)
+    if huerfanas:
+        raise RuntimeError(f"brand_sources tiene columnas que el rebuild perdería: "
+                           f"{sorted(huerfanas)}; agrégalas a _BRAND_SOURCES_REBUILD_COLS")
+    col_list = ", ".join(c for c in _BRAND_SOURCES_REBUILD_COLS if c in viejas)
+
+    cx.commit()  # PRAGMA foreign_keys no surte efecto dentro de una transacción
+    cx.execute("PRAGMA foreign_keys=OFF")
+    try:
+        cx.execute("BEGIN")
+        cx.execute(_BRAND_SOURCES_REBUILD_DDL)
+        cx.execute(f"INSERT INTO brand_sources_new ({col_list}) "
+                   f"SELECT {col_list} FROM brand_sources")
+        cx.execute("DROP TABLE brand_sources")
+        cx.execute("ALTER TABLE brand_sources_new RENAME TO brand_sources")
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_sources_account ON brand_sources(account_id)")
+        violaciones = cx.execute("PRAGMA foreign_key_check").fetchall()
+        if violaciones:
+            raise RuntimeError(f"foreign_key_check falló tras el rebuild de "
+                               f"brand_sources: {[tuple(v) for v in violaciones]}")
+        cx.execute("COMMIT")
+    except BaseException:
+        try:
+            cx.execute("ROLLBACK")
+        except sqlite3.OperationalError:
+            pass
+        raise
+    finally:
+        cx.execute("PRAGMA foreign_keys=ON")
+
+
 # DDL de destino de brand_templates. Copia literal de src/schema.sql con el
 # nombre _new: si cambia una columna allá, se cambia aquí también.
 _BRAND_TEMPLATES_REBUILD_DDL = """
@@ -577,6 +648,7 @@ def init_db(cx: sqlite3.Connection) -> None:
             if col not in existentes:
                 cx.execute(f"ALTER TABLE {tabla} ADD COLUMN {col} {ddl}")
     _migrar_check_tipo_queue(cx)
+    _migrar_check_kind_sources(cx)
     _migrar_check_aspecto_templates(cx)
     # Multi-cuenta Fase A: seed de la cuenta original e índices post-migración
     # (los índices van aquí y no en schema.sql: en DBs viejas la columna

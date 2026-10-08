@@ -418,7 +418,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_account ON jobs(account_id);
 CREATE TABLE IF NOT EXISTS brand_sources (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL,            -- 'imagen' | 'info'
+    kind        TEXT NOT NULL,            -- 'imagen' | 'info' | 'video'
     provider    TEXT NOT NULL,            -- imagen: carpeta|ig_accounts|pinterest|pexels|unsplash|banco|covers ; info: rss|newsapi
     config_json TEXT,
     activa      INTEGER NOT NULL DEFAULT 1,
@@ -426,7 +426,7 @@ CREATE TABLE IF NOT EXISTS brand_sources (
     ultimo_run  TEXT,
     ultimo_error TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (kind IN ('imagen','info')), CHECK (activa IN (0,1))
+    CHECK (kind IN ('imagen','info','video')), CHECK (activa IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_sources_account ON brand_sources(account_id);
 
@@ -562,3 +562,31 @@ CREATE TABLE IF NOT EXISTS brand_fonts (
     creado_en  TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (account_id, familia)
 );
+
+-- Biblioteca de assets por marca (editor v2, plan 3). `archivo` es el nombre
+-- dentro de data/brands/<slug>/assets/. Dedup por (account_id, sha).
+CREATE TABLE IF NOT EXISTS brand_assets (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    tipo            TEXT    NOT NULL,
+    archivo         TEXT    NOT NULL,
+    sha             TEXT    NOT NULL,
+    proveedor       TEXT    NOT NULL,
+    autor           TEXT,
+    licencia        TEXT,
+    url_origen      TEXT,
+    ig_handle       TEXT,
+    source_post_id  TEXT,
+    ancho           INTEGER,
+    alto            INTEGER,
+    tags_json       TEXT,
+    recorte_archivo TEXT,
+    usada           INTEGER NOT NULL DEFAULT 0,
+    descartada      INTEGER NOT NULL DEFAULT 0,
+    creado_en       TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, sha),
+    CHECK (tipo IN ('imagen','video')),
+    CHECK (usada IN (0,1)),
+    CHECK (descartada IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_assets_account ON brand_assets(account_id, tipo);

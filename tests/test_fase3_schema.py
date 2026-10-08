@@ -36,7 +36,7 @@ def test_brand_sources_check_kind(tmp_path) -> None:
     db.insert(cx, "brand_sources", account_id=1, kind="imagen", provider="pexels")
     db.insert(cx, "brand_sources", account_id=1, kind="info", provider="rss")
     with pytest.raises(sqlite3.IntegrityError):
-        db.insert(cx, "brand_sources", account_id=1, kind="video", provider="pexels")
+        db.insert(cx, "brand_sources", account_id=1, kind="audio", provider="pexels")
 
 
 def test_brand_sources_indice_account(tmp_path) -> None:
