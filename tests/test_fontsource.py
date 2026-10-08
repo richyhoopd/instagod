@@ -140,3 +140,39 @@ def test_api_tipografias_errores_de_origen(api_cliente, tmp_path, monkeypatch) -
     monkeypatch.setattr(biblioteca, "descargar", cdn_caido)
     r = cli.post("/brands/m1/tipografias", json={"id": "bebas-neue"})
     assert r.status_code == 502 and r.json()["detalle"].startswith("descarga falló")
+
+
+def test_forma_invalida_no_se_cachea(cx, monkeypatch) -> None:
+    monkeypatch.setattr(base, "get_json", lambda url, **k: {"error": "x"})
+    with pytest.raises(biblioteca.AssetInvalido, match="respuesta inválida"):
+        fontsource.catalogo("")
+    assert not (assets.CACHE_DIR / "fontsource" / "catalogo.json").exists()
+    assert list((assets.CACHE_DIR / "fontsource").glob("*")) == []
+
+
+def test_cache_con_entradas_sin_llaves_se_regenera(cx, api) -> None:
+    ruta = assets.CACHE_DIR / "fontsource" / "catalogo.json"
+    ruta.parent.mkdir(parents=True)
+    ruta.write_text(json.dumps([{"id": "x"}]))
+    assert len(fontsource.catalogo("")) == 2
+    assert api == ["https://api.fontsource.org/v1/fonts"]
+
+
+def test_url_no_str_en_variante(cx, monkeypatch) -> None:
+    aid = db.insert(cx, "accounts", slug="m1", ig_handle="@m1", nombre="M1", ciudad="GDL")
+    info = json.loads((FIX / "fontsource_bebas.json").read_text())
+    info["variants"]["400"]["normal"]["latin"]["url"]["ttf"] = 123
+    monkeypatch.setattr(base, "get_json", lambda url, **k: info)
+    with pytest.raises(biblioteca.AssetInvalido, match="respuesta inválida"):
+        fontsource.instalar(cx, aid, "m1", "bebas-neue", 400)
+
+
+def test_api_catalogo_forma_invalida_es_502(api_cliente, tmp_path, monkeypatch) -> None:
+    cli, cx, H = api_cliente
+    monkeypatch.setattr(assets, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(base, "get_json", lambda url, **k: {"x": 1})
+    aid = db.insert(cx, "accounts", slug="m1", ig_handle="@m1", nombre="M1", ciudad="GDL")
+    H.login(H.usuario("man@x.com", marcas=[(aid, "manager")]))
+    r = cli.get("/brands/m1/tipografias/catalogo")
+    assert r.status_code == 502 and r.json()["detalle"].startswith("descarga falló")
+    assert not (tmp_path / "cache" / "fontsource" / "catalogo.json").exists()

@@ -67,7 +67,7 @@ def _exigir_slug(slug: str) -> None:
         raise AssetInvalido("marca inválida")
 
 
-def _exigir_cuenta(cx, account_id: int, slug: str) -> None:
+def exigir_cuenta(cx, account_id: int, slug: str) -> None:
     """slug válido Y perteneciente a account_id, antes de tocar disco o red."""
     _exigir_slug(slug)
     filas = db.rows(cx, "SELECT 1 FROM accounts WHERE id = ? AND slug = ?", (account_id, slug))
@@ -173,7 +173,7 @@ def _dims_imagen(datos: bytes) -> tuple[int, int]:
 def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: str,
                   meta: dict | None = None, tags: list[str] | None = None
                   ) -> tuple[dict, bool]:
-    _exigir_cuenta(cx, account_id, slug)
+    exigir_cuenta(cx, account_id, slug)
     detectado = tipo_de_bytes(datos[:16])
     if detectado is None:
         raise AssetInvalido("formato no soportado (jpg, png, webp, gif, mp4, webm)")
@@ -229,7 +229,7 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
 
 
 def _importar_local(cx, account_id: int, slug: str, cand: Candidata, tags) -> dict:
-    _exigir_cuenta(cx, account_id, slug)
+    exigir_cuenta(cx, account_id, slug)
     carpeta, _, nombre = cand.url[len("local:"):].partition("/")
     if carpeta == "assets":
         _ruta(slug, nombre)  # valida el nombre
@@ -255,7 +255,7 @@ def _importar_local(cx, account_id: int, slug: str, cand: Candidata, tags) -> di
 
 def importar(cx, account_id: int, slug: str, cand: Candidata, *,
              tags: list[str] | None = None) -> dict:
-    _exigir_cuenta(cx, account_id, slug)
+    exigir_cuenta(cx, account_id, slug)
     if cand.url.startswith("local:"):
         return _importar_local(cx, account_id, slug, cand, tags)
     if cand.proveedor == "carpeta":   # carpeta es solo local: jamás sale a la red

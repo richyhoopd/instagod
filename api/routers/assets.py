@@ -157,6 +157,8 @@ def catalogo_tipografias(slug: str, q: str = Query("", max_length=60),
         return fontsource.catalogo(q)
     except requests.RequestException as e:
         raise ApiError(502, "origen", "Fontsource no respondió") from e
+    except biblioteca.AssetInvalido as e:
+        raise ApiError(502, "origen", str(e)[:200]) from e
 
 
 @router.post("/tipografias", status_code=201)
@@ -172,6 +174,7 @@ def instalar_tipografia(slug: str, datos: TipografiaIn, user: dict = Depends(usu
     except biblioteca.AssetInvalido as e:
         if str(e).startswith("descarga falló"):
             raise ApiError(502, "origen", str(e)[:200]) from e
-        raise ApiError(422, "validacion", str(e)[:200], "id") from e
+        campo = "slug" if "marca" in str(e) else "id"
+        raise ApiError(422, "validacion", str(e)[:200], campo) from e
     except ValueError as e:
         raise ApiError(422, "validacion", str(e)[:200], "id") from e

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 
 from src import assets
@@ -22,18 +23,37 @@ _TOPE = 5 * 1024 * 1024
 _MAGIC_TTF = (b"\x00\x01\x00\x00", b"OTTO", b"true")
 
 
+_INVALIDA = "descarga falló: respuesta inválida de fontsource"
+
+
+def _forma_valida(datos) -> bool:
+    return isinstance(datos, list) and all(
+        isinstance(f, dict) and isinstance(f.get("id"), str) and isinstance(f.get("family"), str)
+        for f in datos)
+
+
 def _lista() -> list[dict]:
     ruta = assets.CACHE_DIR / "fontsource" / "catalogo.json"
     if ruta.is_file() and time.time() - ruta.stat().st_mtime < _TTL:
         try:
-            return json.loads(ruta.read_text())
+            datos = json.loads(ruta.read_text())
+            if _forma_valida(datos):
+                return datos
         except ValueError:
-            pass  # caché corrupta: se vuelve a pedir
+            pass  # caché corrupta o de otra forma: se vuelve a pedir
     datos = base.get_json(_API, params={"subsets": "latin", "type": "google"})
+    if not _forma_valida(datos):
+        raise biblioteca.AssetInvalido(_INVALIDA)
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ruta.with_name(ruta.name + ".part")
-    tmp.write_text(json.dumps(datos))
-    os.replace(tmp, ruta)
+    fd, tmp = tempfile.mkstemp(dir=ruta.parent, suffix=".part")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(datos, f)
+        os.replace(tmp, ruta)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     return datos
 
 
@@ -57,12 +77,14 @@ def detalle(fid: str) -> dict:
 
 
 def instalar(cx, account_id: int, slug: str, fid: str, peso: int = 400) -> dict:
-    biblioteca._exigir_cuenta(cx, account_id, slug)
+    biblioteca.exigir_cuenta(cx, account_id, slug)
     info = detalle(fid)
     try:
         url = info["variants"][str(int(peso))]["normal"]["latin"]["url"]["ttf"]
     except (KeyError, TypeError) as e:
         raise ValueError("esa tipografía no tiene ese peso en latin normal") from e
+    if not isinstance(url, str):
+        raise biblioteca.AssetInvalido(_INVALIDA)
     familia = str(info.get("family") or fid)
     if not _FAMILIA_RE.match(familia):
         raise ValueError("nombre de tipografía no admitido")
