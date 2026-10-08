@@ -70,3 +70,67 @@ def test_carpeta_busca_en_biblioteca_y_fotos(cx, tmp_path) -> None:
 def test_brands_dir_coincide_con_image_sources() -> None:
     from src import image_sources
     assert assets.BRANDS_DIR == image_sources.BRANDS_DIR
+
+
+FAKE = "sk-FAKE-123456"
+
+
+class _Resp:
+    status_code = 403
+
+    def raise_for_status(self):
+        import requests
+        raise requests.HTTPError(f"403 Client Error for url: https://api.x.com/v1?key={FAKE}",
+                                 response=self)
+
+
+@pytest.mark.parametrize("llamada", [
+    lambda: base.get_json("https://api.x.com/v1", params={"key": FAKE}),
+    lambda: base.post_json("https://api.x.com/v1?key=" + FAKE, json_body={}),
+    lambda: base.enviar("GET", "https://api.x.com/v1?key=" + FAKE),
+])
+def test_http_4xx_no_filtra_la_llave(monkeypatch, llamada) -> None:
+    import requests
+    for m in ("get", "post", "request"):
+        monkeypatch.setattr(requests, m, lambda *a, **k: _Resp())
+    with pytest.raises(requests.RequestException) as e:
+        llamada()
+    assert FAKE not in str(e.value) and FAKE not in repr(e.value)
+    assert "403" in str(e.value) and "api.x.com" in str(e.value)
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+
+
+@pytest.mark.parametrize("llamada", [
+    lambda: base.get_json("https://api.x.com/v1?key=" + FAKE),
+    lambda: base.post_json("https://api.x.com/v1?key=" + FAKE, json_body={}),
+    lambda: base.enviar("POST", "https://api.x.com/v1?key=" + FAKE),
+])
+def test_error_de_conexion_no_filtra_la_llave(monkeypatch, llamada) -> None:
+    import requests
+
+    def boom(*a, **k):
+        raise requests.ConnectionError(f"HTTPSConnectionPool: url: /v1?key={FAKE}")
+    for m in ("get", "post", "request"):
+        monkeypatch.setattr(requests, m, boom)
+    with pytest.raises(requests.RequestException) as e:
+        llamada()
+    assert FAKE not in str(e.value) and "api.x.com" in str(e.value)
+
+
+@pytest.mark.parametrize("slug", ["", "..", "a", "A/../x", "m1/../../x"])
+def test_carpeta_slug_invalido_devuelve_vacio(cx, tmp_path, slug) -> None:
+    (tmp_path / "brands" / "fotos").mkdir(parents=True)
+    (tmp_path / "brands" / "fotos" / "playa.jpg").write_bytes(b"x")
+    p = Carpeta(cx=cx, account_id=1, slug=slug, creds={}, config={})
+    assert p.buscar("playa") == []
+
+
+def test_carpeta_ignora_symlinks_y_directorios(cx, tmp_path) -> None:
+    fotos = tmp_path / "brands" / "m1" / "fotos"
+    fotos.mkdir(parents=True)
+    (fotos / "playa-ok.jpg").write_bytes(b"x")
+    (fotos / "playa-dir.jpg").mkdir()
+    (tmp_path / "secreto.jpg").write_bytes(b"x")
+    (fotos / "playa-link.jpg").symlink_to(tmp_path / "secreto.jpg")
+    p = Carpeta(cx=cx, account_id=1, slug="m1", creds={}, config={})
+    assert [c.id_origen for c in p.buscar("playa")] == ["playa-ok.jpg"]

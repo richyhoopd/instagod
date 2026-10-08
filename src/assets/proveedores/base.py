@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -16,25 +17,46 @@ class SinLlave(Exception):
     """Falta la API key del proveedor. args[0] = nombre de la variable."""
 
 
+class ErrorHttp(requests.RequestException):
+    """Error HTTP/red ya saneado: solo estado y host, nunca la query (lleva API keys)."""
+
+
+def _sanear(exc: requests.RequestException, url: str) -> ErrorHttp:
+    host = urlsplit(url).hostname or "?"
+    resp = getattr(exc, "response", None)
+    estado = getattr(resp, "status_code", None)
+    detalle = f"HTTP {estado}" if estado is not None else type(exc).__name__
+    return ErrorHttp(f"{detalle} en {host}")
+
+
 def get_json(url: str, *, params: dict | None = None, headers: dict | None = None) -> Any:
-    r = requests.get(url, params=params, headers={"User-Agent": UA, **(headers or {})},
-                     timeout=TIMEOUT)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get(url, params=params, headers={"User-Agent": UA, **(headers or {})},
+                         timeout=TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        raise _sanear(e, url) from None
 
 
 def post_json(url: str, *, json_body: dict, headers: dict | None = None) -> Any:
-    r = requests.post(url, json=json_body, headers={"User-Agent": UA, **(headers or {})},
-                      timeout=TIMEOUT * 4)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.post(url, json=json_body, headers={"User-Agent": UA, **(headers or {})},
+                          timeout=TIMEOUT * 4)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        raise _sanear(e, url) from None
 
 
 def enviar(metodo: str, url: str, *, headers: dict | None = None) -> None:
     """Pings de tracking (descarga de Unsplash, stats de Coverr). Sin cuerpo."""
-    r = requests.request(metodo, url, headers={"User-Agent": UA, **(headers or {})},
-                         timeout=TIMEOUT)
-    r.raise_for_status()
+    try:
+        r = requests.request(metodo, url, headers={"User-Agent": UA, **(headers or {})},
+                             timeout=TIMEOUT)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise _sanear(e, url) from None
 
 
 class Proveedor:

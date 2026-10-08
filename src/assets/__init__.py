@@ -18,6 +18,8 @@ CACHE_DIR = config.BASE_DIR / "data" / "cache" / "assets"
 
 
 # Fotos sueltas en brands/<slug>/fotos (v1): una sola definición, la importan carpeta y biblioteca.
+# Mismo patrón que api/routers/brands.py (_SLUG_RE).
+SLUG_RE = re.compile(r"^[a-z0-9_]{2,32}\Z")
 EXT_FOTO = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 NOMBRE_FOTO_RE = re.compile(r"^[a-z0-9_.-]+\Z")
 

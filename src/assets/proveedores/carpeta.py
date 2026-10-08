@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from src import assets, db
-from src.assets import EXT_FOTO, NOMBRE_FOTO_RE, Candidata
+from src.assets import EXT_FOTO, NOMBRE_FOTO_RE, SLUG_RE, Candidata
 from src.assets.proveedores.base import Proveedor
 
 
@@ -17,6 +17,8 @@ class Carpeta(Proveedor):
     tipos = ("imagen", "video")
 
     def buscar(self, q: str, *, tipo: str = "imagen", n: int = 20) -> list[Candidata]:
+        if not SLUG_RE.match(self.slug or ""):
+            return []
         toks = _tokens(q)
         filas = db.rows(self.cx, "SELECT * FROM brand_assets WHERE account_id = ? AND tipo = ? "
                                  "AND descartada = 0 ORDER BY id DESC LIMIT 500",
@@ -39,7 +41,7 @@ class Carpeta(Proveedor):
             carpeta = assets.BRANDS_DIR / self.slug / "fotos"
             if carpeta.is_dir():
                 for p in sorted(carpeta.iterdir()):
-                    if (p.suffix.lower() not in EXT_FOTO or not NOMBRE_FOTO_RE.match(p.name)
+                    if (not p.is_file() or p.is_symlink() or p.suffix.lower() not in EXT_FOTO or not NOMBRE_FOTO_RE.match(p.name)
                             or (toks and not any(t in p.name.lower() for t in toks))):
                         continue
                     out.append(Candidata(
