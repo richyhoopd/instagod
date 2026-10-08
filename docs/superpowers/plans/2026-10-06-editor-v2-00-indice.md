@@ -110,6 +110,13 @@ def pedir_herramienta(*, system: str, mensajes: list[dict], herramienta: dict,
 # config.DISENO_MODELO = os.getenv("DISENO_MODELO", "claude-sonnet-5-5")
 # src/plantillas/ops.py
 def aplicar(escena: dict, ops: list[dict]) -> dict     # misma semántica que aplicarOps de TS
+# src/plantillas/kinds/__init__.py
+KINDS: tuple[str, ...]   # side, stat, vs, compare, list, cta, meme, historia, cita, propiedad
+# src/plantillas/extraer.py
+def extraer(html: str, *, slug: str, tokens: dict, fuente: str) -> tuple[bytes, dict, dict]   # png, escena, muestras
+# src/plantillas/chat.py
+def crear(cx, marca, mensaje, *, formato="4x5", uso=None) -> tuple[dict, dict, dict]      # escena, contrato, meta
+def editar(cx, marca, escena, contrato, mensaje, *, uso=None) -> tuple[list, dict, dict]  # ops, escena, meta
 ```
 - Job `diseno.chat`. Resultado: `{"escena": {...}}` al crear y `{"ops": [...]}` al editar.
 
