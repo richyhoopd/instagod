@@ -12,6 +12,7 @@ import config
 from api.errors import ApiError, manejar_api_error
 from api.ratelimit import Limitador
 from api.routers import (
+    assets,
     auth,
     brands,
     cola,
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(posts.router)
     app.include_router(plantillas.router)
     app.include_router(fuentes_api.router)
+    app.include_router(assets.router)
     app.include_router(planes.router)
     app.include_router(lotes.router)
     return app
