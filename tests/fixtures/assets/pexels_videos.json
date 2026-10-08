@@ -1,0 +1,9 @@
+{"page": 1, "videos": [
+  {"id": 202, "width": 3840, "height": 2160, "url": "https://www.pexels.com/video/202/",
+   "image": "https://images.pexels.com/videos/202/thumb.jpeg", "user": {"name": "Marta"},
+   "video_files": [
+     {"quality": "uhd", "file_type": "video/mp4", "width": 3840, "height": 2160, "link": "https://videos.pexels.com/video-files/202/uhd.mp4"},
+     {"quality": "hd", "file_type": "video/mp4", "width": 1920, "height": 1080, "link": "https://videos.pexels.com/video-files/202/hd.mp4"},
+     {"quality": "sd", "file_type": "video/mp4", "width": 640, "height": 360, "link": "https://videos.pexels.com/video-files/202/sd.mp4"}
+   ]}
+]}

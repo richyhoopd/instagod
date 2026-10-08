@@ -71,3 +71,45 @@ def test_unsplash_mapea_y_registra_descarga(llamadas) -> None:
 def test_unsplash_sin_llave(llamadas) -> None:
     with pytest.raises(base.SinLlave):
         _prov("unsplash").buscar("x", tipo="imagen", n=5)
+
+
+def test_pexels_fotos(llamadas) -> None:
+    """Fixture pexels_fotos.json: forma del plan, sin verificar contra la API real (R8)."""
+    llamadas.resp = _grabado("pexels_fotos.json")
+    [c] = _prov("pexels", {"PEXELS_API_KEY": "PK"}).buscar("café", tipo="imagen", n=3)
+    assert c.url.endswith("w=1880") and c.preview_url.endswith("h=350")
+    assert (c.autor, c.ancho, c.alto, c.licencia) == ("Luis", 3000, 4000, "Pexels License")
+    metodo, url, params, headers = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://api.pexels.com/v1/search")
+    assert headers == {"Authorization": "PK"}
+    assert params == {"query": "café", "per_page": 3}
+
+
+def test_pexels_video_elige_mp4_hasta_1920(llamadas) -> None:
+    """Fixture pexels_videos.json: forma del plan, sin verificar contra la API real (R8)."""
+    llamadas.resp = _grabado("pexels_videos.json")
+    [c] = _prov("pexels", {"PEXELS_API_KEY": "PK"}).buscar("ciudad", tipo="video", n=3)
+    assert c.tipo == "video" and c.url.endswith("/hd.mp4")
+    assert (c.ancho, c.alto) == (1920, 1080)
+    assert c.preview_url.endswith("thumb.jpeg")
+    metodo, url, _, headers = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://api.pexels.com/videos/search")
+    assert headers == {"Authorization": "PK"}
+
+
+def test_pexels_video_solo_archivos_grandes_toma_el_menor(llamadas) -> None:
+    """Dato sintético armado en el test (no es respuesta real)."""
+    arch = lambda w, h, n: {"file_type": "video/mp4", "width": w, "height": h,  # noqa: E731
+                            "link": f"https://videos.pexels.com/{n}.mp4"}
+    llamadas.resp = {"videos": [
+        {"id": 1, "video_files": [arch(3840, 2160, "uhd"), arch(2560, 1440, "qhd")]},
+        {"id": 2, "video_files": [{"file_type": "video/webm", "link": "x"}]},
+    ]}
+    [c] = _prov("pexels", {"PEXELS_API_KEY": "PK"}).buscar("x", tipo="video", n=3)
+    assert c.url.endswith("/qhd.mp4")
+
+
+def test_pexels_sin_llave(llamadas) -> None:
+    with pytest.raises(base.SinLlave):
+        _prov("pexels").buscar("x", tipo="imagen", n=5)
+    assert llamadas.hechas == []
