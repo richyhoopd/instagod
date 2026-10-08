@@ -8,16 +8,25 @@ export type TipoAsset = "imagen" | "video";
 
 // Todos estos endpoints exigen rol manager (api/routers/assets.py): `habilitado`
 // evita pedirlos como editor, que solo recibiría 403.
-export function useBuscarAssets(slug: string, q: string, tipo: TipoAsset,
-                                proveedores?: string[], habilitado = true) {
+export function useBuscarAssets(slug: string, q: string, tipo: TipoAsset, habilitado = true) {
   const params = new URLSearchParams({ q, tipo, n: "30" });
-  if (proveedores?.length) params.set("proveedores", proveedores.join(","));
   return useQuery<{ resultados: Candidata[]; avisos: string[] }, ApiError>({
-    queryKey: ["assets-buscar", slug, tipo, q, proveedores?.join(",") ?? ""],
+    queryKey: ["assets-buscar", slug, tipo, q],
     queryFn: () => get(`/brands/${slug}/assets/buscar?${params.toString()}`),
     enabled: habilitado && !!slug && q.trim().length >= 1,
     staleTime: 5 * 60_000,
     retry: false,
+  });
+}
+
+// Búsqueda de pago (fal.ai): mutación, no query. Una mutación solo corre por un
+// clic explícito; ningún remount, refoco ni expiración de caché la repite.
+export function useBuscarIaAssets(slug: string) {
+  return useMutation<{ resultados: Candidata[]; avisos: string[] }, ApiError, string>({
+    mutationFn: (q) => {
+      const params = new URLSearchParams({ q, tipo: "imagen", n: "30", proveedores: "ia_imagen" });
+      return get(`/brands/${slug}/assets/buscar?${params.toString()}`);
+    },
   });
 }
 

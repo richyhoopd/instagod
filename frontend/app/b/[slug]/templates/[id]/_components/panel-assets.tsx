@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import {
   type TipoAsset,
   useAssets,
   useBuscarAssets,
+  useBuscarIaAssets,
   useDescartarAsset,
   useImportarAsset,
   useRecorteAsset,
@@ -49,17 +51,22 @@ function Miniatura({ src, tipo, alt }: { src: string; tipo: TipoAsset; alt: stri
 function SeguimientoRecorte({ slug, jid, onFin }: {
   slug: string;
   jid: number;
-  onFin: (job: Job) => void;
+  onFin: (job: Job | null) => void;
 }) {
   const job = useJob(slug, jid);
   const avisado = useRef(false);
   useEffect(() => {
+    if (job.isError && !avisado.current) {
+      avisado.current = true;
+      onFin(null);
+      return;
+    }
     if (!job.data || avisado.current) return;
     if (job.data.estado === "ok" || job.data.estado === "error" || job.data.estado === "cancelado") {
       avisado.current = true;
       onFin(job.data);
     }
-  }, [job.data, onFin]);
+  }, [job.data, job.isError, onFin]);
   return <p className="mt-2 text-xs text-muted-foreground">Quitando el fondo…</p>;
 }
 
@@ -73,7 +80,10 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
   const [recorteJob, setRecorteJob] = useState<{ jid: number; asset: Asset } | null>(null);
   const archivoRef = useRef<HTMLInputElement>(null);
 
-  const busqueda = useBuscarAssets(slug, buscado, tipo, conIa ? ["ia_imagen"] : undefined, puedeEditar);
+  const qc = useQueryClient();
+  const busquedaGratis = useBuscarAssets(slug, buscado, tipo, puedeEditar && !conIa);
+  const busquedaIa = useBuscarIaAssets(slug);
+  const busqueda = conIa ? busquedaIa : busquedaGratis;
   const biblioteca = useAssets(slug, tipo, puedeEditar);
   const importar = useImportarAsset(slug);
   const subir = useSubirAsset(slug);
@@ -88,9 +98,13 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
     );
   }
 
-  function terminarRecorte(job: Job) {
+  function terminarRecorte(job: Job | null) {
     const origen = recorteJob?.asset;
     setRecorteJob(null);
+    if (!job) {
+      toast.error("Se perdió el seguimiento del recorte. Revisa la biblioteca en un momento.");
+      return;
+    }
     if (job.estado !== "ok") {
       toast.error("No se pudo quitar el fondo.");
       return;
@@ -100,7 +114,10 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
       toast.error("No se pudo leer el resultado del recorte.");
       return;
     }
-    agregarCapa(capaDesdeAsset({ ...origen, recorte_archivo: r.recorte_archivo }, escena, { recorte: true }));
+    void qc.invalidateQueries({ queryKey: ["assets", slug] });
+    agregarCapa(
+      capaDesdeAsset({ ...origen, recorte_archivo: r.recorte_archivo }, escena, { recorteSrc: r.src }),
+    );
     toast.success("Fondo quitado");
   }
 
@@ -123,7 +140,7 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
 
   return (
     <div className="flex h-full flex-col gap-3 p-3">
-      <Tabs value={tipo} onValueChange={(v) => setTipo(v as TipoAsset)}>
+      <Tabs value={tipo} onValueChange={(v) => { setTipo(v as TipoAsset); setConIa(false); }}>
         <TabsList className="w-full">
           <TabsTrigger value="imagen" className="flex-1">Fotos</TabsTrigger>
           <TabsTrigger value="video" className="flex-1">Video</TabsTrigger>
@@ -143,9 +160,9 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
           </form>
           <div className="flex flex-wrap gap-2">
             {tipo === "imagen" && (
-              <Button size="sm" variant="outline" disabled={q.trim().length < 2}
+              <Button size="sm" variant="outline" disabled={q.trim().length < 2 || busquedaIa.isPending}
                       title="De pago: solo si la marca activó la fuente IA"
-                      onClick={() => { setConIa(true); setBuscado(q.trim()); }}>
+                      onClick={() => { setConIa(true); setBuscado(q.trim()); busquedaIa.mutate(q.trim()); }}>
                 Generar con IA
               </Button>
             )}
@@ -181,7 +198,7 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
         {buscado && (
           <section>
             <h4 className="mb-2 text-xs font-medium text-muted-foreground">Resultados</h4>
-            {busqueda.isLoading && <Skeleton className="h-32 w-full" />}
+            {(conIa ? busquedaIa.isPending : busquedaGratis.isLoading) && <Skeleton className="h-32 w-full" />}
             {busqueda.isSuccess && resultados.length === 0 && (
               <p className="text-xs text-muted-foreground">Sin resultados.</p>
             )}

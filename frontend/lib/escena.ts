@@ -80,7 +80,7 @@ export type CapaImagen = CapaBase & {
   tipo: "image";
   src: string | null;
   campo?: string | null;
-  recorte?: { x: number; y: number; w: number; h: number } | null;
+  recorte?: boolean;
   ajuste: "cover" | "contain";
   mascara: string; // "none" | "circle" | "rounded:N"
   estilo: EstiloMedio;

@@ -38,11 +38,19 @@ describe("assets", () => {
     expect(c.y).toBe(513);
     expect(c.z).toBe(4);
     expect(c.anclaje).toBe("center");
+    expect(c.recorte).toBeUndefined();
     expect(c.fuente_asset).toEqual({ proveedor: "unsplash", autor: "Ana",
       licencia: "Unsplash License", url: "https://unsplash.com/p", ig_handle: null });
-    const r = capaDesdeAsset(asset, escena, { recorte: true }) as unknown as Record<string, unknown>;
+    const r = capaDesdeAsset(asset, escena, { recorteSrc: "assets/ab12-recorte.png" }) as unknown as Record<string, unknown>;
     expect(r.src).toBe("assets/ab12-recorte.png");
     expect(r.ajuste).toBe("contain");
+  });
+
+  it("z no pasa de 999 y url_origen larga se omite de fuente_asset", () => {
+    const alta = { ...escena, capas: [{ ...escena.capas[0], z: 999 }] } as unknown as Escena;
+    expect(capaDesdeAsset(asset, alta).z).toBe(999);
+    const larga = capaDesdeAsset({ ...asset, url_origen: "https://x.com/" + "a".repeat(500) }, escena);
+    expect((larga as unknown as { fuente_asset: { url: string | null } }).fuente_asset.url).toBeNull();
   });
 
   it("un asset de video produce capa de video", () => {
