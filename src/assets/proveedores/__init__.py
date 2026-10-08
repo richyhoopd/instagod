@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from src.assets.proveedores.base import Proveedor
 from src.assets.proveedores.carpeta import Carpeta
+from src.assets.proveedores.openverse import Openverse
 from src.assets.proveedores.pexels import Pexels
 from src.assets.proveedores.pixabay import Pixabay
 from src.assets.proveedores.unsplash import Unsplash
 
-PROVEEDORES: dict[str, type[Proveedor]] = {c.nombre: c for c in (Carpeta, Unsplash, Pexels, Pixabay)}
+_TODOS = (Carpeta, Unsplash, Pexels, Pixabay, Openverse)
+PROVEEDORES: dict[str, type[Proveedor]] = {c.nombre: c for c in _TODOS}

@@ -201,3 +201,34 @@ def test_pixabay_error_http_no_filtra_la_llave(tmp_path, monkeypatch) -> None:
         _prov("pixabay", {"PIXABAY_API_KEY": "SECRETO123"}).buscar("sol", tipo="imagen", n=5)
     assert "SECRETO123" not in str(e.value) and "pixabay.com" in str(e.value)
     assert not (tmp_path / "cache" / "pixabay").exists()
+
+
+def test_openverse_filtra_nd_y_mature(llamadas) -> None:
+    """Fixture openverse.json: forma del plan, sin verificar contra la API real (R8)."""
+    llamadas.resp = _grabado("openverse.json")
+    res = _prov("openverse").buscar("tacos", tipo="imagen", n=10)
+    assert [c.id_origen for c in res] == ["uuid-1"]
+    c = res[0]
+    assert c.licencia == "CC BY 4.0" and c.autor == "Juan"
+    assert c.url_origen == "https://www.flickr.com/photos/x/1"
+    metodo, url, params, headers = llamadas.hechas[0]
+    assert (metodo, url) == ("GET", "https://api.openverse.org/v1/images/")
+    assert params["license_type"] == "commercial" and "Authorization" not in headers
+    assert params["q"] == "tacos" and params["page_size"] == 10
+
+
+def test_openverse_licencias_libres_item_malformado_y_tipo(llamadas) -> None:
+    """Dato sintético armado en el test (no es respuesta real)."""
+    def r(i, lic, ver="1.0"):
+        return {"id": i, "url": f"https://x.org/{i}.jpg", "license": lic, "license_version": ver,
+                "mature": False}
+    llamadas.resp = {"results": [
+        None, {"url": "https://x.org/sin-id.jpg", "license": "by"}, {"id": "s", "license": "by"},
+        r("a", "cc0"), r("b", "pdm"), r("c", "by-sa", "3.0"), r("d", "by-nc-nd", "2.0"),
+        {"id": "e", "url": "https://x.org/e.jpg", "license": None}]}
+    p = _prov("openverse")
+    res = {c.id_origen: c.licencia for c in p.buscar("x", tipo="imagen", n=50)}
+    assert res == {"a": "CC0", "b": "Dominio público", "c": "CC BY-SA 3.0"}  # "e" sin licencia se descarta
+    assert llamadas.hechas[0][2]["page_size"] == 20  # tope de page_size
+    assert p.buscar("x", tipo="video", n=5) == []
+    assert len(llamadas.hechas) == 1

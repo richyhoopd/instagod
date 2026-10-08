@@ -1,0 +1,11 @@
+{"result_count": 3, "results": [
+  {"id": "uuid-1", "url": "https://live.staticflickr.com/1/a.jpg", "thumbnail": "https://api.openverse.org/v1/images/uuid-1/thumb/",
+   "width": 1024, "height": 768, "creator": "Juan", "license": "by", "license_version": "4.0",
+   "foreign_landing_url": "https://www.flickr.com/photos/x/1", "mature": false},
+  {"id": "uuid-2", "url": "https://upload.wikimedia.org/b.jpg", "thumbnail": "https://api.openverse.org/v1/images/uuid-2/thumb/",
+   "width": 800, "height": 600, "creator": "Eva", "license": "by-nd", "license_version": "2.0",
+   "foreign_landing_url": "https://commons.wikimedia.org/b", "mature": false},
+  {"id": "uuid-3", "url": "https://upload.wikimedia.org/c.jpg", "thumbnail": "https://api.openverse.org/v1/images/uuid-3/thumb/",
+   "width": 800, "height": 600, "creator": "Ivo", "license": "cc0", "license_version": "1.0",
+   "foreign_landing_url": "https://commons.wikimedia.org/c", "mature": true}
+]}
