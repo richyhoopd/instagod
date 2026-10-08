@@ -401,7 +401,9 @@ _ACCOUNT_CRED_KEYS = ("IG_USER_ID", "IG_ACCESS_TOKEN", "IG_SCRAPER_SESSIONID",
                       "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                       # Portal: LLM y APIs de imágenes/noticias por marca (opcionales)
                       "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL",
-                      "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY")
+                      "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY",
+                      # Editor v2 (plan 3): assets. FAL_KEY es de pago (ia_imagen).
+                      "PIXABAY_API_KEY", "COVERR_API_KEY", "GIPHY_API_KEY", "FAL_KEY")
 
 
 def _creds_db(slug: str) -> dict[str, str]:

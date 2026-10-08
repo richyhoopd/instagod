@@ -39,7 +39,8 @@ def api_cliente(tmp_path, monkeypatch):
                 "IG_SCRAPER_UA", "SHEET_ID",
                 "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                 "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL",
-                "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY"):
+                "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY",
+                "PIXABAY_API_KEY", "COVERR_API_KEY", "GIPHY_API_KEY", "FAL_KEY"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(config, "INSTAGOD_MASTER_KEY", None)
     monkeypatch.setattr(config, "APP_URL", "http://front.test")
