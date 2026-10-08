@@ -1,0 +1,7 @@
+{
+  "description": "Foto a media página de un lado y texto del otro. Para presentar un tema, un servicio o una persona.",
+  "properties": {
+    "lado": {"type": "string", "enum": ["izq", "der"], "default": "der", "description": "lado de la foto"}
+  },
+  "x-slots": [{"id": "imagen", "requerido": true}]
+}

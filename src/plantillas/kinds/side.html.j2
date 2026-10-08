@@ -1,0 +1,12 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% set posiciones_sticker = [(560, 1000, -6), (70, 940, 5), (560, 80, 6)] %}
+{% block capas %}
+{% set izq = spec.lado == "izq" %}
+{% set tx = 600 if izq else 80 %}
+{{ p.foto("imagen", a.imagen, 0 if izq else 540, 0, 540, 1350, campo="imagen") }}
+{% if spec.etiqueta %}{{ p.pill("etiqueta", spec.etiqueta, tx, 120, 400, t) }}{% endif %}
+{{ p.texto("titulo", "Título", tx, 230, 400, 72, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo", anclaje="center") }}
+{% if spec.bajada %}{{ p.texto("bajada", "Bajada", tx, 700, 400, 32, spec.bajada, clase="bajada", campo="bajada") }}{% endif %}
+{% if spec.cta %}{{ p.caja("cta", "Botón", tx, 1110, 400, 84, spec.cta, t.acento, t.sobre_acento, size=30, padding=16) }}{% endif %}
+{% endblock %}

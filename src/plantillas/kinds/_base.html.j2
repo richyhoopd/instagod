@@ -1,0 +1,22 @@
+{% import "_parciales.html.j2" as p %}
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+{{ font_faces|safe }}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1350px;background:transparent}
+.card{position:relative;width:1080px;height:1350px;overflow:hidden;background:{{ t.fondo }};
+  font-family:'{{ f.texto }}';color:{{ t.tinta }};-webkit-font-smoothing:antialiased;--acento:{{ t.acento }}}
+.card>[data-tipo]{position:absolute}
+.card>[data-tipo="text"],.card>[data-tipo="caja"]{white-space:pre-line}
+.titulo{font-family:'{{ f.titulo }}';font-weight:700;line-height:1.02;letter-spacing:-0.02em;color:{{ t.tinta }}}
+.bajada{font-size:36px;line-height:1.3;font-weight:600;color:{{ t.suave }}}
+.pill{font-size:28px;font-weight:600;line-height:1.2;padding:14px 28px;border-radius:999px;white-space:nowrap;text-align:center}
+{% block estilos %}{% endblock %}
+</style></head>
+<body><div class="card lienzo">
+{% block capas %}{% endblock %}
+{% set ps = posiciones_sticker if posiciones_sticker is defined else [(760, 96, 8), (90, 1120, -6), (700, 1140, 5)] %}
+{% for s in spec.stickers %}{% set q = ps[loop.index0] %}{{ p.sticker("sticker_" ~ loop.index0, s, q[0], q[1], q[2], t) }}{% endfor %}
+{{ p.pie(handle, logo, t) }}
+{% if spec.grano %}{{ p.grano() }}{% endif %}
+</div></body></html>

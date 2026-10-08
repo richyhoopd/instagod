@@ -1,0 +1,20 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% set posiciones_sticker = [(780, 70, 8), (60, 1110, -5), (760, 1110, 4)] %}
+{% block capas %}
+{% if spec.etiqueta %}{{ p.pill("etiqueta", spec.etiqueta, 80, 80, 400, t) }}{% endif %}
+{{ p.texto("titulo", "Título", 80, 170, 920, 70, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo", anclaje="top") }}
+{% set n = spec["items"]|length %}
+{% set ancho = (920 - (n - 1) * 24) // n %}
+{% for it in spec["items"] %}
+{% set x = 80 + loop.index0 * (ancho + 24) %}
+{{ p.shape("panel_" ~ loop.index0, "Panel", x, 360, ancho, 420, t.panel, "32px") }}
+{{ p.recorte("item_" ~ loop.index0, a["item_" ~ loop.index0], x + 20, 380, ancho - 40, 250, nombre=it.nombre) }}
+{{ p.texto("nombre_" ~ loop.index0, "Nombre", x + 16, 650, ancho - 32, 26, it.nombre, alinea="center", extra="font-weight:600;line-height:1.2;") }}
+{{ p.coin("precio_" ~ loop.index0, it.precio, x + ancho // 2 - 60, 720, 120, t.destacado, t.sobre_destacado, size=30) }}
+{% endfor %}
+{{ p.shape("oferta_fondo", "Oferta", 80, 880, 920, 300, t.acento, "40px") }}
+{{ p.texto("oferta_nombre", "Oferta", 130, 930, 560, 44, spec.oferta.nombre, clase="titulo", color=t.sobre_acento, valign="center") }}
+{{ p.coin("oferta_precio", spec.oferta.precio, 760, 910, 200, t.destacado, t.sobre_destacado, size=48) }}
+{% if spec.bajada %}{{ p.texto("bajada", "Bajada", 130, 1060, 600, 28, spec.bajada, clase="bajada", campo="bajada", color=t.sobre_acento) }}{% endif %}
+{% endblock %}
