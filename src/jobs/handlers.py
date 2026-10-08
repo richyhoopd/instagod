@@ -36,6 +36,8 @@ from src import (
     video_render,
 )
 from src import fuentes as fuentes_mod
+from src.assets import biblioteca as assets_biblioteca
+from src.assets import recorte as assets_recorte
 from src.image_sources import BRANDS_DIR
 from src.plantillas import contrato as contrato_mod
 from src.plantillas import disenador, fuentes_tipograficas, preview
@@ -741,6 +743,29 @@ def rerender_video(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any
     return {"queue_id": queue_id, "url": url}
 
 
+def asset_recorte(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """Quita el fondo de un asset de imagen de la marca del job.
+
+    payload: {asset_id}. El asset DEBE ser de job['account_id']: el router ya lo
+    valida, pero aquí se repite porque el job es la frontera que escribe a disco.
+    """
+    payload = json.loads(job["payload_json"] or "{}")
+    slug = _marca_de(cx, job["account_id"])
+    asset = db.get(cx, "brand_assets", int(payload["asset_id"]))
+    if asset is None or asset["account_id"] != job["account_id"]:
+        raise ValueError("el asset no existe en esta marca")
+    if asset["tipo"] != "imagen":
+        raise ValueError("solo se recortan imágenes")
+    jobs.progresar(cx, job["id"], 10, "Quitando el fondo")
+    nombre = asset["archivo"].rsplit(".", 1)[0] + "-recorte.png"
+    assets_recorte.quitar_fondo(assets_biblioteca.ruta_de(slug, asset["archivo"]),
+                                assets_biblioteca.ruta_de(slug, nombre))
+    db.update(cx, "brand_assets", asset["id"], recorte_archivo=nombre)
+    cx.commit()
+    jobs.progresar(cx, job["id"], 100, "listo")
+    return {"asset_id": asset["id"], "recorte_archivo": nombre, "src": f"assets/{nombre}"}
+
+
 HANDLERS = {
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
@@ -759,4 +784,5 @@ HANDLERS = {
     "lote.enviar": lote_enviar,
     "post.generar": generar_post,
     "post.rerender": rerender_post,
+    "asset.recorte": asset_recorte,
 }

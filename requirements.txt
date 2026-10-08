@@ -20,6 +20,7 @@ fastapi          # GUI local de curación (web/)
 uvicorn          # servidor de la GUI: uvicorn web.app:app
 python-multipart # forms HTML en FastAPI (edición inline de la GUI)
 rapidocr_onnxruntime  # OCR potente para flyers (Fase 5): lee tipografía artística
+rembg[cpu,cli]>=2.0.85  # editor v2: quitar fondo (BiRefNet); 2.0.85 es la que lee REMBG_HOME
 cryptography     # secretos por marca cifrados en DB (Fernet) — portal
 httpx            # cliente HTTP de la API (Resend) y TestClient
 email-validator  # EmailStr en la API

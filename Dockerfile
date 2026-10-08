@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    REMBG_HOME=/opt/rembg \
     TZ=America/Mexico_City
 
 # Dependencias de sistema: tesseract (OCR flyers), libGL/glib (OpenCV),
@@ -24,6 +25,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt \
     && playwright install --with-deps chromium \
+    && rembg d birefnet-general \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
@@ -33,7 +35,7 @@ COPY . .
 ARG APP_UID=1000
 RUN useradd -m -u ${APP_UID} instagod \
     && mkdir -p /app/data /app/out /app/secrets \
-    && chown -R instagod:instagod /app /ms-playwright
+    && chown -R instagod:instagod /app /ms-playwright /opt/rembg
 USER instagod
 
 EXPOSE 8100
