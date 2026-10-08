@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from src.assets import Candidata
 from src.assets.proveedores import PROVEEDORES, base
 
 FIX = Path(__file__).parent / "fixtures" / "assets"
@@ -423,3 +424,11 @@ def test_ia_imagen_error_http_no_filtra_la_llave(monkeypatch) -> None:
         _prov("ia_imagen", {"FAL_KEY": "FK-SECRETA"}).buscar("taco", n=2)
     assert "FK-SECRETA" not in str(e.value) and "FK-SECRETA" not in repr(e.value)
     assert str(e.value) == "HTTP 401 en fal.run"
+
+
+def test_unsplash_registrar_descarga_escapa_el_id(llamadas) -> None:
+    p = _prov("unsplash", {"UNSPLASH_ACCESS_KEY": "UK"})
+    c = Candidata("unsplash", "../x?y=1", "imagen", "https://images.unsplash.com/p", "", None,
+                  None, None, None, None)
+    p.registrar_descarga(c)
+    assert llamadas.hechas[-1][1] == "https://api.unsplash.com/photos/..%2Fx%3Fy%3D1/download"

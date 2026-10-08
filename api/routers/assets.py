@@ -66,8 +66,11 @@ def buscar_assets(slug: str, q: str = Query(..., min_length=1, max_length=200),
                   user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
     marca, _ = marca_para(slug, cx, user, minimo="manager")
     lista = [p.strip() for p in proveedores.split(",") if p.strip()] if proveedores else None
-    resultados, avisos = buscar.buscar_con_avisos(cx, marca["id"], marca["slug"], q, tipo=tipo,
-                                                  proveedores=lista, n=n)
+    try:
+        resultados, avisos = buscar.buscar_con_avisos(cx, marca["id"], marca["slug"], q,
+                                                      tipo=tipo, proveedores=lista, n=n)
+    except buscar.LimiteDiario as e:
+        raise ApiError(429, "limite_diario", str(e)) from e
     return {"resultados": [c.a_dict() for c in resultados], "avisos": avisos}
 
 
@@ -144,6 +147,13 @@ def recortar_asset(slug: str, aid: int, user: dict = Depends(usuario_actual),
         raise ApiError(422, "validacion", "Solo se puede quitar el fondo a imágenes", "tipo")
     if asset["descartada"]:
         raise ApiError(409, "conflicto", "El asset está descartado")
+    previo = cx.execute(
+        "SELECT id FROM jobs WHERE tipo = 'asset.recorte' AND account_id = ? "
+        "AND estado IN ('cola','corriendo') "
+        "AND json_extract(payload_json, '$.asset_id') = ? ORDER BY id LIMIT 1",
+        (marca["id"], aid)).fetchone()
+    if previo:
+        return {"job_id": previo[0]}
     jid = jobs.crear(cx, "asset.recorte", marca["id"], {"asset_id": aid},
                      creado_por=user["id"])
     return {"job_id": jid}

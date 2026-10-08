@@ -2,6 +2,8 @@
 /photos/{id}/download cuando la foto se usa (registrar_descarga)."""
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from src.assets import Candidata
 from src.assets.proveedores import base
 
@@ -38,4 +40,4 @@ class Unsplash(base.Proveedor):
 
     def registrar_descarga(self, cand: Candidata) -> None:
         # Ping sin cuerpo: `enviar` no parsea la respuesta (el endpoint devuelve {"url": ...}).
-        base.enviar("GET", f"{_API}/photos/{cand.id_origen}/download", headers=self._headers())
+        base.enviar("GET", f"{_API}/photos/{quote(cand.id_origen, safe='')}/download", headers=self._headers())

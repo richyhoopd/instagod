@@ -31,6 +31,7 @@ function mensajeError(e: unknown, accion: string): string {
   if (e instanceof ApiError) {
     if (e.status === 413) return "El archivo es demasiado grande (máximo 15 MB en fotos y 100 MB en video).";
     if (e.status === 502) return `${accion}: el origen falló (${e.detalle}).`;
+    if (e.status === 429) return e.detalle;   // tope diario de IA: el backend lo explica en español
     if (e.status === 403) return "Tu rol no permite administrar assets.";
     return e.detalle;
   }
@@ -162,7 +163,9 @@ export function PanelAssets({ slug, puedeEditar }: { slug: string; puedeEditar: 
             {tipo === "imagen" && (
               <Button size="sm" variant="outline" disabled={q.trim().length < 2 || busquedaIa.isPending}
                       title="De pago: solo si la marca activó la fuente IA"
-                      onClick={() => { setConIa(true); setBuscado(q.trim()); busquedaIa.mutate(q.trim()); }}>
+                      onClick={() => { setConIa(true); setBuscado(q.trim()); busquedaIa.mutate(q.trim(), {
+                        onError: (e) => toast.error(mensajeError(e, "No se pudo generar con IA")),
+                      }); }}>
                 Generar con IA
               </Button>
             )}

@@ -170,6 +170,15 @@ def _dims_imagen(datos: bytes) -> tuple[int, int]:
         raise AssetInvalido("la imagen está dañada") from e
 
 
+def _rescatar(cx, fila) -> dict:
+    """Re-importar un asset descartado lo vuelve a mostrar en la biblioteca."""
+    if fila["descartada"]:
+        db.update(cx, "brand_assets", fila["id"], descartada=0)
+        cx.commit()
+        return dict(db.get(cx, "brand_assets", fila["id"]))
+    return dict(fila)
+
+
 def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: str,
                   meta: dict | None = None, tags: list[str] | None = None
                   ) -> tuple[dict, bool]:
@@ -184,7 +193,7 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
     previas = db.rows(cx, "SELECT * FROM brand_assets WHERE account_id = ? AND sha = ?",
                       (account_id, sha))
     if previas:
-        return dict(previas[0]), False
+        return _rescatar(cx, previas[0]), False
     meta = meta or {}
     ancho, alto = _dims_imagen(datos) if tipo == "imagen" else (meta.get("ancho"), meta.get("alto"))
     archivo = f"{sha[:16]}.{ext}"
@@ -216,7 +225,7 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
         previas = db.rows(cx, "SELECT * FROM brand_assets WHERE account_id = ? AND sha = ?",
                           (account_id, sha))
         if previas:
-            return dict(previas[0]), False
+            return _rescatar(cx, previas[0]), False
         if creado:
             destino.unlink(missing_ok=True)
         raise

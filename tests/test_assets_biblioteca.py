@@ -368,3 +368,12 @@ def test_part_se_limpia_si_falla_la_escritura(cx, monkeypatch) -> None:
         biblioteca.guardar_bytes(cx, aid, "m1", _png(2, 2), proveedor="subida")
     assert list((assets.BRANDS_DIR / "m1" / "assets").iterdir()) == []
     assert db.rows(cx, "SELECT id FROM brand_assets") == []
+
+
+def test_reimportar_un_asset_descartado_lo_vuelve_a_mostrar(cx) -> None:
+    aid = _cuenta(cx)
+    fila, _ = biblioteca.guardar_bytes(cx, aid, "m1", _png(8, 5), proveedor="subida")
+    db.update(cx, "brand_assets", fila["id"], descartada=1)
+    otra, nueva = biblioteca.guardar_bytes(cx, aid, "m1", _png(8, 5), proveedor="subida")
+    assert not nueva and otra["id"] == fila["id"] and otra["descartada"] == 0
+    assert db.get(cx, "brand_assets", fila["id"])["descartada"] == 0

@@ -182,3 +182,46 @@ def test_de_pago_no_se_toma_de_otra_marca(cx, monkeypatch) -> None:
     res, avisos = buscar.buscar_con_avisos(cx, a, "m1", "x", proveedores=["ia_imagen"])
     assert res == [] and _Falso.llamadas == []
     assert avisos and "es de pago" in avisos[0]
+
+
+def _activar_ia(cx, monkeypatch, aid) -> None:
+    _registrar(monkeypatch, "ia_imagen", de_pago=True)
+    db.insert(cx, "brand_sources", account_id=aid, kind="imagen", provider="ia_imagen")
+
+
+def test_ia_imagen_tope_diario_por_marca(cx, monkeypatch) -> None:
+    monkeypatch.setenv("INSTAGOD_IA_IMAGEN_MAX_DIA", "2")
+    a = _cuenta(cx)
+    b = db.insert(cx, "accounts", slug="m2", ig_handle="@m2", nombre="M2", ciudad="GDL")
+    _activar_ia(cx, monkeypatch, a)
+    db.insert(cx, "brand_sources", account_id=b, kind="imagen", provider="ia_imagen")
+    for _ in range(2):   # bajo el tope: pasa
+        res, _av = buscar.buscar_con_avisos(cx, a, "m1", "x", proveedores=["ia_imagen"])
+        assert res
+    assert _Falso.llamadas == ["ia_imagen", "ia_imagen"]
+    with pytest.raises(buscar.LimiteDiario, match="tope diario de 2"):   # en el tope: 429
+        buscar.buscar_con_avisos(cx, a, "m1", "x", proveedores=["ia_imagen"])
+    assert _Falso.llamadas == ["ia_imagen", "ia_imagen"]   # no gastó
+    res, _av = buscar.buscar_con_avisos(cx, b, "m2", "x", proveedores=["ia_imagen"])
+    assert res   # otra marca no se ve afectada
+
+
+def test_ia_imagen_tope_por_omision_es_20_y_el_dia_siguiente_libera(cx, monkeypatch) -> None:
+    monkeypatch.delenv("INSTAGOD_IA_IMAGEN_MAX_DIA", raising=False)
+    assert buscar._max_ia_dia() == 20
+    monkeypatch.setenv("INSTAGOD_IA_IMAGEN_MAX_DIA", "1")
+    a = _cuenta(cx)
+    _activar_ia(cx, monkeypatch, a)
+    cx.execute("INSERT INTO ia_generaciones (account_id, creado_en) "
+               "VALUES (?, datetime('now', '-1 day'))", (a,))
+    cx.commit()
+    assert buscar.buscar_con_avisos(cx, a, "m1", "x", proveedores=["ia_imagen"])[0]
+
+
+def test_ia_imagen_sin_fuente_activa_no_cuenta(cx, monkeypatch) -> None:
+    monkeypatch.setenv("INSTAGOD_IA_IMAGEN_MAX_DIA", "1")
+    a = _cuenta(cx)
+    _registrar(monkeypatch, "ia_imagen", de_pago=True)
+    for _ in range(3):
+        buscar.buscar_con_avisos(cx, a, "m1", "x", proveedores=["ia_imagen"])
+    assert cx.execute("SELECT COUNT(*) FROM ia_generaciones").fetchone()[0] == 0

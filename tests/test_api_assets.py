@@ -201,3 +201,31 @@ def test_importar_carpeta_con_https_se_rechaza(entorno) -> None:
         "proveedor": "carpeta", "id_origen": "a.png", "tipo": "imagen",
         "url": "https://images.pexels.com/1.jpg"})
     assert r.status_code == 422
+
+
+def test_recorte_pendiente_se_reutiliza(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    fila, _ = biblioteca.guardar_bytes(cx, a1, "m1", _png(), proveedor="subida")
+    otra, _ = biblioteca.guardar_bytes(cx, a1, "m1", _png(7, 7), proveedor="subida")
+    r1 = cli.post(f"/brands/m1/assets/{fila['id']}/recorte")
+    r2 = cli.post(f"/brands/m1/assets/{fila['id']}/recorte")
+    assert r1.status_code == r2.status_code == 202
+    assert r1.json()["job_id"] == r2.json()["job_id"]
+    db.update(cx, "jobs", r1.json()["job_id"], estado="corriendo")
+    assert cli.post(f"/brands/m1/assets/{fila['id']}/recorte").json() == r1.json()
+    # otro asset: job propio
+    assert cli.post(f"/brands/m1/assets/{otra['id']}/recorte").json()["job_id"] != r1.json()["job_id"]
+    # terminado el job, uno nuevo sí se encola
+    db.update(cx, "jobs", r1.json()["job_id"], estado="ok")
+    assert cli.post(f"/brands/m1/assets/{fila['id']}/recorte").json()["job_id"] != r1.json()["job_id"]
+
+
+def test_buscar_ia_imagen_sobre_el_tope_es_429_con_mensaje(entorno, monkeypatch) -> None:
+    cli, cx, a1, _ = entorno
+
+    def tope(*_a, **_k):
+        raise buscar.LimiteDiario("Llegaste al tope diario de 20 generaciones con IA")
+    monkeypatch.setattr(buscar, "buscar_con_avisos", tope)
+    r = cli.get("/brands/m1/assets/buscar", params={"q": "x", "proveedores": "ia_imagen"})
+    assert r.status_code == 429
+    assert r.json()["error"] == "limite_diario" and "tope diario" in r.json()["detalle"]

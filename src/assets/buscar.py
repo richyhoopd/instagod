@@ -7,6 +7,7 @@ proveedores de pago (`de_pago=True`) nunca corren por omisión.
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import UTC, datetime
 from itertools import zip_longest
@@ -20,6 +21,29 @@ from src.assets.proveedores.base import SinLlave
 _MAX_ERROR = 300
 _PARAM_SECRETO = re.compile(r"(?i)\b(key|api_key|apikey|client_id|access_key|token)=[^&\s'\"]+")
 _HEADER_SECRETO = re.compile(r"(?i)\b(authorization|client-id|bearer|key)\s*[:=]?\s+\S+")
+
+
+class LimiteDiario(Exception):
+    """La marca ya gastó su tope diario de generaciones de pago."""
+
+
+def _max_ia_dia() -> int:
+    try:
+        return max(0, int(os.getenv("INSTAGOD_IA_IMAGEN_MAX_DIA", "20")))
+    except ValueError:
+        return 20
+
+
+def _reservar_ia(cx, account_id: int) -> None:
+    """Cuenta una llamada a ia_imagen (día UTC) o lanza LimiteDiario si ya se llegó al tope."""
+    tope = _max_ia_dia()
+    usadas = cx.execute("SELECT COUNT(*) FROM ia_generaciones WHERE account_id = ? "
+                        "AND date(creado_en) = date('now')", (account_id,)).fetchone()[0]
+    if usadas >= tope:
+        raise LimiteDiario(f"Llegaste al tope diario de {tope} generaciones con IA para esta "
+                           "marca. Inténtalo mañana o pídele a un administrador subir el límite.")
+    cx.execute("INSERT INTO ia_generaciones (account_id) VALUES (?)", (account_id,))
+    cx.commit()
 
 
 def _limpiar(msg: str, creds: dict) -> str:
@@ -65,6 +89,8 @@ def buscar_con_avisos(cx, account_id: int, slug: str, q: str, *, tipo: str = "im
             else:
                 nombres.append(p)
 
+    if "ia_imagen" in nombres and tipo in PROVEEDORES["ia_imagen"].tipos:
+        _reservar_ia(cx, account_id)   # antes de gastar; también cuenta si el proveedor falla
     listas: list[list[Candidata]] = []
     for nombre in dict.fromkeys(nombres):
         cls = PROVEEDORES.get(nombre)

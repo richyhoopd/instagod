@@ -1,6 +1,6 @@
 """Quitar fondo con rembg + BiRefNet (CPU). rembg se importa dentro de la función y la
 sesión se carga una vez por proceso: importar este módulo no carga onnxruntime. El modelo
-se descarga en el build de la imagen (Dockerfile: `rembg d birefnet-general`,
+se descarga en el build de la imagen (Dockerfile: `new_session("birefnet-general")`,
 REMBG_HOME=/opt/rembg; rembg 2.0.85 lee REMBG_HOME en sessions/base.py:169)."""
 from __future__ import annotations
 

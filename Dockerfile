@@ -23,12 +23,17 @@ WORKDIR /app
 
 # Primero deps (capa cacheable), luego el código.
 COPY requirements.txt .
+# rapidocr_onnxruntime exige `opencv-python` (con GUI) y choca con el headless de
+# requirements.txt/rembg: ambos escriben en cv2/. Se deja SOLO el headless.
 RUN pip install -r requirements.txt \
+    && pip uninstall -y opencv-python \
+    && pip install --force-reinstall --no-deps "opencv-python-headless<5" \
+    && python -c "import cv2; cv2.CascadeClassifier; print(cv2.__version__)" \
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Modelo de recorte en capa propia (cientos de MB), separada del pip install.
-RUN rembg d birefnet-general
+RUN python -c "from rembg import new_session; new_session('birefnet-general')"
 
 COPY . .
 

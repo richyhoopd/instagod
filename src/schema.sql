@@ -590,3 +590,11 @@ CREATE TABLE IF NOT EXISTS brand_assets (
     CHECK (descartada IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_assets_account ON brand_assets(account_id, tipo);
+
+-- Tope diario de generación de imágenes de pago (fal.ai): una fila por llamada.
+CREATE TABLE IF NOT EXISTS ia_generaciones (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    creado_en  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ia_gen_account ON ia_generaciones(account_id, creado_en);
