@@ -6,7 +6,6 @@ si cambias algo aquí, cámbialo allá y agrega el caso al fixture en el mismo c
 from __future__ import annotations
 
 import copy
-import math
 from typing import Any
 
 _INTOCABLES = {"id", "tipo"}
@@ -41,7 +40,12 @@ def _set(capas: list[dict], op: dict) -> None:
         elif not isinstance(sig, dict):
             raise OpInvalida(f"{p!r} no es un objeto en la capa {op.get('capa')!r}")
         obj = sig
-    obj[partes[-1]] = copy.deepcopy(op.get("valor"))
+    if "valor" not in op:
+        raise OpInvalida("set necesita valor (usa null para asignar null)")
+    valor = op["valor"]
+    if ruta == "hijos" and not (isinstance(valor, list) and all(isinstance(h, str) for h in valor)):
+        raise OpInvalida("hijos debe ser una lista de ids (str)")
+    obj[partes[-1]] = copy.deepcopy(valor)
 
 
 def _add(capas: list[dict], op: dict) -> None:
@@ -51,13 +55,13 @@ def _add(capas: list[dict], op: dict) -> None:
     if any(c.get("id") == capa.get("id") for c in capas):
         raise OpInvalida(f"ya existe la capa {capa.get('id')!r}")
     n = len(capas)
-    indice = op.get("indice")
-    if indice is None:
+    if "indice" not in op:
         i = n
-    elif isinstance(indice, bool) or not isinstance(indice, (int, float)) or not math.isfinite(indice):
-        raise OpInvalida("indice debe ser numérico")
     else:
-        i = min(max(math.trunc(indice), 0), n)
+        indice = op["indice"]
+        if isinstance(indice, bool) or not isinstance(indice, int):
+            raise OpInvalida("indice debe ser un entero")
+        i = min(max(indice, 0), n)
     capas.insert(i, copy.deepcopy(capa))
 
 
@@ -104,9 +108,14 @@ def aplicar(escena: dict, ops: list[dict]) -> dict:
     if not isinstance(ops, list):
         raise OpInvalida("ops debe ser una lista")
     nueva = copy.deepcopy(escena)
-    capas = nueva.setdefault("capas", [])
+    capas = nueva.get("capas") if isinstance(nueva, dict) else None
+    if not isinstance(capas, list):
+        raise OpInvalida("capas debe ser una lista")
     for op in ops:
-        if not isinstance(op, dict) or op.get("op") not in _OPS:
+        if not isinstance(op, dict) or not isinstance(op.get("op"), str) or op["op"] not in _OPS:
             raise OpInvalida(f"op desconocida: {op!r:.80}")
-        _OPS[op["op"]](capas, op)
+        try:
+            _OPS[op["op"]](capas, op)
+        except (TypeError, KeyError, AttributeError) as e:
+            raise OpInvalida(f"op mal formada ({type(e).__name__}): {e}") from e
     return nueva
