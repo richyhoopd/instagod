@@ -10,6 +10,7 @@ const FUENTE_LABELS: Record<string, string> = {
   covers: "Covers",
   carpeta: "Carpeta local",
   ig_accounts: "Cuentas de Instagram",
+  ig_seguidos: "Instagram (seguidos)",
   rss: "RSS",
   newsapi: "NewsAPI",
   manual: "Manual",

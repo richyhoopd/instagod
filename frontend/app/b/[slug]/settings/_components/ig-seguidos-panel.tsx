@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useJob } from "@/hooks/use-job";
+import { ultimaLinea } from "@/lib/log";
 import {
   type CuentaIG,
   type EstadoIG,
@@ -98,7 +99,8 @@ export function IgSeguidosPanel({ slug, puedeEditar }: { slug: string; puedeEdit
     if (avisado.current === jobId) return;
     avisado.current = jobId;
     if (estadoJob === "ok") toast.success("Listo");
-    else toast.error(job.data?.log?.split("\n").pop() || "El job falló");
+    else if (estadoJob === "cancelado") toast.info("Job cancelado");
+    else toast.error(ultimaLinea(job.data?.log) || "El job falló");
     invalidarCuentasIG(qc, slug);
   }, [jobId, estadoJob, job.data?.log, qc, slug]);
 
@@ -146,7 +148,7 @@ export function IgSeguidosPanel({ slug, puedeEditar }: { slug: string; puedeEdit
       {corriendo ? (
         <p className="text-xs text-muted-foreground">
           {job.data?.estado === "cola" ? "En cola (otra marca puede estar usando Instagram)…" : null}
-          {job.data?.estado === "corriendo" ? `${job.data.progreso ?? 0}% · ${job.data.log?.split("\n").pop() ?? ""}` : null}
+          {job.data?.estado === "corriendo" ? `${job.data.progreso ?? 0}% · ${ultimaLinea(job.data.log)}` : null}
         </p>
       ) : null}
 
