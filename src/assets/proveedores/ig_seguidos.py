@@ -29,11 +29,12 @@ class IgSeguidosProvider(base.Proveedor):
             SELECT a.* FROM brand_assets a
              WHERE a.account_id = ? AND a.proveedor = 'ig_seguidos' AND a.tipo = ?
                AND COALESCE(a.descartada, 0) = 0
-               AND COALESCE(a.ig_handle, '') NOT IN (
-                   SELECT ig_handle FROM brand_ig_cuentas
-                    WHERE account_id = ? AND estado = 'descartada')
+               AND NOT EXISTS (
+                   SELECT 1 FROM brand_ig_cuentas c
+                    WHERE c.account_id = a.account_id AND c.ig_handle = a.ig_handle
+                      AND c.estado = 'descartada')
         """
-        params: list[Any] = [self.account_id, tipo, self.account_id]
+        params: list[Any] = [self.account_id, tipo]
         texto = (q or "").strip().lstrip("@").lower()
         if texto:
             patron = f"%{_escapar_like(texto)}%"

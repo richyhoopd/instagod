@@ -229,3 +229,29 @@ def test_buscar_ia_imagen_sobre_el_tope_es_429_con_mensaje(entorno, monkeypatch)
     r = cli.get("/brands/m1/assets/buscar", params={"q": "x", "proveedores": "ia_imagen"})
     assert r.status_code == 429
     assert r.json()["error"] == "limite_diario" and "tope diario" in r.json()["detalle"]
+
+
+def _cand_local(proveedor: str, archivo: str) -> dict:
+    return {"proveedor": proveedor, "id_origen": "x", "tipo": "imagen",
+            "url": f"local:assets/{archivo}", "preview_url": "", "ancho": None,
+            "alto": None, "autor": None, "licencia": None, "url_origen": None}
+
+
+def test_importar_candidata_local_de_ig_seguidos(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    fila, _ = biblioteca.guardar_bytes(cx, a1, "m1", _png(), proveedor="ig_seguidos")
+    antes = len(db.rows(cx, "SELECT id FROM brand_assets WHERE account_id = ?", (a1,)))
+    r = cli.post("/brands/m1/assets/importar", json=_cand_local("ig_seguidos", fila["archivo"]))
+    assert r.status_code == 201
+    assert r.json()["id"] == fila["id"] and r.json()["archivo"] == fila["archivo"]
+    assert len(db.rows(cx, "SELECT id FROM brand_assets WHERE account_id = ?", (a1,))) == antes
+
+
+def test_importar_local_con_proveedor_de_red_es_422(entorno) -> None:
+    cli, cx, a1, _ = entorno
+    fila, _ = biblioteca.guardar_bytes(cx, a1, "m1", _png(), proveedor="subida")
+    r = cli.post("/brands/m1/assets/importar", json=_cand_local("pexels", fila["archivo"]))
+    assert r.status_code == 422
+    # y una URL https con proveedor local tampoco pasa
+    web = {**_cand_local("ig_seguidos", "x.png"), "url": "https://images.pexels.com/1.jpg"}
+    assert cli.post("/brands/m1/assets/importar", json=web).status_code == 422

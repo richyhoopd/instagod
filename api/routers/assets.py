@@ -17,6 +17,9 @@ from src.assets import Candidata, biblioteca, buscar
 from src.assets.proveedores import PROVEEDORES
 from src.plantillas import fontsource
 
+# Proveedores cuyas candidatas son locales (`local:...`): nunca salen a la red.
+PROVEEDORES_LOCALES = frozenset({"carpeta", "ig_seguidos"})
+
 router = APIRouter(prefix="/brands/{slug}", tags=["assets"])
 
 _CHUNK = 64 * 1024
@@ -93,7 +96,7 @@ def importar_asset(slug: str, datos: CandidataIn, user: dict = Depends(usuario_a
     if datos.proveedor not in PROVEEDORES:
         raise ApiError(422, "validacion", "Proveedor desconocido", "proveedor")
     es_local = datos.url.startswith("local:")
-    if es_local != (datos.proveedor == "carpeta") or (
+    if es_local != (datos.proveedor in PROVEEDORES_LOCALES) or (
             not es_local and not datos.url.startswith("https://")):
         raise ApiError(422, "validacion", "URL inválida para ese proveedor", "url")
     cand = Candidata(**datos.model_dump(exclude={"tags"}))
