@@ -243,8 +243,9 @@ def _ya_ingerido(cx, account_id: int, handle: str, post_id: str) -> bool:
 
 
 def _ingerir_cuenta(cx, account_id: int, slug: str, cuenta: dict[str, Any],
-                    session: Any, por_cuenta: int) -> int:
-    """Perfil (bio, privada) + últimos `por_cuenta` posts. Devuelve assets nuevos."""
+                    session: Any, por_cuenta: int, conteo: list[int]) -> None:
+    """Perfil (bio, privada) + últimos `por_cuenta` posts. Suma los assets nuevos a
+    `conteo[0]` conforme se guardan, para que un fallo a medias no los pierda."""
     h = cuenta["ig_handle"]
     perfil = ingest_ig.fetch_profile(session, h)
     privada = bool(perfil.get("is_private"))
@@ -255,9 +256,8 @@ def _ingerir_cuenta(cx, account_id: int, slug: str, cuenta: dict[str, Any],
               notas="perfil privado: no se puede ingerir" if privada else None)
     cx.commit()
     if privada:
-        return 0
+        return
     ingest_ig._sleep()
-    nuevos = 0
     for item in ingest_ig.fetch_posts(session, str(perfil["id"]), por_cuenta):
         codigo = _CODIGO_RE.sub("", str(item.get("code") or ""))
         post_id = str(item.get("pk") or item.get("id") or codigo)
@@ -267,18 +267,30 @@ def _ingerir_cuenta(cx, account_id: int, slug: str, cuenta: dict[str, Any],
                          caption=str((item.get("caption") or {}).get("text") or ""))
         bajados = sum(_bajar(cx, account_id, slug, session, origen, tipo, url)
                       for tipo, url in _medios(item))
-        nuevos += bajados
+        conteo[0] += bajados
         if bajados:
             ingest_ig._sleep()
-    return nuevos
+
+
+def _debe_quemar(exc: Exception) -> bool:
+    """True si el fallo es de la cookie (límite, sesión caída), no de la cuenta consultada.
+
+    IngestRateLimited siempre; HTTPError solo con status 401, 403 o 429. Un 404 o 5xx
+    es de ESA cuenta (handle renombrado/borrado) y no debe quemar el pool.
+    """
+    if isinstance(exc, ingest_ig.IngestRateLimited):
+        return True
+    resp = getattr(exc, "response", None)
+    return getattr(resp, "status_code", None) in (401, 403, 429)
 
 
 def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
             progreso: Callable[[int, str], None] | None = None) -> dict[str, Any]:
     """Baja los últimos `por_cuenta` posts de cada cuenta ACTIVA de la marca.
 
-    Rate limit o HTTPError (p. ej. checkpoint_required): quema la cookie, rota y
-    reintenta la MISMA cuenta, igual que import_followees._listar_con_pool. Sin
+    Rate limit o HTTPError 401/403/429: quema la cookie, rota y reintenta la MISMA
+    cuenta (como import_followees._listar_con_pool). Otro HTTPError (404, 5xx) es
+    error de ESA cuenta: va a `errores`, no quema nada ni corta la corrida. Sin
     cookies sanas se corta; si se cortó sin bajar nada, lanza IngestRateLimited
     para que el job termine en error y no en un 'ok' vacío.
     """
@@ -295,14 +307,21 @@ def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
             if not rot.disponible():
                 resultado["cortado"] = True
                 break
+            conteo = [0]
             try:
-                resultado["assets"] += _ingerir_cuenta(cx, account_id, slug, cuenta,
-                                                       rot.session, por_cuenta)
+                _ingerir_cuenta(cx, account_id, slug, cuenta, rot.session, por_cuenta, conteo)
+                resultado["assets"] += conteo[0]
                 resultado["cuentas"] += 1
                 break
-            except (ingest_ig.IngestRateLimited, HTTPError):
+            except (ingest_ig.IngestRateLimited, HTTPError) as exc:
+                resultado["assets"] += conteo[0]   # lo guardado antes del fallo cuenta
+                if not _debe_quemar(exc):
+                    resultado["errores"].append(
+                        f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
+                    break
                 rot.rotar_por_quemada()
             except Exception as exc:  # noqa: BLE001 — una cuenta rota no tira a las demás
+                resultado["assets"] += conteo[0]
                 resultado["errores"].append(f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
                 break
         if resultado["cortado"]:

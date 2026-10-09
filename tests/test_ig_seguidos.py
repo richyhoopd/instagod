@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from curl_cffi.requests.exceptions import HTTPError
@@ -362,16 +363,6 @@ def test_ingerir_progreso_y_aislamiento_de_fallos(cx, ids, ig_falso, monkeypatch
     assert [p for p, _ in avance] == [0, 25, 50, 75]
 
 
-def test_rate_limit_se_propaga(cx, ids, ig_falso, monkeypatch) -> None:
-    def limitado(session, url, params=None):
-        raise ingest_ig.IngestRateLimited("HTTP 429")
-
-    monkeypatch.setattr(ingest_ig, "_get_json", limitado)
-    ig_seguidos.fijar_estado(cx, ids["a"], "cafe.tacuba", "activa")
-    with pytest.raises(ingest_ig.IngestRateLimited):
-        ig_seguidos.ingerir(cx, ids["a"])
-
-
 def _origen() -> ig_seguidos._Origen:
     return ig_seguidos._Origen(handle="cafe.tacuba", codigo="Abc", post_id="1", caption="c")
 
@@ -598,10 +589,15 @@ def test_rate_limit_rota_y_reintenta_la_misma_cuenta(cx, ids, ig_falso, tmp_path
     assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
 
 
-def test_http_error_quema_igual(cx, ids, ig_falso, tmp_path) -> None:
+def _http(status: int) -> HTTPError:
+    return HTTPError(f"HTTP {status}", response=SimpleNamespace(status_code=status))
+
+
+@pytest.mark.parametrize("status", [401, 403, 429])
+def test_http_error_de_cookie_quema_y_rota(cx, ids, ig_falso, tmp_path, status) -> None:
     a = ids["a"]
     ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
-    ig_falso["fallar"].append(HTTPError("400 checkpoint_required"))
+    ig_falso["fallar"].append(_http(status))
     r = ig_seguidos.ingerir(cx, a)
     assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
     pool = _pool(tmp_path)
@@ -617,7 +613,7 @@ def test_pool_agotado_sin_nada_lanza(cx, ids, ig_falso, tmp_path) -> None:
     assert _assets(cx, ids["a"]) == []
 
 
-def test_pool_agotado_a_media_corrida_devuelve_cortado(cx, ids, ig_falso, monkeypatch) -> None:
+def test_pool_agotado_a_media_corrida_devuelve_cortado(cx, ids, ig_falso, monkeypatch, tmp_path) -> None:
     a = ids["a"]
     ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
     ig_seguidos.fijar_estado(cx, a, "zz.segunda", "activa")
@@ -631,6 +627,7 @@ def test_pool_agotado_a_media_corrida_devuelve_cortado(cx, ids, ig_falso, monkey
     monkeypatch.setattr(ingest_ig, "_get_json", segunda_limitada)
     r = ig_seguidos.ingerir(cx, a)
     assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": True}
+    assert all(c["quemada_hasta"] for c in _pool(tmp_path))
 
 
 def test_handle_inexistente_es_error_por_cuenta(cx, ids, ig_falso, monkeypatch, tmp_path) -> None:
@@ -649,3 +646,64 @@ def test_handle_inexistente_es_error_por_cuenta(cx, ids, ig_falso, monkeypatch, 
     assert r["cuentas"] == 1 and r["cortado"] is False and len(r["errores"]) == 1
     assert r["errores"][0].startswith("@aa.no.existe: LookupError")
     assert not any(c["quemada_hasta"] for c in _pool(tmp_path))
+
+
+@pytest.mark.parametrize("status", [404, 500])
+def test_http_error_de_la_cuenta_no_quema_ni_corta(cx, ids, ig_falso, monkeypatch, tmp_path, status) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "aa.muerta", "activa")
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    real = ingest_ig._get_json
+
+    def muerta(session, url, params=None):
+        if params and params.get("username") == "aa.muerta":
+            raise _http(status)
+        return real(session, url, params)
+
+    monkeypatch.setattr(ingest_ig, "_get_json", muerta)
+    antes = _pool(tmp_path)
+    r = ig_seguidos.ingerir(cx, a)
+    assert r["cuentas"] == 1 and r["assets"] == 4 and r["cortado"] is False
+    assert r["errores"] == [f"@aa.muerta: HTTPError: HTTP {status}"]
+    assert _pool(tmp_path) == antes
+    assert not any(c["quemada_hasta"] for c in _pool(tmp_path))
+
+
+def _sleep_que_falla_desde(monkeypatch, n: int) -> None:
+    llamadas = [0]
+
+    def sleep():
+        llamadas[0] += 1
+        if llamadas[0] >= n:
+            raise ingest_ig.IngestRateLimited("429 a medias")
+
+    monkeypatch.setattr(ingest_ig, "_sleep", sleep)
+
+
+def test_fallo_a_medias_cuenta_lo_guardado_y_el_reintento_completa(cx, ids, ig_falso, monkeypatch, tmp_path) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    llamadas = [0]
+
+    def sleep():   # 1ª tras el perfil; 2ª tras el primer post bajado: falla solo esa vez
+        llamadas[0] += 1
+        if llamadas[0] == 2:
+            raise ingest_ig.IngestRateLimited("429 a medias")
+
+    monkeypatch.setattr(ingest_ig, "_sleep", sleep)
+    r = ig_seguidos.ingerir(cx, a)
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
+    assert len(_assets(cx, a)) == 4
+    pool = _pool(tmp_path)
+    assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
+
+
+def test_corte_con_progreso_parcial_no_lanza(cx, ids, ig_falso, monkeypatch, tmp_path) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    _sleep_que_falla_desde(monkeypatch, 2)
+    r = ig_seguidos.ingerir(cx, a)
+    guardados = len(_assets(cx, a))
+    assert guardados > 0
+    assert r == {"cuentas": 0, "assets": guardados, "errores": [], "cortado": True}
+    assert all(c["quemada_hasta"] for c in _pool(tmp_path))
