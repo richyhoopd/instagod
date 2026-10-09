@@ -500,6 +500,75 @@ def test_video_sin_cuadro_se_salta(cx, ids, ig_falso, monkeypatch) -> None:
     assert len(_fotos_propias(cx, a)) == 2
 
 
+def _estado_ig(cx, ids, ig_falso):
+    ig_seguidos.fijar_estado(cx, ids["a"], "cafe.tacuba", "activa")
+    return ig_seguidos.ingerir(cx, ids["a"])
+
+
+def test_mp4_rechazado_no_deja_cuadro_huerfano(cx, ids, ig_falso, monkeypatch) -> None:
+    llamadas = []
+    monkeypatch.setitem(biblioteca.TOPES, "video", 5)           # todo mp4 excede el tope
+    monkeypatch.setattr(ig_seguidos, "primer_cuadro",
+                        lambda v, d: llamadas.append(v) or d)
+    r = _estado_ig(cx, ids, ig_falso)
+    a = ids["a"]
+    assert llamadas == []                                       # ffmpeg ni se corre
+    assert [x for x in _assets(cx, a) if x["tipo"] == "video"] == []
+    assert not any("cuadro_de_video" in (x["tags_json"] or "") for x in _assets(cx, a))
+    assert r["assets"] == 2 and len(_assets(cx, a)) == 2
+    assert not ig_seguidos._ya_ingerido(cx, a, "cafe.tacuba", "9003")   # el reel se reintenta
+
+
+def test_mp4_sin_magic_bytes_no_corre_ffmpeg(cx, ids, ig_falso, monkeypatch) -> None:
+    llamadas = []
+    monkeypatch.setattr(ingest_ig, "_download",
+                        lambda s, u, d: d.write_bytes(b"<html>no</html>") or True)
+    monkeypatch.setattr(ig_seguidos, "primer_cuadro", lambda v, d: llamadas.append(v) or d)
+    assert _estado_ig(cx, ids, ig_falso)["assets"] == 0
+    assert llamadas == [] and _assets(cx, ids["a"]) == []
+
+
+@pytest.mark.parametrize("fallo", ["timeout", "no_escribe", "no_existe"])
+def test_fallos_de_ffmpeg_saltan_solo_el_video(cx, ids, ig_falso, monkeypatch, fallo) -> None:
+    def roto(video, destino):
+        if fallo == "timeout":
+            raise subprocess.TimeoutExpired("ffmpeg", 60)
+        if fallo == "no_existe":
+            raise FileNotFoundError("ffmpeg")
+        return destino                                          # sale 0 pero no escribió el PNG
+
+    monkeypatch.setattr(ig_seguidos, "primer_cuadro", roto)
+    r = _estado_ig(cx, ids, ig_falso)
+    assert r["errores"] == [] and r["cuentas"] == 1 and r["assets"] == 2
+    assert [x for x in _assets(cx, ids["a"]) if x["tipo"] == "video"] == []
+    assert len(_fotos_propias(cx, ids["a"])) == 2
+
+
+def test_cuadro_con_sha_duplicado_reusa_la_fila(cx, ids, ig_falso) -> None:
+    a = ids["a"]
+    reel_url = "https://x/reel.mp4"
+    # una foto previa con los mismos bytes que sacará el cuadro del reel
+    previa = _reg(cx, a, Path(cx.execute("PRAGMA database_list").fetchone()[2]).parent,
+                  _png("\x00\x00\x00\x18ftypmp42" + reel_url))[0]
+    assert previa is not None
+    ig_seguidos._bajar(cx, a, "pensionmas", object(), _origen(), "video", reel_url)
+    video = next(x for x in _assets(cx, a) if x["tipo"] == "video")
+    assert json.loads(video["tags_json"])["poster"] == previa["archivo"]
+    assert len(_assets(cx, a)) == 2                             # foto previa + mp4, sin cuadro nuevo
+
+
+def test_cuadro_descartado_no_es_poster_ni_resucita(cx, ids, ig_falso) -> None:
+    a = ids["a"]
+    reel_url = "https://x/reel.mp4"
+    previa = _reg(cx, a, Path(cx.execute("PRAGMA database_list").fetchone()[2]).parent,
+                  _png("\x00\x00\x00\x18ftypmp42" + reel_url))[0]
+    db.update(cx, "brand_assets", previa["id"], descartada=1)
+    ig_seguidos._bajar(cx, a, "pensionmas", object(), _origen(), "video", reel_url)
+    video = next(x for x in _assets(cx, a) if x["tipo"] == "video")
+    assert "poster" not in json.loads(video["tags_json"])
+    assert db.get(cx, "brand_assets", previa["id"])["descartada"] == 1
+
+
 @pytest.mark.lento
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sin ffmpeg")
 def test_primer_cuadro_real(tmp_path) -> None:

@@ -165,20 +165,38 @@ def _registrar(cx, account_id: int, slug: str, origen: _Origen, tmp: Path, *, ti
 
 
 def primer_cuadro(video: Path, destino: Path) -> Path:
-    """Primer cuadro del video como PNG (el póster en la biblioteca y en el editor)."""
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(video),
-                    "-frames:v", "1", str(destino)],
-                   check=True, capture_output=True, timeout=60)
+    """Primer cuadro del video como PNG (el póster en la biblioteca y en el editor).
+
+    Solo lee archivos locales (-protocol_whitelist file) y nunca stdin. Si ffmpeg
+    sale 0 sin escribir el PNG, FileNotFoundError.
+    """
+    subprocess.run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-protocol_whitelist", "file",
+                    "-i", str(video), "-frames:v", "1", str(destino)],
+                   check=True, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    if not destino.is_file():
+        raise FileNotFoundError(str(destino))
     return destino
+
+
+def _mp4_valido(ruta: Path) -> bool:
+    """Tope de tamaño y magic bytes de mp4, ANTES de dárselo a ffmpeg."""
+    if ruta.stat().st_size > biblioteca.TOPES["video"]:
+        return False
+    with ruta.open("rb") as f:
+        return biblioteca.tipo_de_bytes(f.read(16)) == ("video", "mp4")
 
 
 def _bajar(cx, account_id: int, slug: str, session: Any, origen: _Origen,
            tipo: str, url: str) -> int:
-    """Descarga un medio a un tempdir y lo registra. Devuelve los assets nuevos.
+    """Descarga un medio a un tempdir y lo registra. Devuelve 1 si quedó un asset
+    nuevo (foto o video), 0 si no; el cuadro de un video nunca cuenta.
 
-    Un video deja dos filas: su primer cuadro (imagen, buscable como foto) y el
-    mp4, que apunta al cuadro en tags.poster. Sin cuadro no se guarda el video.
-    Solo el video cuenta como asset nuevo; el cuadro es su póster.
+    Un video deja dos filas: el mp4 (tags.poster -> su cuadro) y su primer cuadro
+    (imagen, tags.cuadro_de_video, buscable como foto). El mp4 se valida (tope y
+    magic bytes) antes de correr ffmpeg y se registra primero: si se rechaza no
+    queda cuadro huérfano. Sin cuadro (ffmpeg falla, timeout, no escribe el PNG)
+    se salta el video entero. Si el cuadro ya existe y está descartado no se usa
+    de póster ni se resucita: el mp4 se guarda sin tags.poster.
     """
     with tempfile.TemporaryDirectory() as tmp:
         crudo = Path(tmp) / "crudo"
@@ -187,17 +205,31 @@ def _bajar(cx, account_id: int, slug: str, session: Any, origen: _Origen,
         if tipo == "imagen":
             _, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="imagen")
             return int(nueva)
+        if not _mp4_valido(crudo):
+            return 0
         try:
             cuadro = primer_cuadro(crudo, Path(tmp) / "cuadro.png")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            datos = cuadro.read_bytes()
+            if biblioteca.tipo_de_bytes(datos[:16]) != ("imagen", "png"):
+                return 0
+            dims = biblioteca._dims_imagen(datos)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError,
+                biblioteca.AssetInvalido):
             return 0
-        poster, _ = _registrar(cx, account_id, slug, origen, cuadro, tipo="imagen",
-                               tags_extra={"cuadro_de_video": True})
-        if poster is None:
+        sha = hashlib.sha256(datos).hexdigest()
+        previa = db.rows(cx, "SELECT * FROM brand_assets WHERE account_id = ? AND sha = ?",
+                         (account_id, sha))
+        if previa:
+            poster = None if previa[0]["descartada"] else previa[0]["archivo"]
+        else:
+            poster = f"ig_{sha[:20]}.png"
+        extra: dict[str, Any] = {"poster": poster} if poster else {}
+        fila, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="video",
+                                 dims=dims, tags_extra=extra)
+        if fila is None:
             return 0
-        _, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="video",
-                              dims=(poster["ancho"], poster["alto"]),
-                              tags_extra={"poster": poster["archivo"]})
+        _registrar(cx, account_id, slug, origen, cuadro, tipo="imagen",
+                   tags_extra={"cuadro_de_video": True})
         return int(nueva)
 
 
