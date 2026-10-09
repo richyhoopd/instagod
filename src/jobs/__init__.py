@@ -42,6 +42,13 @@ def crear(cx: sqlite3.Connection, tipo: str, account_id: int, payload: dict,
                      creado_por=creado_por)
 
 
+# Tipos que pegan a Instagram con el pool de cookies compartido. Corren de uno
+# en uno en TODA la instancia (no por cuenta): dos marcas scrapeando a la vez
+# duplican el ritmo contra Meta y queman cookies (spec editor v2 §4).
+TIPOS_IG: tuple[str, ...] = ("ig.importar_seguidos", "ig.ingerir", "sourcing.ig_scrape")
+_PH_IG = ", ".join("?" * len(TIPOS_IG))
+
+
 def tomar(cx: sqlite3.Connection, worker_id: str,
           *, max_global: int | None = None) -> dict[str, Any] | None:
     """Toma atómicamente el job más viejo en cola de una cuenta sin nada corriendo.
@@ -54,6 +61,7 @@ def tomar(cx: sqlite3.Connection, worker_id: str,
     conteo antes de que cualquiera tome, y ambos pasar el tope por uno (TOCTOU).
     Aceptado a propósito — es un throttle suave (evita saturar LLM/Cloudinary),
     no una garantía dura; el aislamiento por cuenta del UPDATE sí es atómico.
+    Además, los tipos de `TIPOS_IG` corren de uno en uno en toda la instancia (carril IG).
     """
     if max_global is not None:
         corriendo = cx.execute(
@@ -64,7 +72,7 @@ def tomar(cx: sqlite3.Connection, worker_id: str,
 
     ahora = _ts()
     fila = cx.execute(
-        """
+        f"""
         UPDATE jobs
            SET estado = 'corriendo', worker_id = ?, heartbeat = ?, started_at = ?
          WHERE id = (
@@ -73,11 +81,16 @@ def tomar(cx: sqlite3.Connection, worker_id: str,
                 AND account_id NOT IN (
                     SELECT account_id FROM jobs WHERE estado = 'corriendo'
                 )
+                AND NOT (
+                    tipo IN ({_PH_IG})
+                    AND EXISTS (SELECT 1 FROM jobs
+                                 WHERE estado = 'corriendo' AND tipo IN ({_PH_IG}))
+                )
               ORDER BY id LIMIT 1
          )
         RETURNING *
         """,
-        (worker_id, ahora, ahora),
+        (worker_id, ahora, ahora, *TIPOS_IG, *TIPOS_IG),
     ).fetchone()
     cx.commit()
     return dict(fila) if fila else None

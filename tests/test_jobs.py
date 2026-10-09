@@ -258,3 +258,23 @@ def test_worker_redacta_secretos_del_error(cx, monkeypatch) -> None:
     assert "tok_abc_123" not in fila["resultado_json"]
     assert "tok_abc_123" not in (fila["log"] or "")
     assert "***" in fila["resultado_json"]
+
+
+def test_carril_ig_un_solo_job_global(cx) -> None:
+    otra = db.insert(cx, "accounts", slug="daisies", ig_handle="@d", nombre="D", ciudad="CDMX")
+    a = jobs.crear(cx, "ig.ingerir", 1, {})
+    jobs.crear(cx, "ig.ingerir", otra, {})
+    primero = jobs.tomar(cx, "w1")
+    assert primero["id"] == a
+    # Otra marca, pero el carril IG está ocupado: no se toma.
+    assert jobs.tomar(cx, "w2") is None
+
+
+def test_carril_ig_no_bloquea_otros_tipos(cx) -> None:
+    otra = db.insert(cx, "accounts", slug="daisies", ig_handle="@d", nombre="D", ciudad="CDMX")
+    jobs.crear(cx, "sourcing.ig_scrape", 1, {})
+    jobs.crear(cx, "ig.importar_seguidos", otra, {})
+    libre = jobs.crear(cx, "template.preview", otra, {})
+    assert jobs.tomar(cx, "w1")["tipo"] == "sourcing.ig_scrape"
+    # El de IG de la otra marca espera; el que no es de IG pasa delante.
+    assert jobs.tomar(cx, "w2")["id"] == libre
