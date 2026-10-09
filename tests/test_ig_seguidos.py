@@ -572,6 +572,31 @@ def test_cuadro_descartado_no_es_poster_ni_resucita(cx, ids, ig_falso) -> None:
     assert db.get(cx, "brand_assets", previa["id"])["descartada"] == 1
 
 
+def test_cuadro_que_falla_al_registrar_no_deja_poster_colgando(cx, ids, ig_falso, monkeypatch) -> None:
+    real = ig_seguidos._registrar
+
+    def sin_cuadro(cx_, a, slug, origen, tmp, *, tipo, **kw):
+        if (kw.get("tags_extra") or {}).get("cuadro_de_video"):
+            return None, False                                  # el cuadro no entra a la biblioteca
+        return real(cx_, a, slug, origen, tmp, tipo=tipo, **kw)
+
+    monkeypatch.setattr(ig_seguidos, "_registrar", sin_cuadro)
+    a = ids["a"]
+    ig_seguidos._bajar(cx, a, "pensionmas", object(), _origen(), "video", "https://x/reel.mp4")
+    video = next(x for x in _assets(cx, a) if x["tipo"] == "video")
+    assert "poster" not in json.loads(video["tags_json"])
+
+
+def test_poster_es_el_archivo_real_del_cuadro(cx, ids, ig_falso) -> None:
+    a = ids["a"]
+    ig_seguidos._bajar(cx, a, "pensionmas", object(), _origen(), "video", "https://x/reel.mp4")
+    todos = _assets(cx, a)
+    video = next(x for x in todos if x["tipo"] == "video")
+    cuadro = next(x for x in todos if x["tipo"] == "imagen")
+    assert json.loads(video["tags_json"])["poster"] == cuadro["archivo"]
+    assert json.loads(video["tags_json"])["fuente"] == "ig_seguidos"   # tags previos intactos
+
+
 @pytest.mark.lento
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sin ffmpeg")
 def test_primer_cuadro_real(tmp_path) -> None:

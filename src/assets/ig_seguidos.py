@@ -8,6 +8,7 @@ Reusa el pool de cookies (SesionRotatoria) y su ritmo; no sube la concurrencia.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import subprocess
 import tempfile
@@ -222,8 +223,9 @@ def _bajar(cx, account_id: int, slug: str, session: Any, origen: _Origen,
     (imagen, tags.cuadro_de_video, buscable como foto). El mp4 se valida (tope y
     magic bytes) antes de correr ffmpeg y se registra primero: si se rechaza no
     queda cuadro huérfano. Sin cuadro (ffmpeg falla, timeout, no escribe el PNG)
-    se salta el video entero. Si el cuadro ya existe y está descartado no se usa
-    de póster ni se resucita: el mp4 se guarda sin tags.poster.
+    se salta el video entero. El mp4 se guarda primero y, solo si el cuadro quedó en la
+    biblioteca (y no está descartado), se le agrega tags.poster con el archivo real del
+    cuadro; si no, el mp4 queda sin tags.poster y el cuadro descartado no se resucita.
     """
     with tempfile.TemporaryDirectory() as tmp:
         crudo = Path(tmp) / "crudo"
@@ -243,20 +245,18 @@ def _bajar(cx, account_id: int, slug: str, session: Any, origen: _Origen,
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError,
                 biblioteca.AssetInvalido):
             return 0
-        sha = hashlib.sha256(datos).hexdigest()
-        previa = db.rows(cx, "SELECT * FROM brand_assets WHERE account_id = ? AND sha = ?",
-                         (account_id, sha))
-        if previa:
-            poster = None if previa[0]["descartada"] else previa[0]["archivo"]
-        else:
-            poster = f"ig_{sha[:20]}.png"
-        extra: dict[str, Any] = {"poster": poster} if poster else {}
-        fila, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="video",
-                                 dims=dims, tags_extra=extra)
+        fila, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="video", dims=dims)
         if fila is None:
             return 0
-        _registrar(cx, account_id, slug, origen, cuadro, tipo="imagen",
-                   tags_extra={"cuadro_de_video": True})
+        fcuadro, _ = _registrar(cx, account_id, slug, origen, cuadro, tipo="imagen",
+                                tags_extra={"cuadro_de_video": True})
+        # El póster es el archivo REAL de la fila del cuadro (no un nombre armado a mano).
+        # Sin fila o descartada no hay póster: nada colgando ni resucitado.
+        if nueva and fcuadro is not None and not fcuadro["descartada"]:
+            tags = json.loads(fila["tags_json"] or "{}")
+            tags["poster"] = fcuadro["archivo"]
+            db.update(cx, "brand_assets", fila["id"],
+                      tags_json=json.dumps(tags, ensure_ascii=False))
         return int(nueva)
 
 
