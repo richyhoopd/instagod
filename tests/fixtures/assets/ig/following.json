@@ -1,0 +1,9 @@
+[
+  {"pk": "111", "username": "cafe.tacuba", "full_name": "Café Tacuba Bar",
+   "is_private": false, "profile_pic_url": "https://scontent.cdninstagram.com/v/t51/avatar_111.jpg?oe=AAAA"},
+  {"pk": "222", "username": "la_privada", "full_name": "",
+   "is_private": true, "profile_pic_url": "https://scontent.cdninstagram.com/v/t51/avatar_222.jpg?oe=BBBB"},
+  {"pk": "333", "username": "Mercado.Roma", "full_name": "Mercado Roma",
+   "is_private": false, "profile_pic_url": "javascript:alert(1)"},
+  {"pk": "444", "username": "../../etc/passwd", "full_name": "malo"}
+]
