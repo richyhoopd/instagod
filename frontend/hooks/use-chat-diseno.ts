@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "@/lib/api";
 import { OpInvalida, type Escena, type Formato, type Op } from "@/lib/escena";
@@ -66,7 +66,10 @@ export function useChatDiseno(slug: string, tid: number, alResultado: (r: Result
 
   const j = jobId !== null ? job.data : undefined;
   const terminado = !!j && (j.estado === "ok" || j.estado === "error" || j.estado === "cancelado");
-  const resultado = j?.estado === "ok" ? interpretarResultado(resultadoDeJob<unknown>(j)) : null;
+  const resultado = useMemo(
+    () => (j?.estado === "ok" ? interpretarResultado(resultadoDeJob<unknown>(j)) : null),
+    [j],
+  );
 
   // El resultado se entrega una sola vez por job; el estado se deriva en el render.
   useEffect(() => {
@@ -88,7 +91,12 @@ export function useChatDiseno(slug: string, tid: number, alResultado: (r: Result
   }
 
   const enviar = useCallback(
-    async (mensaje: string, modo: "crear" | "editar", escena: Escena | null, formato?: Formato) => {
+    async (
+      mensaje: string,
+      modo: "crear" | "editar",
+      escena: Escena | null,
+      formato?: Formato,
+    ): Promise<boolean> => {
       setErrorEnvio(null);
       try {
         const r = await post<{ job_id: number }>(`/brands/${slug}/templates/${tid}/chat`, {
@@ -98,8 +106,10 @@ export function useChatDiseno(slug: string, tid: number, alResultado: (r: Result
           formato: formato ?? null,
         });
         setJobId(r.job_id);
+        return true;
       } catch {
         setErrorEnvio("No se pudo enviar el mensaje. Intenta de nuevo.");
+        return false;
       }
     },
     [slug, tid],

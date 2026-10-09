@@ -3,7 +3,10 @@
 import type { ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-type Pestana = { id: string; etiqueta: string; contenido: ReactNode };
+type Pestana = { id: string; etiqueta: string; contenido: ReactNode;
+  // Sigue montada (oculta) al cambiar de pestaña: el chat debe seguir sondeando su job.
+  montada?: boolean;
+};
 
 export function PanelLateral({ pestanas }: { pestanas: Pestana[] }) {
   if (!pestanas.length) return null;
@@ -17,7 +20,12 @@ export function PanelLateral({ pestanas }: { pestanas: Pestana[] }) {
         ))}
       </TabsList>
       {pestanas.map((p) => (
-        <TabsContent key={p.id} value={p.id} className="min-h-0 flex-1 overflow-y-auto">
+        <TabsContent
+          key={p.id}
+          value={p.id}
+          forceMount={p.montada ? true : undefined}
+          className={`min-h-0 flex-1 overflow-y-auto${p.montada ? " data-[state=inactive]:hidden" : ""}`}
+        >
           {p.contenido}
         </TabsContent>
       ))}

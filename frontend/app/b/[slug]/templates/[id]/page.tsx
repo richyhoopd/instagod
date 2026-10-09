@@ -209,7 +209,7 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
                 : []),
               // El endpoint del chat exige rol manager, igual que assets.
               ...(puedeAssets
-                ? [{ id: "chat", etiqueta: "Chat", contenido: <PanelChat slug={slug} tid={disenoId} /> }]
+                ? [{ id: "chat", etiqueta: "Chat", montada: true, contenido: <PanelChat slug={slug} tid={disenoId} /> }]
                 : []),
             ]}
           />

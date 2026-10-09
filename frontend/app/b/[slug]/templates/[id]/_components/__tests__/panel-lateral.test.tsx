@@ -20,4 +20,20 @@ describe("PanelLateral", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Assets" }), { button: 0 });
     expect(screen.queryByText("contenido assets")).not.toBeNull();
   });
+
+  it("una pestaña montada sigue en el DOM, oculta, al cambiar de pestaña", () => {
+    render(
+      <PanelLateral
+        pestanas={[
+          { id: "capas", etiqueta: "Capas", contenido: <p>contenido capas</p> },
+          { id: "chat", etiqueta: "Chat", montada: true, contenido: <p>contenido chat</p> },
+        ]}
+      />,
+    );
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Chat" }), { button: 0 });
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Capas" }), { button: 0 });
+    const chat = screen.getByText("contenido chat");
+    expect(chat.closest("[data-state]")?.getAttribute("data-state")).toBe("inactive");
+    expect(screen.queryByText("contenido capas")).not.toBeNull();
+  });
 });

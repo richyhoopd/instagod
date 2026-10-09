@@ -33,8 +33,8 @@ export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
         !window.confirm("Crear desde cero reemplaza el diseño y no se puede deshacer. ¿Seguir?")) {
       return;
     }
-    await enviar(m, modo, escena ?? null);
-    setTexto("");
+    setErrorAplicar(null);
+    if (await enviar(m, modo, escena ?? null)) setTexto("");
   };
 
   return (
