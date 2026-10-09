@@ -16,8 +16,6 @@ from . import contrato as contrato_mod
 from . import escena as escena_mod
 from . import extraer, fuentes_tipograficas, kinds, ops
 
-_CLAVES_FUENTE = ("proveedor", "autor", "licencia", "url", "ig_handle")
-
 
 class ChatError(RuntimeError):
     """El modelo no produjo algo usable tras su reintento, o falta un asset."""
@@ -174,10 +172,11 @@ def contrato_de(escena: dict, formato: str) -> dict:
 
 
 def _revisar(png: bytes, kind: str, spec: dict, uso: list) -> dict | None:
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(png)
-        ruta = Path(f.name)
+    ruta = None
     try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            ruta = Path(f.name)
+            f.write(png)
         salida = llm_claude.pedir_herramienta(
             system="Eres director de arte. Revisas un post de Instagram ya renderizado.",
             mensajes=[{"role": "user", "content":
@@ -187,7 +186,8 @@ def _revisar(png: bytes, kind: str, spec: dict, uso: list) -> dict | None:
     except (llm_claude.LLMTruncado, llm_claude.LLMSinHerramienta):
         return None
     finally:
-        ruta.unlink(missing_ok=True)
+        if ruta is not None:
+            ruta.unlink(missing_ok=True)
     if salida.get("ok") or not isinstance(salida.get("spec"), dict):
         return None
     try:
@@ -222,12 +222,18 @@ def crear(cx, marca, mensaje: str, *, formato: str = "4x5",
 
     corregido = _revisar(png, kind, spec, uso)
     if corregido is not None:
-        faltantes = {s["id"] for s in kinds.slots(kind, corregido)} - set(assets)
-        if faltantes:
-            assets |= _resolver_assets(cx, marca, kind, corregido,
-                                       {k: v for k, v in consultas.items() if k in faltantes})
-        spec = corregido
-        png, escena, muestras = _componer(cx, marca, kind, spec, assets, catalogo)
+        # La crítica es de mejor esfuerzo: si su spec no resuelve assets, se queda el primer render.
+        try:
+            faltantes = {s["id"] for s in kinds.slots(kind, corregido)} - set(assets)
+            nuevos = dict(assets)
+            if faltantes:
+                nuevos |= _resolver_assets(cx, marca, kind, corregido,
+                                           {k: v for k, v in consultas.items() if k in faltantes})
+        except ChatError:
+            corregido = None
+        else:
+            assets, spec = nuevos, corregido
+            png, escena, muestras = _componer(cx, marca, kind, spec, assets, catalogo)
 
     if formato != "4x5":
         escena = escena_mod.reformatear(escena, formato)

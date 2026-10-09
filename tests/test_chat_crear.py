@@ -174,13 +174,9 @@ def test_asset_salta_candidata_que_no_descarga(entorno, monkeypatch):
     assert chat.asset_para(entorno.cx, _marca(), "beach", recortar=False) is None
 
 
-def test_max_tokens_en_diseno_reintenta_y_luego_falla(entorno):
-    def truncado(**kw):
-        raise chat.llm_claude.LLMTruncado("max_tokens")
-
-    entorno.respuestas += [SIDE, {"ok": True}]
-    llamadas = {"n": 0}
+def test_max_tokens_en_diseno_reintenta_y_luego_falla(entorno, monkeypatch):
     original = chat.llm_claude.pedir_herramienta
+    llamadas = {"n": 0}
 
     def primero_truncado(**kw):
         llamadas["n"] += 1
@@ -188,19 +184,17 @@ def test_max_tokens_en_diseno_reintenta_y_luego_falla(entorno):
             raise chat.llm_claude.LLMTruncado("max_tokens")
         return original(**kw)
 
-    chat.llm_claude.pedir_herramienta = primero_truncado
-    try:
-        _, _, meta = chat.crear(entorno.cx, _marca(), "x")
-    finally:
-        chat.llm_claude.pedir_herramienta = original
+    entorno.respuestas += [SIDE, {"ok": True}]
+    monkeypatch.setattr(chat.llm_claude, "pedir_herramienta", primero_truncado)
+    _, _, meta = chat.crear(entorno.cx, _marca(), "x")
     assert meta["kind"] == "side" and llamadas["n"] == 3
 
-    chat.llm_claude.pedir_herramienta = truncado
-    try:
-        with pytest.raises(chat.ChatError, match="max_tokens"):
-            chat.crear(entorno.cx, _marca(), "x")
-    finally:
-        chat.llm_claude.pedir_herramienta = original
+    def truncado(**kw):
+        raise chat.llm_claude.LLMTruncado("max_tokens")
+
+    monkeypatch.setattr(chat.llm_claude, "pedir_herramienta", truncado)
+    with pytest.raises(chat.ChatError, match="max_tokens"):
+        chat.crear(entorno.cx, _marca(), "x")
 
 
 def test_max_tokens_en_critica_se_ignora(entorno, monkeypatch):
@@ -215,3 +209,15 @@ def test_max_tokens_en_critica_se_ignora(entorno, monkeypatch):
     monkeypatch.setattr(chat.llm_claude, "pedir_herramienta", f)
     chat.crear(entorno.cx, _marca(), "x")
     assert len(entorno.compuestos) == 1
+
+
+def test_critica_con_slot_sin_resolver_conserva_el_primer_render(entorno):
+    comp = {"kind": "compare", "respuesta": "ok", "assets": {"item_0": "pill", "item_1": "flask"},
+            "spec": {"titulo": ["A"], "oferta": {"nombre": "T", "precio": "$1"},
+                     "items": [{"nombre": "a", "precio": "1"}, {"nombre": "b", "precio": "2"}]}}
+    tres = {**comp["spec"], "items": comp["spec"]["items"] + [{"nombre": "c", "precio": "3"}]}
+    entorno.respuestas += [comp, {"ok": False, "problemas": ["falta uno"], "spec": tres}]
+    _, _, meta = chat.crear(entorno.cx, _marca(), "x")
+    assert len(entorno.compuestos) == 1
+    assert meta["revisado"] is False
+    assert len(meta["spec"]["items"]) == 2
