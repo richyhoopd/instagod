@@ -693,7 +693,7 @@ def test_fallo_a_medias_cuenta_lo_guardado_y_el_reintento_completa(cx, ids, ig_f
     monkeypatch.setattr(ingest_ig, "_sleep", sleep)
     r = ig_seguidos.ingerir(cx, a)
     assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
-    assert len(_assets(cx, a)) == 4
+    assert len(_assets(cx, a)) == 6   # 4 contados + 2 cuadros de video (no cuentan)
     pool = _pool(tmp_path)
     assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
 
