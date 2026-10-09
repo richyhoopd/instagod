@@ -59,6 +59,15 @@ def _ahora() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _proveedores_extra(cx, account_id: int) -> list[str]:
+    """Proveedores activos sin fila en brand_sources: ig_seguidos se activa solo
+    cuando la marca ya tiene assets ingeridos de IG."""
+    hay = db.rows(cx, "SELECT 1 FROM brand_assets WHERE account_id = ?"
+                      " AND proveedor = 'ig_seguidos' AND COALESCE(descartada, 0) = 0 LIMIT 1",
+                  (account_id,))
+    return ["ig_seguidos"] if hay else []
+
+
 def buscar_con_avisos(cx, account_id: int, slug: str, q: str, *, tipo: str = "imagen",
                       proveedores: list[str] | None = None, n: int = 20
                       ) -> tuple[list[Candidata], list[str]]:
@@ -78,6 +87,7 @@ def buscar_con_avisos(cx, account_id: int, slug: str, q: str, *, tipo: str = "im
         nombres = [p for p in fila_de if p in PROVEEDORES and not PROVEEDORES[p].de_pago]
         if not nombres:
             nombres = ["carpeta"] + (["pexels"] if creds.get("PEXELS_API_KEY") else [])
+        nombres += _proveedores_extra(cx, account_id)
     else:
         nombres = []
         for p in proveedores:

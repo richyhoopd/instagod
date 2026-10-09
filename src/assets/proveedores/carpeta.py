@@ -21,7 +21,8 @@ class Carpeta(Proveedor):
             return []
         toks = _tokens(q)
         filas = db.rows(self.cx, "SELECT * FROM brand_assets WHERE account_id = ? AND tipo = ? "
-                                 "AND descartada = 0 ORDER BY id DESC LIMIT 500",
+                                 "AND descartada = 0 AND COALESCE(proveedor, '') != 'ig_seguidos' "
+                                 "ORDER BY id DESC LIMIT 500",
                         (self.account_id, tipo))
         puntuadas = []
         for f in filas:

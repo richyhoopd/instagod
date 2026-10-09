@@ -113,7 +113,7 @@ def estado_fuentes(slug: str) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for prov in ("pexels", "unsplash", "pinterest", "newsapi", "rss", "banco",
                  "covers", "carpeta", "ig_accounts", "manual",
-                 "pixabay", "openverse", "coverr", "giphy", "ia_imagen"):
+                 "pixabay", "openverse", "coverr", "giphy", "ia_imagen", "ig_seguidos"):
         motivo = None
         if prov in config.FUENTES_NO_DISPONIBLES:
             motivo = "no disponible en este servidor"
