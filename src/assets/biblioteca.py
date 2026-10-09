@@ -180,11 +180,14 @@ def _rescatar(cx, fila) -> dict:
 
 
 def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: str,
-                  meta: dict | None = None, tags: list[str] | None = None
-                  ) -> tuple[dict, bool]:
+                  meta: dict | None = None, tags: list[str] | dict | None = None,
+                  prefijo: str = "", largo_sha: int = 16,
+                  exts: frozenset[str] | None = None) -> tuple[dict, bool]:
+    """`prefijo`/`largo_sha` definen el nombre en disco (<prefijo><sha[:largo]>.<ext>);
+    `exts` acota las extensiones aceptadas (None = todas las que reconoce tipo_de_bytes)."""
     exigir_cuenta(cx, account_id, slug)
     detectado = tipo_de_bytes(datos[:16])
-    if detectado is None:
+    if detectado is None or (exts is not None and detectado[1] not in exts):
         raise AssetInvalido("formato no soportado (jpg, png, webp, gif, mp4, webm)")
     tipo, ext = detectado
     if len(datos) > TOPES[tipo]:
@@ -196,7 +199,7 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
         return _rescatar(cx, previas[0]), False
     meta = meta or {}
     ancho, alto = _dims_imagen(datos) if tipo == "imagen" else (meta.get("ancho"), meta.get("alto"))
-    archivo = f"{sha[:16]}.{ext}"
+    archivo = f"{prefijo}{sha[:largo_sha]}.{ext}"
     destino = _ruta(slug, archivo)
     destino.parent.mkdir(parents=True, exist_ok=True)
     _ruta(slug, archivo)   # re-valida contención ya con el directorio creado
