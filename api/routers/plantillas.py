@@ -289,7 +289,10 @@ def chat_diseno(slug: str, tid: int, cuerpo: MensajeChat, user: dict = Depends(u
                 cx=Depends(get_cx)) -> dict:
     """Un mensaje del chat del editor v2 (crear o editar). Aislamiento antes de encolar."""
     marca, _ = marca_para(slug, cx, user, minimo="manager")
-    _plantilla_de_marca(cx, marca["id"], tid)
+    fila = _plantilla_de_marca(cx, marca["id"], tid)
+    # El chat escribe directo en la plantilla: solo en borradores.
+    if fila["estado"] != "borrador":
+        raise HTTPException(409, "El chat solo funciona en borradores.")
     job_id = jobs.crear(cx, "diseno.chat", marca["id"],
                         {"template_id": tid, **cuerpo.model_dump()}, creado_por=user["id"])
     return {"job_id": job_id}

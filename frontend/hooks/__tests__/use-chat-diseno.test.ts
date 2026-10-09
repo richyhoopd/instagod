@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpInvalida } from "@/lib/escena";
-import { aplicarResultado, interpretarResultado } from "../use-chat-diseno";
+import { aplicarResultado, errorDeJob, interpretarResultado } from "../use-chat-diseno";
 
 describe("interpretarResultado", () => {
   it("crear devuelve escena", () => {
@@ -44,5 +44,18 @@ describe("aplicarResultado", () => {
     });
     expect(() => aplicarResultado({ tipo: "ops", ops: [], respuesta: "x", version: 3 },
       { cargar: vi.fn(), aplicar })).toThrow(TypeError);
+  });
+});
+
+describe("errorDeJob", () => {
+  it("lee el texto del error del job", () => {
+    expect(errorDeJob({ resultado_json: JSON.stringify({ error: "el modelo no corrigió su propuesta" }) }))
+      .toBe("el modelo no corrigió su propuesta");
+  });
+  it("sin error legible es null", () => {
+    expect(errorDeJob(undefined)).toBeNull();
+    expect(errorDeJob({ resultado_json: null })).toBeNull();
+    expect(errorDeJob({ resultado_json: "no json" })).toBeNull();
+    expect(errorDeJob({ resultado_json: "{}" })).toBeNull();
   });
 });

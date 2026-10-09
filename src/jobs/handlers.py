@@ -783,10 +783,14 @@ def diseno_chat(cx, job) -> dict:
     fila = plantillas.obtener(cx, tid)
     if fila is None or fila["account_id"] != job["account_id"]:
         raise ValueError("plantilla de otra marca o inexistente")
+    if fila["estado"] != "borrador":
+        raise ValueError("el chat solo funciona en borradores")
+    modo = payload.get("modo")
+    if modo not in ("crear", "editar"):
+        raise ValueError("falta el modo (crear o editar) en el payload del chat")
     m = marcas.cargar_por_id(cx, job["account_id"])
     uso: list[dict] = []
     jobs.progresar(cx, job["id"], 10, "Pensando el diseño")
-    modo = payload.get("modo") or "crear"
     if modo == "editar":
         actual = payload.get("escena") or escena_mod.normalizar(
             json.loads(fila.get("layout_json") or "null"), fila["aspecto"])

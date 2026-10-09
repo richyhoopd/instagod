@@ -34,7 +34,7 @@ export function PanelChat({ slug, tid }: { slug: string; tid: number }) {
       return;
     }
     setErrorAplicar(null);
-    if (await enviar(m, modo, escena ?? null)) setTexto("");
+    if (await enviar(m, modo, escena ?? null, escena?.lienzo.formato)) setTexto("");
   };
 
   return (

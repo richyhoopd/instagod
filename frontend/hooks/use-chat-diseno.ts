@@ -32,6 +32,17 @@ export function interpretarResultado(r: unknown): ResultadoChat | null {
   return null;
 }
 
+/** Texto de error del job (`{"error": "..."}` en resultado_json, src/jobs/__init__.py:110). */
+export function errorDeJob(j: { resultado_json: string | null } | undefined): string | null {
+  if (!j?.resultado_json) return null;
+  try {
+    const e = (JSON.parse(j.resultado_json) as { error?: unknown } | null)?.error;
+    return typeof e === "string" && e.trim() ? e : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Lleva el resultado al store. Si la escena cambió mientras corría el job y las ops ya no
  *  aplican, `aplicar` lanza `OpInvalida` sin registrar nada (plan 2): se devuelve el error
  *  para el chat en vez de tumbar el editor. */
@@ -78,6 +89,9 @@ export function useChatDiseno(slug: string, tid: number, alResultado: (r: Result
       procesado.current = jobId;
       if (resultado) alResultado(resultado);
       void qc.invalidateQueries({ queryKey: ["chat", slug, tid] });
+      // crear regenera el contrato y crea versión: el diseño y la lista de versiones quedan viejos.
+      void qc.invalidateQueries({ queryKey: ["diseno", slug, tid] });
+      void qc.invalidateQueries({ queryKey: ["versiones", slug, tid] });
     } else if (j.estado === "error" || j.estado === "cancelado") {
       procesado.current = jobId;
     }
@@ -85,7 +99,7 @@ export function useChatDiseno(slug: string, tid: number, alResultado: (r: Result
 
   let error = errorEnvio;
   if (!error && j && (j.estado === "error" || j.estado === "cancelado")) {
-    error = "No se pudo completar. Intenta de nuevo o reformula.";
+    error = errorDeJob(j) ?? "No se pudo completar. Intenta de nuevo o reformula.";
   } else if (!error && j?.estado === "ok" && !resultado) {
     error = "El job terminó sin resultado.";
   }

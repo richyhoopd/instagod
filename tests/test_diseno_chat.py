@@ -141,3 +141,42 @@ def test_get_historial(con_marca, monkeypatch):
     assert r.status_code == 200
     assert r.json()[-1]["mensaje"] == "hola"
     assert r.json()[-1]["respuesta"] == "Listo"
+
+
+def test_post_409_si_no_es_borrador(con_marca):
+    cli, cx, H, uid = con_marca
+    marca = _marca(cx, "prueba")
+    tid = _plantilla(cx, marca["id"])
+    db.update(cx, "brand_templates", tid, estado="activa")
+    cx.commit()
+    antes = len(db.rows(cx, "SELECT id FROM jobs"))
+    r = cli.post(f"/brands/prueba/templates/{tid}/chat", json={"mensaje": "x", "modo": "editar"})
+    assert r.status_code == 409
+    assert len(db.rows(cx, "SELECT id FROM jobs")) == antes
+
+
+def test_handler_rechaza_si_ya_no_es_borrador(con_marca, monkeypatch):
+    _, cx, H, uid = con_marca
+    marca = _marca(cx, "prueba")
+    tid = _plantilla(cx, marca["id"])
+    llamado = []
+    monkeypatch.setattr(chat, "editar", lambda *a, **k: llamado.append(1))
+    jid = jobs.crear(cx, "diseno.chat", marca["id"],
+                     {"template_id": tid, "mensaje": "x", "modo": "editar", "escena": ESCENA},
+                     creado_por=uid)
+    db.update(cx, "brand_templates", tid, estado="activa")
+    cx.commit()
+    nv = len(plantillas.versiones(cx, tid))
+    with pytest.raises(ValueError, match="borrador"):
+        handlers.diseno_chat(cx, db.get(cx, "jobs", jid))
+    assert not llamado and len(plantillas.versiones(cx, tid)) == nv
+
+
+def test_handler_exige_modo(con_marca):
+    _, cx, H, uid = con_marca
+    marca = _marca(cx, "prueba")
+    tid = _plantilla(cx, marca["id"])
+    jid = jobs.crear(cx, "diseno.chat", marca["id"],
+                     {"template_id": tid, "mensaje": "x"}, creado_por=uid)
+    with pytest.raises(ValueError, match="modo"):
+        handlers.diseno_chat(cx, db.get(cx, "jobs", jid))

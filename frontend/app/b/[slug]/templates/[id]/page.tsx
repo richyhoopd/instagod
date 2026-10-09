@@ -207,8 +207,8 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
               ...(puedeAssets
                 ? [{ id: "assets", etiqueta: "Assets", contenido: <PanelAssets slug={slug} puedeEditar /> }]
                 : []),
-              // El endpoint del chat exige rol manager, igual que assets.
-              ...(puedeAssets
+              // El endpoint del chat exige rol manager y escribe directo: solo en borradores.
+              ...(puedeAssets && diseno.estado === "borrador"
                 ? [{ id: "chat", etiqueta: "Chat", montada: true, contenido: <PanelChat slug={slug} tid={disenoId} /> }]
                 : []),
             ]}

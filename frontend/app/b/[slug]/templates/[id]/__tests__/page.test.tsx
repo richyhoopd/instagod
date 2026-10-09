@@ -58,6 +58,16 @@ describe("DisenoPage", () => {
     expect(screen.getByTestId("lienzo")).not.toBeNull();
   });
 
+  it("la pestaña Chat solo existe en borradores", () => {
+    diseno = { id: 7, nombre: "X", aspecto: "4:5", estado: "borrador", editable: true, layout: structuredClone(escena) };
+    const { unmount } = render(<DisenoPage />);
+    expect(screen.queryByRole("tab", { name: "Chat" })).not.toBeNull();
+    unmount();
+    diseno = { id: 7, nombre: "X", aspecto: "4:5", estado: "activa", editable: true, layout: structuredClone(escena) };
+    render(<DisenoPage />);
+    expect(screen.queryByRole("tab", { name: "Chat" })).toBeNull();
+  });
+
   it("un diseño no editable no carga el store ni guarda", () => {
     diseno = { id: 7, nombre: "X", aspecto: "4:5", estado: "borrador", editable: false, layout: structuredClone(escena) };
     render(<DisenoPage />);
