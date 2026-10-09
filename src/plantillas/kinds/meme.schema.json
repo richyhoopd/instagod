@@ -1,0 +1,8 @@
+{
+  "description": "Meme. impact = foto a sangre con texto arriba y abajo en mayúsculas; tweet = captura tipo publicación con texto e imagen. El título es el texto de arriba (impact) o el texto del post (tweet).",
+  "properties": {
+    "estilo": {"type": "string", "enum": ["impact", "tweet"], "default": "impact"},
+    "abajo": {"type": "string", "maxLength": 80, "description": "texto de abajo (solo impact)"}
+  },
+  "x-slots": [{"id": "imagen", "requerido": true}]
+}

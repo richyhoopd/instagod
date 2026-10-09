@@ -1,0 +1,10 @@
+{
+  "description": "Historia corta en una sola lámina: título y de 1 a 3 párrafos, con foto opcional arriba. Para testimonios o casos.",
+  "properties": {
+    "titulo": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string", "minLength": 1, "maxLength": 40}},
+    "parrafos": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string", "minLength": 1, "maxLength": 280}},
+    "con_foto": {"type": "boolean", "default": true}
+  },
+  "required": ["parrafos"],
+  "x-slots": [{"id": "imagen", "requerido_si": "con_foto"}]
+}

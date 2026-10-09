@@ -1,0 +1,12 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% set posiciones_sticker = [(780, 60, 7), (60, 60, -6), (780, 640, 5)] %}
+{% block capas %}
+{{ p.foto("imagen", a.imagen, 0, 0, 1080, 760, campo="imagen") }}
+{% if spec.etiqueta %}{{ p.pill("etiqueta", spec.etiqueta, 60, 680, 420, t, color="profundo", fg=t.sobre_profundo) }}{% endif %}
+{{ p.texto("titulo", "Título", 60, 800, 640, 56, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo") }}
+{{ p.caja("precio", "Precio", 720, 800, 300, 110, spec.precio, t.acento, t.sobre_acento, size=40, radio="28px", peso=700, padding=16) }}
+{% for d in spec.datos %}
+{{ p.caja("dato_" ~ loop.index0, "Dato", 60 + (loop.index0 % 2) * 470, 980 + (loop.index0 // 2) * 100, 450, 80, d, t.panel, t.tinta, size=26, radio="20px", padding=12) }}
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,10 @@
+{
+  "description": "Frase textual de una persona con su nombre y rol. El título ES la cita, partida en líneas.",
+  "properties": {
+    "autor": {"type": "string", "minLength": 1, "maxLength": 40},
+    "rol": {"type": "string", "maxLength": 60},
+    "con_retrato": {"type": "boolean", "default": false}
+  },
+  "required": ["autor"],
+  "x-slots": [{"id": "retrato", "requerido_si": "con_retrato"}]
+}

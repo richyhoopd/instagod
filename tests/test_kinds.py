@@ -58,3 +58,12 @@ def test_requeridos_propios(kind):
 
 def test_estan_todos_los_del_lote_a():
     assert {"side", "stat", "vs", "compare", "list", "cta"} <= set(DISPONIBLES)
+
+
+def test_estan_todos():
+    assert set(DISPONIBLES) == set(kinds.KINDS)
+
+
+def test_meme_usa_anton():
+    f = kinds.fuentes_de(_marca(), {"Anton-Regular", "Poppins-Bold", "Poppins-SemiBold"}, "meme")
+    assert f["titulo"] == "Anton-Regular"

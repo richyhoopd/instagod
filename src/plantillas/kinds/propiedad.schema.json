@@ -1,0 +1,10 @@
+{
+  "description": "Ficha de inmueble: foto grande, precio, ubicación (etiqueta) y hasta 4 datos cortos.",
+  "properties": {
+    "titulo": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string", "minLength": 1, "maxLength": 40}},
+    "precio": {"type": "string", "minLength": 1, "maxLength": 20},
+    "datos": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 24}}
+  },
+  "required": ["precio", "datos"],
+  "x-slots": [{"id": "imagen", "requerido": true}]
+}

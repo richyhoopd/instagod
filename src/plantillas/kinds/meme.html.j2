@@ -1,0 +1,19 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% block capas %}
+{% if spec.estilo == "impact" %}
+{{ p.foto("imagen", a.imagen, 0, 0, 1080, 1350, campo="imagen") }}
+{{ p.shape("banda_arriba", "Banda", 0, 0, 1080, 330, "rgba(0,0,0,0.35)") }}
+{{ p.texto("titulo", "Arriba", 60, 50, 960, 96, spec.titulo|join("<br>"|safe), clase="titulo", alinea="center", color="#FFFFFF", extra="text-transform:uppercase;line-height:1.05;letter-spacing:0em;") }}
+{% if spec.abajo %}
+{{ p.shape("banda_abajo", "Banda", 0, 1020, 1080, 330, "rgba(0,0,0,0.35)") }}
+{{ p.texto("abajo", "Abajo", 60, 1060, 960, 96, spec.abajo, clase="titulo", alinea="center", color="#FFFFFF", anclaje="bottom", extra="text-transform:uppercase;line-height:1.05;letter-spacing:0em;") }}
+{% endif %}
+{% else %}
+{{ p.shape("tarjeta", "Tarjeta", 60, 140, 960, 1060, t.panel, "40px") }}
+{{ p.shape("avatar", "Avatar", 110, 190, 96, 96, t.acento, "50%") }}
+{{ p.texto("autor", "Autor", 230, 200, 700, 34, handle or "@marca", extra="font-weight:700;line-height:1.2;") }}
+{{ p.texto("titulo", "Post", 110, 330, 860, 44, spec.titulo|join("<br>"|safe), extra="font-weight:600;line-height:1.25;") }}
+{{ p.foto("imagen", a.imagen, 110, 600, 860, 540, campo="imagen", radio="28px") }}
+{% endif %}
+{% endblock %}

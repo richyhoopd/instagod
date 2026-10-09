@@ -1,0 +1,15 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% set posiciones_sticker = [(760, 60, 6), (60, 60, -6), (760, 1150, 4)] %}
+{% block capas %}
+{% set y0 = 80 %}
+{% if spec.con_foto and a.imagen %}
+{{ p.foto("imagen", a.imagen, 80, 80, 920, 420, campo="imagen", radio="36px") }}
+{% set y0 = 540 %}
+{% endif %}
+{{ p.texto("titulo", "Título", 80, y0, 920, 60, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo") }}
+{% set alto = 220 if spec.con_foto and a.imagen else 300 %}
+{% for par in spec.parrafos %}
+{{ p.texto("parrafo_" ~ loop.index0, "Párrafo", 80, y0 + 160 + loop.index0 * alto, 920, 28 if spec.con_foto and a.imagen else 32, par, color=t.suave, extra="line-height:1.4;font-weight:600;") }}
+{% endfor %}
+{% endblock %}
