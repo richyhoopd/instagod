@@ -1,0 +1,17 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% set posiciones_sticker = [(90, 90, -7), (740, 90, 6), (90, 1120, 4)] %}
+{% block capas %}
+{{ p.flor("flor_a", -90, 980, 360, t.panel, t.destacado) }}
+{{ p.flor("flor_b", 820, 380, 300, t.panel, t.acento) }}
+{% if spec.con_telefono and a.pantalla %}
+{{ p.texto("titulo", "Título", 80, 200, 500, 72, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo", anclaje="center") }}
+{% if spec.bajada %}{{ p.texto("bajada", "Bajada", 80, 640, 480, 32, spec.bajada, clase="bajada", campo="bajada") }}{% endif %}
+{{ p.telefono("pantalla", a.pantalla, 620, 170, 380, 780, t) }}
+{{ p.caja("cta", "Botón", 80, 1040, 920, 110, spec.cta, t.acento, t.sobre_acento, size=40, padding=20) }}
+{% else %}
+{{ p.texto("titulo", "Título", 80, 300, 920, 88, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo", alinea="center", anclaje="center") }}
+{% if spec.bajada %}{{ p.texto("bajada", "Bajada", 140, 760, 800, 34, spec.bajada, clase="bajada", campo="bajada", alinea="center") }}{% endif %}
+{{ p.caja("cta", "Botón", 190, 980, 700, 120, spec.cta, t.acento, t.sobre_acento, size=44, padding=20) }}
+{% endif %}
+{% endblock %}

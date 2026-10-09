@@ -1,0 +1,12 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% block capas %}
+{{ p.texto("titulo", "Título", 80, 100, 920, 68, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo", alinea="center") }}
+{{ p.shape("ellos_fondo", "Ellos", 60, 330, 470, 820, t.panel, "36px") }}
+{{ p.shape("nosotros_fondo", "Nosotros", 550, 330, 470, 820, t.acento, "36px") }}
+{{ p.texto("ellos_nombre", "Ellos", 100, 380, 390, 40, spec.ellos.nombre, clase="titulo", alinea="center", color=t.suave) }}
+{{ p.texto("nosotros_nombre", "Nosotros", 590, 380, 390, 40, spec.nosotros.nombre, clase="titulo", alinea="center", color=t.sobre_acento) }}
+{% for x in spec.ellos.puntos %}{{ p.texto("ellos_" ~ loop.index0, "Punto", 100, 500 + loop.index0 * 150, 390, 30, "– " ~ x, color=t.suave, extra="line-height:1.25;font-weight:600;") }}{% endfor %}
+{% for x in spec.nosotros.puntos %}{{ p.texto("nosotros_" ~ loop.index0, "Punto", 590, 500 + loop.index0 * 150, 390, 30, "+ " ~ x, color=t.sobre_acento, extra="line-height:1.25;font-weight:600;") }}{% endfor %}
+{{ p.coin("vs", "VS", 480, 300, 120, t.destacado, t.sobre_destacado, size=40) }}
+{% endblock %}

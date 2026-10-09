@@ -1,0 +1,10 @@
+{
+  "description": "Una cifra enorme con su contexto. Para datos duros: porcentajes, conteos, precios.",
+  "properties": {
+    "cifra": {"type": "string", "minLength": 1, "maxLength": 8, "description": "lo que va enorme: 7 de 10, 82%, $399"},
+    "unidad": {"type": "string", "maxLength": 20},
+    "fuente": {"type": "string", "maxLength": 80, "description": "de dónde sale la cifra"}
+  },
+  "required": ["cifra"],
+  "x-slots": []
+}

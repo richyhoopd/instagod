@@ -1,0 +1,4 @@
+{"spec": {"titulo": ["Por separado", "te sale caro"], "acento": "caro",
+          "items": [{"nombre": "Consulta", "precio": "$600"}, {"nombre": "Laboratorio", "precio": "$900"}, {"nombre": "Seguimiento", "precio": "$400"}],
+          "oferta": {"nombre": "Todo en Daisies", "precio": "$399"},
+          "bajada": "Consulta, estudios y seguimiento por chat."}}

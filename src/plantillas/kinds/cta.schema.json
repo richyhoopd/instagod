@@ -1,0 +1,9 @@
+{
+  "description": "Cierre con llamado a la acción grande. Opcional: pantalla de la app en un teléfono.",
+  "properties": {
+    "cta": {"type": "string", "minLength": 1, "maxLength": 40},
+    "con_telefono": {"type": "boolean", "default": false}
+  },
+  "required": ["cta"],
+  "x-slots": [{"id": "pantalla", "requerido_si": "con_telefono"}]
+}

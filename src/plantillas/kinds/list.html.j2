@@ -1,0 +1,14 @@
+{% extends "_base.html.j2" %}
+{% import "_parciales.html.j2" as p %}
+{% set posiciones_sticker = [(780, 80, 8), (760, 1150, -5), (60, 1150, 4)] %}
+{% block capas %}
+{% if spec.etiqueta %}{{ p.pill("etiqueta", spec.etiqueta, 80, 80, 400, t) }}{% endif %}
+{{ p.texto("titulo", "Título", 80, 170, 920, 68, p.texto_con_acento(spec.titulo, spec.acento), clase="titulo") }}
+{% set n = spec["items"]|length %}
+{% set paso = 760 // n %}
+{% for it in spec["items"] %}
+{% set y = 360 + loop.index0 * paso %}
+{{ p.coin("num_" ~ loop.index0, loop.index|string, 80, y, 84, t.acento, t.sobre_acento, size=36) }}
+{{ p.texto("item_" ~ loop.index0, "Punto", 196, y + 4, 800, 34, it, valign="center", extra="line-height:1.25;font-weight:600;") }}
+{% endfor %}
+{% endblock %}
