@@ -241,3 +241,81 @@ def crear(cx, marca, mensaje: str, *, formato: str = "4x5",
     escena_mod.validar(escena, contrato, familias={f["familia"] for f in catalogo})
     return escena, contrato, {"kind": kind, "spec": spec, "respuesta": salida["respuesta"],
                               "muestras": muestras, "revisado": corregido is not None}
+
+
+HERRAMIENTA_EDITAR = {
+    "name": "editar",
+    "description": "Cambia la escena con ops. set: {op:'set', capa:id, ruta:'estilo.color', valor}; "
+                   "valor null deja la clave en null (no la borra). add: {op:'add', capa:{...capa v2 completa...}, indice?}. "
+                   "del: {op:'del', capa:id}. Para cambiar una foto usa buscar_asset, no inventes src.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ops": {"type": "array", "items": {"type": "object"}},
+            "buscar_asset": {"type": "array", "items": {
+                "type": "object", "properties": {"capa": {"type": "string"},
+                                                 "query": {"type": "string"}},
+                "required": ["capa", "query"]}},
+            "respuesta": {"type": "string", "description": "una frase para la persona, en español"},
+        },
+        "required": ["ops", "respuesta"],
+    },
+}
+
+_SYSTEM_EDITAR = (
+    "Editas una escena v2 de un post de Instagram. Responde SOLO con la herramienta `editar`.\n"
+    "- Cambia lo mínimo que pide la persona; no reacomodes lo demás.\n"
+    "- Colores: '#rrggbb', 'rgba(...)' o 'token:<nombre>' de escena.tokens.colores.\n"
+    "- El lienzo mide lienzo.w × lienzo.h px; x/y/w/h van en px.\n"
+    "- Ids nuevos: ^[a-z][a-z0-9_-]{0,31}$ y que no existan.\n"
+    "- Nunca cambies `id` ni `campo`.\n"
+    "- Español de México, sin emojis."
+)
+
+
+def _ops_de_asset(cx, marca, escena: dict, pedido: dict) -> list[dict]:
+    capa = next((c for c in escena.get("capas", []) if c.get("id") == pedido.get("capa")), None)
+    if capa is None or capa.get("tipo") != "image":
+        raise ChatError(f"buscar_asset necesita una capa de imagen: {pedido.get('capa')!r}")
+    asset = asset_para(cx, marca, str(pedido.get("query") or ""),
+                       recortar=bool(capa.get("recorte")))
+    if asset is None:
+        raise ChatError(f"sin resultados para {pedido.get('query')!r}")
+    return [{"op": "set", "capa": capa["id"], "ruta": "src", "valor": asset["archivo"]},
+            {"op": "set", "capa": capa["id"], "ruta": "fuente_asset",
+             "valor": asset["fuente_asset"]}]
+
+
+def _escena_para_llm(valor, clave: str = ""):
+    """Copia de la escena sin src largos (§3): data:, file:// o un `src` de >300 caracteres.
+    Los textos largos sí viajan: el modelo los necesita para editar."""
+    if isinstance(valor, dict):
+        return {k: _escena_para_llm(v, k) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [_escena_para_llm(v, clave) for v in valor]
+    if isinstance(valor, str) and (valor.startswith(("data:", "file:"))
+                                   or (clave == "src" and len(valor) > 300)):
+        return "<omitido>"
+    return valor
+
+
+def editar(cx, marca, escena: dict, contrato: dict, mensaje: str, *,
+           uso: list | None = None) -> tuple[list, dict, dict]:
+    uso = [] if uso is None else uso
+    familias = {f["familia"] for f in fuentes_tipograficas.catalogo(cx, marca.id)}
+
+    def validar(salida: dict) -> tuple[list, dict]:
+        lista = list(salida.get("ops") or [])
+        for pedido in salida.get("buscar_asset") or []:
+            lista += _ops_de_asset(cx, marca, escena, pedido)
+        nueva = ops.aplicar(escena, lista)
+        escena_mod.validar(nueva, contrato, familias=familias)
+        return lista, nueva
+
+    contenido = (f"Escena actual:\n{json.dumps(_escena_para_llm(escena), ensure_ascii=False)}\n\n"
+                 f"Familias tipográficas disponibles: {sorted(familias)}\n\n"
+                 f"Pedido: {mensaje}")
+    salida, (lista, nueva) = _pedir_valido(
+        system=_SYSTEM_EDITAR, mensajes=[{"role": "user", "content": contenido}],
+        herramienta=HERRAMIENTA_EDITAR, validar=validar, uso=uso)
+    return lista, nueva, {"respuesta": salida["respuesta"]}
