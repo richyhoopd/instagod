@@ -86,14 +86,23 @@ def _following() -> list[dict]:
 
 
 @pytest.fixture
-def following_falso(monkeypatch):
+def following_falso(monkeypatch, tmp_path):
+    """Following simulado sin red: pool temporal, perfil y paginación falsos.
+    `llamadas` registra (semilla, limite) de cada listado."""
+    pool = tmp_path / "ig_accounts.json"
+    pool.write_text(json.dumps([
+        {"label": "t1", "sessionid": "s1", "ua": "u", "quemada_hasta": None},
+        {"label": "t2", "sessionid": "s2", "ua": "u", "quemada_hasta": None},
+    ]))
+    monkeypatch.setattr(config, "resolve_ig_accounts_path", lambda: pool)
+    monkeypatch.setattr(ingest_ig, "get_session", lambda cuenta=None: object())
     llamadas: list[tuple] = []
-
-    def falso(cuenta, limite):
-        llamadas.append((cuenta, limite))
-        return _following()
-
-    monkeypatch.setattr(import_followees, "_listar_con_pool", falso)
+    perfil = lambda session, handle: {"id": handle, "edge_follow": {"count": 4}}  # noqa: E731
+    monkeypatch.setattr(ingest_ig, "fetch_profile", perfil)
+    monkeypatch.setattr(import_followees, "fetch_profile", perfil)  # el flujo gdlscene lo importó por nombre
+    monkeypatch.setattr(import_followees, "listar_following",
+                        lambda session, uid, limite=None:
+                        llamadas.append((uid, limite)) or _following())
     return llamadas
 
 
@@ -256,7 +265,7 @@ def test_ingerir_baja_fotos_de_cuentas_activas(cx, ids, ig_falso) -> None:
     ig_seguidos.fijar_estado(cx, a, "candidata.sin.aprobar", "candidata")
     ig_seguidos.fijar_estado(cx, a, "descartada.x", "descartada")
     r = ig_seguidos.ingerir(cx, a, por_cuenta=12)
-    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}   # 2 fotos + 2 videos
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False, "pendientes": 0}   # 2 fotos + 2 videos
     fotos = _fotos_propias(cx, a)
     assert len(fotos) == 2                                   # foto suelta + foto del carrusel
     f = fotos[0]
@@ -287,7 +296,7 @@ def test_ingerir_es_idempotente(cx, ids, ig_falso) -> None:
     antes = _assets(cx, a)
     descargas = len(ig_falso["descargas"])
     r = ig_seguidos.ingerir(cx, a)
-    assert r == {"cuentas": 1, "assets": 0, "errores": [], "cortado": False}
+    assert r == {"cuentas": 1, "assets": 0, "errores": [], "cortado": False, "pendientes": 0}
     assert _assets(cx, a) == antes
     assert len(ig_falso["descargas"]) == descargas          # post ya ingerido: ni se baja
 
@@ -322,7 +331,7 @@ def test_perfil_privado_no_baja_nada(cx, ids, ig_falso, monkeypatch) -> None:
     a = ids["a"]
     ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
     r = ig_seguidos.ingerir(cx, a)
-    assert r == {"cuentas": 1, "assets": 0, "errores": [], "cortado": False}
+    assert r == {"cuentas": 1, "assets": 0, "errores": [], "cortado": False, "pendientes": 0}
     cuenta = ig_seguidos.listar(cx, a)[0]
     assert cuenta["privada"] == 1 and cuenta["notas"] == "perfil privado: no se puede ingerir"
     assert not any("/feed/user/" in u for u in ig_falso["get_json"])
@@ -331,7 +340,7 @@ def test_perfil_privado_no_baja_nada(cx, ids, ig_falso, monkeypatch) -> None:
 
 def test_ingerir_sin_cuentas_activas_no_toca_ig(cx, ids, ig_falso) -> None:
     assert ig_seguidos.ingerir(cx, ids["a"]) == {"cuentas": 0, "assets": 0, "errores": [],
-                                                 "cortado": False}
+                                                 "cortado": False, "pendientes": 0}
     assert ig_falso["get_json"] == []
 
 
@@ -584,7 +593,7 @@ def test_rate_limit_rota_y_reintenta_la_misma_cuenta(cx, ids, ig_falso, tmp_path
     ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
     ig_falso["fallar"].append(ingest_ig.IngestRateLimited("HTTP 429"))
     r = ig_seguidos.ingerir(cx, a)
-    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False, "pendientes": 0}
     pool = _pool(tmp_path)
     assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
 
@@ -599,7 +608,7 @@ def test_http_error_de_cookie_quema_y_rota(cx, ids, ig_falso, tmp_path, status) 
     ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
     ig_falso["fallar"].append(_http(status))
     r = ig_seguidos.ingerir(cx, a)
-    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False, "pendientes": 0}
     pool = _pool(tmp_path)
     assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
 
@@ -626,7 +635,7 @@ def test_pool_agotado_a_media_corrida_devuelve_cortado(cx, ids, ig_falso, monkey
 
     monkeypatch.setattr(ingest_ig, "_get_json", segunda_limitada)
     r = ig_seguidos.ingerir(cx, a)
-    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": True}
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": True, "pendientes": 0}
     assert all(c["quemada_hasta"] for c in _pool(tmp_path))
 
 
@@ -692,7 +701,7 @@ def test_fallo_a_medias_cuenta_lo_guardado_y_el_reintento_completa(cx, ids, ig_f
 
     monkeypatch.setattr(ingest_ig, "_sleep", sleep)
     r = ig_seguidos.ingerir(cx, a)
-    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False, "pendientes": 0}
     assert len(_assets(cx, a)) == 6   # 4 contados + 2 cuadros de video (no cuentan)
     pool = _pool(tmp_path)
     assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
@@ -705,7 +714,7 @@ def test_corte_con_progreso_parcial_no_lanza(cx, ids, ig_falso, monkeypatch, tmp
     r = ig_seguidos.ingerir(cx, a)
     guardados = len(_assets(cx, a))
     assert guardados > 0
-    assert r == {"cuentas": 0, "assets": guardados, "errores": [], "cortado": True}
+    assert r == {"cuentas": 0, "assets": guardados, "errores": [], "cortado": True, "pendientes": 0}
     assert all(c["quemada_hasta"] for c in _pool(tmp_path))
 
 
@@ -762,3 +771,201 @@ def test_handlers_igs_cuenta_inexistente_truena(cx, ids) -> None:
     job["account_id"] = 99999
     with pytest.raises(ValueError):
         handlers.HANDLERS["ig.ingerir"](cx, job)
+
+
+# --- final-review I1: la semilla escrita a mano no puede quemar el pool compartido ---
+def _pool_importar(tmp_path) -> list[dict]:
+    return json.loads((tmp_path / "ig_accounts.json").read_text())
+
+
+@pytest.mark.parametrize("status", [404, 500, 502])
+def test_importar_semilla_http_no_quema_el_pool(cx, ids, following_falso, monkeypatch,
+                                                tmp_path, status) -> None:
+    def malo(session, handle):
+        raise _http(status)
+
+    monkeypatch.setattr(ingest_ig, "fetch_profile", malo)
+    antes = _pool_importar(tmp_path)
+    esperado = LookupError if status == 404 else HTTPError
+    with pytest.raises(esperado) as ei:
+        ig_seguidos.importar_seguidos(cx, ids["a"], "typo.no.existe")
+    if status == 404:
+        assert "la semilla" in str(ei.value) and "no existe" in str(ei.value)
+    assert _pool_importar(tmp_path) == antes
+    assert ig_seguidos.listar(cx, ids["a"]) == []
+
+
+def test_importar_semilla_5xx_a_media_paginacion_no_quema(cx, ids, following_falso,
+                                                          monkeypatch, tmp_path) -> None:
+    def roto(session, uid, limite=None):
+        raise _http(503)
+
+    monkeypatch.setattr(import_followees, "listar_following", roto)
+    antes = _pool_importar(tmp_path)
+    with pytest.raises(HTTPError):
+        ig_seguidos.importar_seguidos(cx, ids["a"], "pensionmas")
+    assert _pool_importar(tmp_path) == antes
+
+
+def test_importar_semilla_sin_datos_es_semilla_inexistente(cx, ids, following_falso,
+                                                           monkeypatch, tmp_path) -> None:
+    def vacio(session, handle):
+        raise LookupError("IG no devolvió datos")
+
+    monkeypatch.setattr(ingest_ig, "fetch_profile", vacio)
+    antes = _pool_importar(tmp_path)
+    with pytest.raises(LookupError, match="la semilla"):
+        ig_seguidos.importar_seguidos(cx, ids["a"], "typo")
+    assert _pool_importar(tmp_path) == antes
+
+
+@pytest.mark.parametrize("status", [401, 403, 429])
+def test_importar_semilla_http_de_cookie_quema_y_rota(cx, ids, following_falso, monkeypatch,
+                                                      tmp_path, status) -> None:
+    fallos = [_http(status)]
+    real = ingest_ig.fetch_profile
+
+    def una_vez(session, handle):
+        if fallos:
+            raise fallos.pop()
+        return real(session, handle)
+
+    monkeypatch.setattr(ingest_ig, "fetch_profile", una_vez)
+    r = ig_seguidos.importar_seguidos(cx, ids["a"], "pensionmas")
+    assert r == {"nuevas": 3, "ya": 0, "total": 4}
+    pool = _pool_importar(tmp_path)
+    assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
+
+
+def test_importar_semilla_pool_agotado_lanza(cx, ids, following_falso, monkeypatch, tmp_path) -> None:
+    def limitado(session, handle):
+        raise ingest_ig.IngestRateLimited("429")
+
+    monkeypatch.setattr(ingest_ig, "fetch_profile", limitado)
+    with pytest.raises(ingest_ig.IngestRateLimited):
+        ig_seguidos.importar_seguidos(cx, ids["a"], "pensionmas")
+    assert all(c["quemada_hasta"] for c in _pool_importar(tmp_path))
+
+
+def test_importar_ya_no_usa_listar_con_pool(cx, ids, following_falso, monkeypatch) -> None:
+    def prohibido(*a, **k):
+        raise AssertionError("_listar_con_pool quema con cualquier HTTPError")
+
+    monkeypatch.setattr(import_followees, "_listar_con_pool", prohibido)
+    assert ig_seguidos.importar_seguidos(cx, ids["a"], "pensionmas")["nuevas"] == 3
+
+
+# --- final-review I2: tope de cuentas por job + reencolado ---
+def _activas(cx, a, n) -> list[str]:
+    hs = [f"cuenta.{i:02d}" for i in range(n)]
+    for h in hs:
+        ig_seguidos.fijar_estado(cx, a, h, "activa")
+    return hs
+
+
+def test_ingerir_respeta_el_tope_y_reporta_pendientes(cx, ids, ig_falso, monkeypatch) -> None:
+    monkeypatch.setattr(ig_seguidos, "MAX_CUENTAS_POR_JOB", 3)
+    a = ids["a"]
+    _activas(cx, a, 5)
+    avance = []
+    r = ig_seguidos.ingerir(cx, a, progreso=lambda p, m: avance.append((p, m)))
+    assert r["cuentas"] == 3 and r["pendientes"] == 2 and r["cortado"] is False
+    assert [m for _, m in avance] == ["@cuenta.00", "@cuenta.01", "@cuenta.02"]
+    assert [p for p, _ in avance] == [0, 33, 66]  # coherente con el lote, no con las 5
+
+
+def test_ingerir_procesa_primero_las_mas_viejas(cx, ids, ig_falso, monkeypatch) -> None:
+    monkeypatch.setattr(ig_seguidos, "MAX_CUENTAS_POR_JOB", 2)
+    a = ids["a"]
+    hs = _activas(cx, a, 4)
+    sellos = {hs[0]: "2026-10-01 00:00:00", hs[1]: None,
+              hs[2]: "2026-09-01 00:00:00", hs[3]: "2026-10-05 00:00:00"}
+    for h, t in sellos.items():
+        db.update(cx, "brand_ig_cuentas", ig_seguidos._fila(cx, a, h)["id"], scraped_at=t)
+    avance = []
+    ig_seguidos.ingerir(cx, a, progreso=lambda p, m: avance.append(m))
+    assert avance == [f"@{hs[1]}", f"@{hs[2]}"]  # nunca ingerida, luego la más vieja
+
+
+def test_ingerir_sin_exceso_no_deja_pendientes(cx, ids, ig_falso) -> None:
+    ig_seguidos.fijar_estado(cx, ids["a"], "cafe.tacuba", "activa")
+    assert ig_seguidos.ingerir(cx, ids["a"])["pendientes"] == 0
+
+
+def test_tope_por_defecto_es_10() -> None:
+    assert ig_seguidos.MAX_CUENTAS_POR_JOB == 10
+
+
+def test_cuenta_con_error_se_sella_y_no_bloquea_la_cadena(cx, ids, ig_falso, monkeypatch) -> None:
+    """Una cuenta que falla en fetch_profile no puede quedarse 'la más vieja' para siempre."""
+    monkeypatch.setattr(ig_seguidos, "MAX_CUENTAS_POR_JOB", 1)
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "aa.muerta", "activa")
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    real = ingest_ig._get_json
+
+    def muerta(session, url, params=None):
+        if params and params.get("username") == "aa.muerta":
+            raise _http(404)
+        return real(session, url, params)
+
+    monkeypatch.setattr(ingest_ig, "_get_json", muerta)
+    r1 = ig_seguidos.ingerir(cx, a)
+    assert r1["pendientes"] == 1 and len(r1["errores"]) == 1
+    r2 = ig_seguidos.ingerir(cx, a)
+    assert r2["cuentas"] == 1 and r2["assets"] == 4 and r2["pendientes"] == 1
+
+
+def test_handler_reencola_el_resto_con_los_mismos_parametros(cx, ids, ig_falso, monkeypatch) -> None:
+    monkeypatch.setattr(ig_seguidos, "MAX_CUENTAS_POR_JOB", 2)
+    a = ids["a"]
+    _activas(cx, a, 3)
+    jid = jobs.crear(cx, "ig.ingerir", a, {"por_cuenta": 7}, creado_por=None)
+    job = dict(db.get(cx, "jobs", jid))
+    r = handlers.HANDLERS["ig.ingerir"](cx, job)
+    assert r["cuentas"] == 2 and r["pendientes"] == 1
+    cola = [j for j in _en_cola_ig(cx) if j["id"] != jid]
+    assert len(cola) == 1 and cola[0]["account_id"] == a and r["reencolado"] == cola[0]["id"]
+    assert json.loads(cola[0]["payload_json"]) == {"por_cuenta": 7}
+
+
+def _en_cola_ig(cx) -> list[dict]:
+    return [dict(r) for r in db.rows(
+        cx, "SELECT * FROM jobs WHERE estado = 'cola' AND tipo = 'ig.ingerir'")]
+
+
+def test_handler_no_reencola_si_no_quedan(cx, ids, ig_falso) -> None:
+    ig_seguidos.fijar_estado(cx, ids["a"], "cafe.tacuba", "activa")
+    handlers.HANDLERS["ig.ingerir"](cx, _job(cx, "ig.ingerir", {"por_cuenta": 5}, ids["a"]))
+    assert len(_en_cola_ig(cx)) == 1  # solo el propio job (sigue 'cola': nadie lo tomó)
+
+
+def test_handler_no_reencola_si_el_pool_se_corto(cx, ids, monkeypatch) -> None:
+    monkeypatch.setattr(ig_seguidos, "ingerir", lambda cx, aid, *, por_cuenta, progreso:
+                        {"cuentas": 1, "assets": 1, "errores": [], "cortado": True,
+                         "pendientes": 4})
+    handlers.HANDLERS["ig.ingerir"](cx, _job(cx, "ig.ingerir", {"por_cuenta": 5}, ids["a"]))
+    assert len(_en_cola_ig(cx)) == 1  # reencolar giraría en vacío contra un pool en reposo
+
+
+def test_job_reencolado_corre_despues_de_lo_ya_encolado_y_el_carril_ig_sigue(
+        cx, ids, ig_falso, monkeypatch) -> None:
+    monkeypatch.setattr(ig_seguidos, "MAX_CUENTAS_POR_JOB", 1)
+    a, b = ids["a"], ids["b"]
+    _activas(cx, a, 2)
+    primero = jobs.crear(cx, "ig.ingerir", a, {"por_cuenta": 5})
+    otro_no_ig = jobs.crear(cx, "diseno.chat", b, {})
+    otro_ig = jobs.crear(cx, "ig.ingerir", b, {"por_cuenta": 5})
+    tomado = jobs.tomar(cx, "w1")
+    assert tomado["id"] == primero
+    handlers.HANDLERS["ig.ingerir"](cx, tomado)       # procesa 1, reencola el resto
+    reencolado = max(r["id"] for r in db.rows(cx, "SELECT id FROM jobs"))
+    assert reencolado > otro_ig
+    jobs.terminar(cx, primero, ok=True)
+    orden = []
+    while (j := jobs.tomar(cx, "w1")) is not None:
+        orden.append(j["id"])
+        if j["tipo"] == "ig.ingerir":                   # carril IG: nadie más IG mientras corre
+            assert jobs.tomar(cx, "w2") is None
+        jobs.terminar(cx, j["id"], ok=True)
+    assert orden == [otro_no_ig, otro_ig, reencolado]

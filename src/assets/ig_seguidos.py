@@ -28,6 +28,9 @@ _HANDLE_RE = re.compile(r"^[a-z0-9._]{1,30}\Z")
 LICENCIA = "Instagram (terceros)"
 _CODIGO_RE = re.compile(r"[^A-Za-z0-9_-]")
 _EXTS = frozenset({"jpg", "png", "webp", "mp4"})
+# Tope de cuentas por job `ig.ingerir`: el worker es uno y secuencial, un job sin
+# tope (50 cuentas x posts x pausas) lo ocupa horas. El resto se reencola.
+MAX_CUENTAS_POR_JOB = 10
 
 
 @dataclass(frozen=True)
@@ -90,9 +93,31 @@ def importar_seguidos(cx, account_id: int, semilla: str,
 
     Nunca toca filas existentes: la curaduría (activa/descartada) manda sobre
     cualquier reimportación. Propaga IngestRateLimited si el pool se agota.
+
+    La semilla la escribe una persona, así que NO se usa `_listar_con_pool` (quema con
+    cualquier HTTPError): solo se quema la cookie con `_debe_quemar` (401/403/429 o
+    IngestRateLimited). 404 o perfil vacío = LookupError «la semilla no existe»;
+    cualquier otro HTTPError (5xx) se propaga sin quemar.
     """
     s = normalizar_handle(semilla)
-    usuarios = import_followees._listar_con_pool(s, limite)
+    rot = ingest_ig.SesionRotatoria()
+    usuarios = None
+    while rot.disponible():
+        try:
+            perfil = ingest_ig.fetch_profile(rot.session, s)
+            usuarios = import_followees.listar_following(rot.session, perfil["id"], limite)
+            break
+        except LookupError as exc:
+            raise LookupError(f"la semilla @{s} no existe en Instagram") from exc
+        except (ingest_ig.IngestRateLimited, HTTPError) as exc:
+            if _debe_quemar(exc):
+                rot.rotar_por_quemada()
+                continue
+            if getattr(getattr(exc, "response", None), "status_code", None) == 404:
+                raise LookupError(f"la semilla @{s} no existe en Instagram") from exc
+            raise
+    if usuarios is None:
+        raise ingest_ig.IngestRateLimited("todas las cuentas scraper están en reposo")
     nuevas = ya = 0
     for u in usuarios:
         try:
@@ -284,6 +309,13 @@ def _debe_quemar(exc: Exception) -> bool:
     return getattr(resp, "status_code", None) in (401, 403, 429)
 
 
+def _sellar(cx, cuenta: dict[str, Any]) -> None:
+    """Marca el intento (scraped_at) de una cuenta que falló: si no, seguiría siendo
+    «la más vieja» y la cadena de reencolados nunca llegaría a las demás."""
+    db.update(cx, "brand_ig_cuentas", cuenta["id"], scraped_at=_ahora())
+    cx.commit()
+
+
 def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
             progreso: Callable[[int, str], None] | None = None) -> dict[str, Any]:
     """Baja los últimos `por_cuenta` posts de cada cuenta ACTIVA de la marca.
@@ -293,9 +325,19 @@ def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
     error de ESA cuenta: va a `errores`, no quema nada ni corta la corrida. Sin
     cookies sanas se corta; si se cortó sin bajar nada, lanza IngestRateLimited
     para que el job termine en error y no en un 'ok' vacío.
+
+    Procesa como máximo MAX_CUENTAS_POR_JOB cuentas, las de scraped_at más viejo primero
+    (nunca ingeridas antes); `pendientes` dice cuántas activas quedaron fuera para que
+    el caller reencole. El progreso se reporta sobre el lote, no sobre el total.
     """
-    resultado: dict[str, Any] = {"cuentas": 0, "assets": 0, "errores": [], "cortado": False}
-    cuentas = listar(cx, account_id, estado="activa")
+    resultado: dict[str, Any] = {"cuentas": 0, "assets": 0, "errores": [], "cortado": False,
+                                 "pendientes": 0}
+    todas = db.rows(
+        cx, "SELECT * FROM brand_ig_cuentas WHERE account_id = ? AND estado = 'activa'"
+            " ORDER BY scraped_at IS NOT NULL, scraped_at, ig_handle", (account_id,))
+    todas = [dict(c) for c in todas]
+    cuentas = todas[:MAX_CUENTAS_POR_JOB]
+    resultado["pendientes"] = len(todas) - len(cuentas)
     if not cuentas:
         return resultado
     slug = db.get(cx, "accounts", account_id)["slug"]
@@ -318,11 +360,13 @@ def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
                 if not _debe_quemar(exc):
                     resultado["errores"].append(
                         f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
+                    _sellar(cx, cuenta)
                     break
                 rot.rotar_por_quemada()
             except Exception as exc:  # noqa: BLE001 — una cuenta rota no tira a las demás
                 resultado["assets"] += conteo[0]
                 resultado["errores"].append(f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
+                _sellar(cx, cuenta)
                 break
         if resultado["cortado"]:
             break
