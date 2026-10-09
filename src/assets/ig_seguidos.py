@@ -48,7 +48,10 @@ def _ahora() -> str:
 
 def normalizar_handle(texto: str) -> str:
     """'  @Cafe.Tacuba ' -> 'cafe.tacuba'. ValueError si no es un handle de IG válido."""
-    h = (texto or "").strip().lstrip("@").lower()
+    h = (texto or "").strip().lstrip("@")
+    if not h.isascii():      # antes de .lower(): el signo Kelvin (U+212A) bajaría a 'k'
+        raise ValueError(f"handle de Instagram inválido: {texto!r}")
+    h = h.lower()
     if not _HANDLE_RE.match(h) or ".." in h:
         raise ValueError(f"handle de Instagram inválido: {texto!r}")
     return h

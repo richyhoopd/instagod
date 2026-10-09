@@ -815,9 +815,14 @@ def ig_importar_seguidos(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[st
     """payload: {semilla, limite}. Following de la semilla -> candidatas de la marca."""
     payload = json.loads(job["payload_json"] or "{}")
     _marca_de(cx, job["account_id"])  # truena si la cuenta ya no existe
-    jobs.progresar(cx, job["id"], 5, f"Leyendo a quién sigue @{payload['semilla']}…")
-    return ig_seguidos.importar_seguidos(cx, job["account_id"], payload["semilla"],
-                                         payload.get("limite"))
+    semilla = payload.get("semilla")
+    if not semilla:
+        raise ValueError("falta la semilla en el payload de ig.importar_seguidos")
+    # Mismo rango que el router: un job encolado por otra vía no llega sin tope.
+    pedido = payload.get("limite")
+    limite = 200 if pedido is None else max(1, min(int(pedido), 2000))
+    jobs.progresar(cx, job["id"], 5, f"Leyendo a quién sigue @{semilla}…")
+    return ig_seguidos.importar_seguidos(cx, job["account_id"], semilla, limite)
 
 
 def ig_ingerir(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
@@ -834,7 +839,8 @@ def ig_ingerir(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     # Tope por job: el resto va en OTRO job al final de la cola (id mayor), así no
     # retiene al worker único. Si el pool se cortó, reencolar giraría en vacío.
     if resultado.get("pendientes") and not resultado.get("cortado"):
-        nuevo = jobs.crear(cx, "ig.ingerir", job["account_id"], {"por_cuenta": por_cuenta, "desde": desde},
+        nuevo = jobs.crear(cx, "ig.ingerir", job["account_id"],
+                           {"por_cuenta": por_cuenta, "desde": desde},
                            creado_por=job.get("creado_por"))
         resultado["reencolado"] = nuevo
         jobs.progresar(cx, job["id"], 99,

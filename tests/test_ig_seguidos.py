@@ -17,8 +17,9 @@ from curl_cffi.requests.exceptions import HTTPError
 from PIL import Image
 
 import config
-from src import assets, db, import_followees, ingest_ig
+from src import assets, db, import_followees, ingest_ig, jobs
 from src.assets import biblioteca, ig_seguidos
+from src.jobs import handlers
 
 FIX = Path(__file__).parent / "fixtures" / "assets" / "ig"
 
@@ -53,6 +54,12 @@ def ids(cx) -> dict[str, int]:
         "b": db.insert(cx, "accounts", slug="daisies", ig_handle="@d",
                        nombre="D", ciudad="CDMX"),
     }
+
+
+def test_normalizar_handle_rechaza_no_ascii_que_minuscula_a_ascii() -> None:
+    with pytest.raises(ValueError):
+        ig_seguidos.normalizar_handle("\u212aafe")      # signo Kelvin: .lower() -> 'k'
+    assert ig_seguidos.normalizar_handle("  @Cafe.Tacuba ") == "cafe.tacuba"
 
 
 def test_precondicion_plan3_brand_assets_existe(cx) -> None:
@@ -744,9 +751,6 @@ def test_corte_con_progreso_parcial_no_lanza(cx, ids, ig_falso, monkeypatch, tmp
 
 
 # --- handlers de jobs (tarea 7) ---
-from src import jobs  # noqa: E402
-from src.jobs import handlers  # noqa: E402
-
 
 def _job(cx, tipo, payload, account_id) -> dict:
     jid = jobs.crear(cx, tipo, account_id, payload)
@@ -760,6 +764,21 @@ def test_handler_importar_seguidos(cx, ids, following_falso) -> None:
     assert following_falso == [("pensionmas", 30)]
     assert len(ig_seguidos.listar(cx, ids["a"])) == 3
     assert "pensionmas" in (db.get(cx, "jobs", job["id"])["log"] or "")
+
+
+@pytest.mark.parametrize("pedido,esperado", [(99999, 2000), (0, 1), (-5, 1), (None, 200),
+                                              (1, 1), (2000, 2000)])
+def test_handler_importar_acota_limite(cx, ids, following_falso, pedido, esperado) -> None:
+    payload = {"semilla": "@pensionmas"} | ({} if pedido is None else {"limite": pedido})
+    handlers.HANDLERS["ig.importar_seguidos"](cx, _job(cx, "ig.importar_seguidos", payload,
+                                                       ids["a"]))
+    assert following_falso == [("pensionmas", esperado)]
+
+
+def test_handler_importar_sin_semilla_da_error_claro(cx, ids) -> None:
+    job = _job(cx, "ig.importar_seguidos", {"limite": 5}, ids["a"])
+    with pytest.raises(ValueError, match="semilla"):
+        handlers.HANDLERS["ig.importar_seguidos"](cx, job)
 
 
 def test_handler_ingerir_reporta_progreso(cx, ids, ig_falso) -> None:
