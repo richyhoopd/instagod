@@ -16,6 +16,7 @@ import { BarraSuperior } from "./_components/barra-superior";
 import { DialogoVersiones } from "./_components/dialogo-versiones";
 import { Lienzo } from "./_components/lienzo";
 import { PanelAssets } from "./_components/panel-assets";
+import { PanelChat } from "./_components/panel-chat";
 import { PanelCapas } from "./_components/panel-capas";
 import { PanelLateral } from "./_components/panel-lateral";
 import { camposDeContrato, PanelPropiedades } from "./_components/panel-propiedades";
@@ -205,6 +206,10 @@ function Editor({ slug, disenoId }: { slug: string; disenoId: number }) {
               // Los endpoints de assets exigen rol manager: sin él, la pestaña no se ofrece.
               ...(puedeAssets
                 ? [{ id: "assets", etiqueta: "Assets", contenido: <PanelAssets slug={slug} puedeEditar /> }]
+                : []),
+              // El endpoint del chat exige rol manager, igual que assets.
+              ...(puedeAssets
+                ? [{ id: "chat", etiqueta: "Chat", contenido: <PanelChat slug={slug} tid={disenoId} /> }]
                 : []),
             ]}
           />
