@@ -317,7 +317,8 @@ def _sellar(cx, cuenta: dict[str, Any]) -> None:
 
 
 def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
-            progreso: Callable[[int, str], None] | None = None) -> dict[str, Any]:
+            progreso: Callable[[int, str], None] | None = None,
+            desde: str | None = None) -> dict[str, Any]:
     """Baja los últimos `por_cuenta` posts de cada cuenta ACTIVA de la marca.
 
     Rate limit o HTTPError 401/403/429: quema la cookie, rota y reintenta la MISMA
@@ -327,14 +328,19 @@ def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
     para que el job termine en error y no en un 'ok' vacío.
 
     Procesa como máximo MAX_CUENTAS_POR_JOB cuentas, las de scraped_at más viejo primero
-    (nunca ingeridas antes); `pendientes` dice cuántas activas quedaron fuera para que
-    el caller reencole. El progreso se reporta sobre el lote, no sobre el total.
+    (nunca ingeridas antes). `desde` (opcional) es el sello de inicio de la cadena de reencolados:
+    solo son elegibles las cuentas con scraped_at NULL o < desde (las ya intentadas en
+    la cadena quedan con scraped_at >= desde, incluso si fallaron). `pendientes` cuenta
+    las elegibles que quedaron fuera de este lote: la cadena termina cuando es 0. El progreso se reporta sobre el lote, no sobre el total.
     """
     resultado: dict[str, Any] = {"cuentas": 0, "assets": 0, "errores": [], "cortado": False,
                                  "pendientes": 0}
+    # Sin `desde` (llamada suelta) no hay cadena que acotar: todas las activas.
+    filtro, params = ("", (account_id,)) if desde is None else (
+        " AND (scraped_at IS NULL OR scraped_at < ?)", (account_id, desde))
     todas = db.rows(
         cx, "SELECT * FROM brand_ig_cuentas WHERE account_id = ? AND estado = 'activa'"
-            " ORDER BY scraped_at IS NOT NULL, scraped_at, ig_handle", (account_id,))
+            + filtro + " ORDER BY scraped_at IS NOT NULL, scraped_at, ig_handle", params)
     todas = [dict(c) for c in todas]
     cuentas = todas[:MAX_CUENTAS_POR_JOB]
     resultado["pendientes"] = len(todas) - len(cuentas)

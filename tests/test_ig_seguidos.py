@@ -760,7 +760,7 @@ def test_handler_ingerir_llama_progresar_por_cuenta(cx, ids, ig_falso, monkeypat
 def test_handler_ingerir_por_cuenta_acotado(cx, ids, monkeypatch) -> None:
     vistos = []
     monkeypatch.setattr(ig_seguidos, "ingerir",
-                        lambda cx, aid, *, por_cuenta, progreso: vistos.append(por_cuenta) or {})
+                        lambda cx, aid, *, por_cuenta, progreso, desde=None: vistos.append(por_cuenta) or {})
     for pedido in (999, 0, None):
         handlers.HANDLERS["ig.ingerir"](cx, _job(cx, "ig.ingerir", {"por_cuenta": pedido}, ids["a"]))
     assert vistos == [50, 12, 12]
@@ -926,7 +926,8 @@ def test_handler_reencola_el_resto_con_los_mismos_parametros(cx, ids, ig_falso, 
     assert r["cuentas"] == 2 and r["pendientes"] == 1
     cola = [j for j in _en_cola_ig(cx) if j["id"] != jid]
     assert len(cola) == 1 and cola[0]["account_id"] == a and r["reencolado"] == cola[0]["id"]
-    assert json.loads(cola[0]["payload_json"]) == {"por_cuenta": 7}
+    p = json.loads(cola[0]["payload_json"])
+    assert p["por_cuenta"] == 7 and p["desde"] and set(p) == {"por_cuenta", "desde"}
 
 
 def _en_cola_ig(cx) -> list[dict]:
@@ -941,7 +942,7 @@ def test_handler_no_reencola_si_no_quedan(cx, ids, ig_falso) -> None:
 
 
 def test_handler_no_reencola_si_el_pool_se_corto(cx, ids, monkeypatch) -> None:
-    monkeypatch.setattr(ig_seguidos, "ingerir", lambda cx, aid, *, por_cuenta, progreso:
+    monkeypatch.setattr(ig_seguidos, "ingerir", lambda cx, aid, *, por_cuenta, progreso, desde=None:
                         {"cuentas": 1, "assets": 1, "errores": [], "cortado": True,
                          "pendientes": 4})
     handlers.HANDLERS["ig.ingerir"](cx, _job(cx, "ig.ingerir", {"por_cuenta": 5}, ids["a"]))
@@ -969,3 +970,40 @@ def test_job_reencolado_corre_despues_de_lo_ya_encolado_y_el_carril_ig_sigue(
             assert jobs.tomar(cx, "w2") is None
         jobs.terminar(cx, j["id"], ok=True)
     assert orden == [otro_no_ig, otro_ig, reencolado]
+
+
+def _correr_cadena(cx, a, tope=20) -> list[dict]:
+    """Corre jobs ig.ingerir de la marca hasta que no quede ninguno en cola."""
+    resultados = []
+    while (j := jobs.tomar(cx, "w")) is not None:
+        assert len(resultados) < tope, "la cadena de reencolados no termina"
+        resultados.append(handlers.HANDLERS["ig.ingerir"](cx, j))
+        jobs.terminar(cx, j["id"], ok=True)
+    return resultados
+
+
+def test_cadena_completa_25_cuentas_son_3_jobs_y_termina(cx, ids, ig_falso) -> None:
+    a = ids["a"]
+    _activas(cx, a, 25)
+    jobs.crear(cx, "ig.ingerir", a, {"por_cuenta": 5})
+    res = _correr_cadena(cx, a)
+    assert [r["cuentas"] for r in res] == [10, 10, 5]
+    assert [r["pendientes"] for r in res] == [15, 5, 0]
+    assert _en_cola_ig(cx) == []
+    # cada cuenta se ingirió exactamente una vez en la cadena
+    assert sum(r["cuentas"] for r in res) == 25
+
+
+def test_cadena_con_cuentas_que_siempre_fallan_termina(cx, ids, ig_falso, monkeypatch) -> None:
+    a = ids["a"]
+    _activas(cx, a, 25)
+
+    def siempre_falla(session, url, params=None):
+        raise _http(500)
+
+    monkeypatch.setattr(ingest_ig, "_get_json", siempre_falla)
+    jobs.crear(cx, "ig.ingerir", a, {"por_cuenta": 5})
+    res = _correr_cadena(cx, a)
+    assert len(res) == 3 and all(r["cuentas"] == 0 for r in res)
+    assert sum(len(r["errores"]) for r in res) == 25
+    assert _en_cola_ig(cx) == []

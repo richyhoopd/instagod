@@ -825,13 +825,16 @@ def ig_ingerir(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
     payload = json.loads(job["payload_json"] or "{}")
     _marca_de(cx, job["account_id"])
     por_cuenta = max(1, min(int(payload.get("por_cuenta") or 12), 50))
+    # `desde`: sello de inicio de la cadena, tomado ANTES de procesar y heredado por los
+    # reencolados; acota la cadena a las cuentas aún no intentadas desde ese momento.
+    desde = payload.get("desde") or ig_seguidos._ahora()
     resultado = ig_seguidos.ingerir(
-        cx, job["account_id"], por_cuenta=por_cuenta,
+        cx, job["account_id"], por_cuenta=por_cuenta, desde=desde,
         progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg))
     # Tope por job: el resto va en OTRO job al final de la cola (id mayor), así no
     # retiene al worker único. Si el pool se cortó, reencolar giraría en vacío.
     if resultado.get("pendientes") and not resultado.get("cortado"):
-        nuevo = jobs.crear(cx, "ig.ingerir", job["account_id"], {"por_cuenta": por_cuenta},
+        nuevo = jobs.crear(cx, "ig.ingerir", job["account_id"], {"por_cuenta": por_cuenta, "desde": desde},
                            creado_por=job.get("creado_por"))
         resultado["reencolado"] = nuevo
         jobs.progresar(cx, job["id"], 99,
