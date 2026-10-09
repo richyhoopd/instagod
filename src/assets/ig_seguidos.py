@@ -7,6 +7,7 @@ Reusa el pool de cookies (SesionRotatoria) y su ritmo; no sube la concurrencia.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import tempfile
 from collections.abc import Callable, Iterator
@@ -108,17 +109,17 @@ def importar_seguidos(cx, account_id: int, semilla: str,
     return {"nuevas": nuevas, "ya": ya, "total": len(usuarios)}
 
 
-def _medios(item: dict[str, Any]) -> Iterator[tuple[int, str, str]]:
-    """(índice, tipo, url) de cada medio del post. En este task solo fotos."""
+def _medios(item: dict[str, Any]) -> Iterator[tuple[str, str]]:
+    """(tipo, url) de cada medio del post. En este task solo fotos."""
     if item.get("media_type") == ingest_ig._MEDIA_CARRUSEL:
         medios = item.get("carousel_media") or []
     else:
         medios = [item]
-    for i, m in enumerate(medios):
+    for m in medios:
         if m.get("media_type") == ingest_ig._MEDIA_FOTO:
             url = ingest_ig._best_url(m)
             if url:
-                yield i, "imagen", url
+                yield "imagen", url
 
 
 def _registrar(cx, account_id: int, slug: str, origen: _Origen, tmp: Path, *, tipo: str,
@@ -137,6 +138,11 @@ def _registrar(cx, account_id: int, slug: str, origen: _Origen, tmp: Path, *, ti
     detectado = biblioteca.tipo_de_bytes(datos[:16])
     if detectado is None or detectado[0] != tipo:
         return None, False
+    sha = hashlib.sha256(datos).hexdigest()
+    previa = db.rows(cx, "SELECT * FROM brand_assets WHERE account_id = ? AND sha = ?",
+                     (account_id, sha))
+    if previa:   # no resucitar descartados: la ingesta automática nunca llama _rescatar
+        return dict(previa[0]), False
     tags = {"fuente": PROVEEDOR, "caption": origen.caption[:500], **(tags_extra or {})}
     meta = {"autor": f"@{origen.handle}", "licencia": LICENCIA,
             "url_origen": f"https://www.instagram.com/p/{origen.codigo}/",
@@ -194,7 +200,7 @@ def _ingerir_cuenta(cx, account_id: int, slug: str, cuenta: dict[str, Any],
         origen = _Origen(handle=h, codigo=codigo, post_id=post_id,
                          caption=str((item.get("caption") or {}).get("text") or ""))
         bajados = sum(_bajar(cx, account_id, slug, session, origen, tipo, url)
-                      for _, tipo, url in _medios(item))
+                      for tipo, url in _medios(item))
         nuevos += bajados
         if bajados:
             ingest_ig._sleep()
@@ -217,6 +223,8 @@ def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
             resultado["assets"] += _ingerir_cuenta(cx, account_id, slug, cuenta,
                                                    rot.session, por_cuenta)
             resultado["cuentas"] += 1
-        except LookupError as exc:
-            resultado["errores"].append(f"@{cuenta['ig_handle']}: {exc}")
+        except ingest_ig.IngestRateLimited:
+            raise
+        except Exception as exc:  # noqa: BLE001 — una cuenta rota no tira a las demás
+            resultado["errores"].append(f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
     return resultado

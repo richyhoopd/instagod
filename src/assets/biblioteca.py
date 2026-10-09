@@ -185,10 +185,13 @@ def guardar_bytes(cx, account_id: int, slug: str, datos: bytes, *, proveedor: st
                   exts: frozenset[str] | None = None) -> tuple[dict, bool]:
     """`prefijo`/`largo_sha` definen el nombre en disco (<prefijo><sha[:largo]>.<ext>);
     `exts` acota las extensiones aceptadas (None = todas las que reconoce tipo_de_bytes)."""
+    if not re.fullmatch(r"[a-z_]*", prefijo):
+        raise ValueError("prefijo de archivo inválido")
     exigir_cuenta(cx, account_id, slug)
     detectado = tipo_de_bytes(datos[:16])
     if detectado is None or (exts is not None and detectado[1] not in exts):
-        raise AssetInvalido("formato no soportado (jpg, png, webp, gif, mp4, webm)")
+        raise AssetInvalido("formato no soportado (jpg, png, webp, gif, mp4, webm)" if exts is None
+                            else "formato no soportado (" + ", ".join(sorted(exts)) + ")")
     tipo, ext = detectado
     if len(datos) > TOPES[tipo]:
         raise AssetInvalido("el archivo excede el tope")
