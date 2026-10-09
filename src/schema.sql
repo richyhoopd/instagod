@@ -598,3 +598,24 @@ CREATE TABLE IF NOT EXISTS ia_generaciones (
     creado_en  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ia_gen_account ON ia_generaciones(account_id, creado_en);
+
+-- Plan 5 editor v2: cuentas de IG curadas por marca (fuente «Seguidos de IG»).
+-- Generaliza la lista de candidatas de gdlscene (bands) sin tocarla.
+CREATE TABLE IF NOT EXISTS brand_ig_cuentas (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  ig_handle   TEXT NOT NULL,
+  nombre      TEXT,
+  estado      TEXT NOT NULL DEFAULT 'candidata'
+              CHECK (estado IN ('candidata', 'activa', 'descartada')),
+  origen      TEXT NOT NULL DEFAULT 'manual',   -- 'manual' | 'seguido_de:<handle>'
+  avatar_url  TEXT,
+  bio         TEXT,
+  ig_user_id  TEXT,
+  privada     INTEGER NOT NULL DEFAULT 0,
+  scraped_at  TEXT,
+  notas       TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (account_id, ig_handle)
+);
+CREATE INDEX IF NOT EXISTS idx_ig_cuentas_account ON brand_ig_cuentas(account_id, estado);

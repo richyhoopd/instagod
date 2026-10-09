@@ -117,6 +117,11 @@ TABLES: dict[str, set[str]] = {
         "url_origen", "ig_handle", "source_post_id", "ancho", "alto", "tags_json",
         "recorte_archivo", "usada", "descartada",
     },
+    # Plan 5 editor v2: fuente «Seguidos de IG».
+    "brand_ig_cuentas": {
+        "account_id", "ig_handle", "nombre", "estado", "origen", "avatar_url",
+        "bio", "ig_user_id", "privada", "scraped_at", "notas",
+    },
     "topic_suggestions": {
         "account_id", "titulo", "resumen", "url", "fuente", "publicado_en",
         "usado_en_queue_id", "descartado",
