@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from curl_cffi.requests.exceptions import HTTPError
 from PIL import Image
 
 import config
@@ -213,10 +214,12 @@ def ig_falso(monkeypatch, tmp_path):
     monkeypatch.setattr(assets, "BRANDS_DIR", tmp_path / "data" / "brands")
     monkeypatch.setattr(ingest_ig, "get_session", lambda cuenta=None: object())
     monkeypatch.setattr(ingest_ig, "_sleep", lambda: None)
-    estado = {"get_json": [], "descargas": []}
+    estado = {"get_json": [], "descargas": [], "fallar": []}
 
     def get_json(session, url, params=None):
         estado["get_json"].append(url)
+        if estado["fallar"]:
+            raise estado["fallar"].pop(0)
         if "web_profile_info" in url:
             datos = json.loads((FIX / "web_profile_info.json").read_text())
             datos["data"]["user"]["username"] = params["username"]
@@ -579,3 +582,70 @@ def test_primer_cuadro_real(tmp_path) -> None:
     with Image.open(png) as im:
         assert im.size == (64, 96)
         assert im.getpixel((10, 10))[0] > 200
+
+
+def _pool(tmp_path) -> list[dict]:
+    return json.loads((tmp_path / "ig_accounts.json").read_text())
+
+
+def test_rate_limit_rota_y_reintenta_la_misma_cuenta(cx, ids, ig_falso, tmp_path) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    ig_falso["fallar"].append(ingest_ig.IngestRateLimited("HTTP 429"))
+    r = ig_seguidos.ingerir(cx, a)
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
+    pool = _pool(tmp_path)
+    assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
+
+
+def test_http_error_quema_igual(cx, ids, ig_falso, tmp_path) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    ig_falso["fallar"].append(HTTPError("400 checkpoint_required"))
+    r = ig_seguidos.ingerir(cx, a)
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}
+    pool = _pool(tmp_path)
+    assert pool[0]["quemada_hasta"] and not pool[1]["quemada_hasta"]
+
+
+def test_pool_agotado_sin_nada_lanza(cx, ids, ig_falso, tmp_path) -> None:
+    ig_seguidos.fijar_estado(cx, ids["a"], "cafe.tacuba", "activa")
+    ig_falso["fallar"].extend([ingest_ig.IngestRateLimited("429")] * 2)
+    with pytest.raises(ingest_ig.IngestRateLimited):
+        ig_seguidos.ingerir(cx, ids["a"])
+    assert all(c["quemada_hasta"] for c in _pool(tmp_path))
+    assert _assets(cx, ids["a"]) == []
+
+
+def test_pool_agotado_a_media_corrida_devuelve_cortado(cx, ids, ig_falso, monkeypatch) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    ig_seguidos.fijar_estado(cx, a, "zz.segunda", "activa")
+    real = ingest_ig._get_json
+
+    def segunda_limitada(session, url, params=None):
+        if params and params.get("username") == "zz.segunda":
+            raise ingest_ig.IngestRateLimited("429")
+        return real(session, url, params)
+
+    monkeypatch.setattr(ingest_ig, "_get_json", segunda_limitada)
+    r = ig_seguidos.ingerir(cx, a)
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": True}
+
+
+def test_handle_inexistente_es_error_por_cuenta(cx, ids, ig_falso, monkeypatch, tmp_path) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    ig_seguidos.fijar_estado(cx, a, "aa.no.existe", "activa")
+    real = ingest_ig._get_json
+
+    def sin_usuario(session, url, params=None):
+        if params and params.get("username") == "aa.no.existe":
+            return {"data": {"user": None}}
+        return real(session, url, params)
+
+    monkeypatch.setattr(ingest_ig, "_get_json", sin_usuario)
+    r = ig_seguidos.ingerir(cx, a)
+    assert r["cuentas"] == 1 and r["cortado"] is False and len(r["errores"]) == 1
+    assert r["errores"][0].startswith("@aa.no.existe: LookupError")
+    assert not any(c["quemada_hasta"] for c in _pool(tmp_path))

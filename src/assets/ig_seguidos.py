@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from curl_cffi.requests.exceptions import HTTPError
+
 from src import db, import_followees, ingest_ig
 from src.assets import biblioteca
 
@@ -273,7 +275,13 @@ def _ingerir_cuenta(cx, account_id: int, slug: str, cuenta: dict[str, Any],
 
 def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
             progreso: Callable[[int, str], None] | None = None) -> dict[str, Any]:
-    """Baja los últimos `por_cuenta` posts de cada cuenta ACTIVA de la marca."""
+    """Baja los últimos `por_cuenta` posts de cada cuenta ACTIVA de la marca.
+
+    Rate limit o HTTPError (p. ej. checkpoint_required): quema la cookie, rota y
+    reintenta la MISMA cuenta, igual que import_followees._listar_con_pool. Sin
+    cookies sanas se corta; si se cortó sin bajar nada, lanza IngestRateLimited
+    para que el job termine en error y no en un 'ok' vacío.
+    """
     resultado: dict[str, Any] = {"cuentas": 0, "assets": 0, "errores": [], "cortado": False}
     cuentas = listar(cx, account_id, estado="activa")
     if not cuentas:
@@ -283,12 +291,22 @@ def ingerir(cx, account_id: int, *, por_cuenta: int = 12,
     for i, cuenta in enumerate(cuentas):
         if progreso:
             progreso(int(100 * i / len(cuentas)), f"@{cuenta['ig_handle']}")
-        try:
-            resultado["assets"] += _ingerir_cuenta(cx, account_id, slug, cuenta,
-                                                   rot.session, por_cuenta)
-            resultado["cuentas"] += 1
-        except ingest_ig.IngestRateLimited:
-            raise
-        except Exception as exc:  # noqa: BLE001 — una cuenta rota no tira a las demás
-            resultado["errores"].append(f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
+        while True:
+            if not rot.disponible():
+                resultado["cortado"] = True
+                break
+            try:
+                resultado["assets"] += _ingerir_cuenta(cx, account_id, slug, cuenta,
+                                                       rot.session, por_cuenta)
+                resultado["cuentas"] += 1
+                break
+            except (ingest_ig.IngestRateLimited, HTTPError):
+                rot.rotar_por_quemada()
+            except Exception as exc:  # noqa: BLE001 — una cuenta rota no tira a las demás
+                resultado["errores"].append(f"@{cuenta['ig_handle']}: {type(exc).__name__}: {exc}")
+                break
+        if resultado["cortado"]:
+            break
+    if resultado["cortado"] and resultado["assets"] == 0:
+        raise ingest_ig.IngestRateLimited("todas las cuentas scraper están en reposo")
     return resultado
