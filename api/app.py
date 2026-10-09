@@ -17,6 +17,7 @@ from api.routers import (
     brands,
     cola,
     fuentes_api,
+    ig_seguidos,
     lotes,
     perfil,
     planes,
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(posts.router)
     app.include_router(plantillas.router)
     app.include_router(fuentes_api.router)
+    app.include_router(ig_seguidos.router)
     app.include_router(assets.router)
     app.include_router(planes.router)
     app.include_router(lotes.router)
