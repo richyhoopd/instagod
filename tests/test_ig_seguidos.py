@@ -6,7 +6,9 @@ import io
 import json
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,14 +31,15 @@ def cx(tmp_path):
 
 @pytest.fixture(autouse=True)
 def cuadro_falso(request, monkeypatch):
-    """Ninguna prueba rápida llama ffmpeg real (Task 5 define primer_cuadro)."""
+    """Ninguna prueba rápida llama ffmpeg real: el cuadro sale de los bytes del video."""
     if request.node.get_closest_marker("lento"):
         return
 
     def falso(video, destino):
-        raise AssertionError("ffmpeg real en una prueba rápida")
+        destino.write_bytes(_png(video.read_bytes().decode("latin-1")))
+        return destino
 
-    monkeypatch.setattr(ig_seguidos, "primer_cuadro", falso, raising=False)
+    monkeypatch.setattr(ig_seguidos, "primer_cuadro", falso)
 
 
 @pytest.fixture
@@ -249,7 +252,7 @@ def test_ingerir_baja_fotos_de_cuentas_activas(cx, ids, ig_falso) -> None:
     ig_seguidos.fijar_estado(cx, a, "candidata.sin.aprobar", "candidata")
     ig_seguidos.fijar_estado(cx, a, "descartada.x", "descartada")
     r = ig_seguidos.ingerir(cx, a, por_cuenta=12)
-    assert r == {"cuentas": 1, "assets": 2, "errores": [], "cortado": False}
+    assert r == {"cuentas": 1, "assets": 4, "errores": [], "cortado": False}   # 2 fotos + 2 videos
     fotos = _fotos_propias(cx, a)
     assert len(fotos) == 2                                   # foto suelta + foto del carrusel
     f = fotos[0]
@@ -276,7 +279,7 @@ def test_ingerir_baja_fotos_de_cuentas_activas(cx, ids, ig_falso) -> None:
 def test_ingerir_es_idempotente(cx, ids, ig_falso) -> None:
     a = ids["a"]
     ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
-    assert ig_seguidos.ingerir(cx, a)["assets"] == 2
+    assert ig_seguidos.ingerir(cx, a)["assets"] == 4
     antes = _assets(cx, a)
     descargas = len(ig_falso["descargas"])
     r = ig_seguidos.ingerir(cx, a)
@@ -292,7 +295,7 @@ def test_nombre_de_archivo_sin_datos_de_ig(cx, ids, ig_falso, tmp_path) -> None:
     raiz = biblioteca.ruta_de("pensionmas", "x").parent.resolve()
     assert str(raiz).startswith(str(tmp_path.resolve()))
     filas = _assets(cx, a)
-    assert len(filas) == 2
+    assert len(filas) == 6                                  # 2 fotos + 2 cuadros + 2 videos
     for f in filas:
         assert re.fullmatch(r"ig_[0-9a-f]{20}\.(jpg|png|webp|mp4)", f["archivo"])
         assert f["archivo"].startswith(f"ig_{f['sha'][:20]}")
@@ -348,7 +351,7 @@ def test_ingerir_progreso_y_aislamiento_de_fallos(cx, ids, ig_falso, monkeypatch
         ig_seguidos.fijar_estado(cx, a, h, "activa")
     avance: list[tuple[int, str]] = []
     r = ig_seguidos.ingerir(cx, a, progreso=lambda p, m: avance.append((p, m)))
-    assert r["cuentas"] == 1 and r["assets"] == 2 and r["cortado"] is False
+    assert r["cuentas"] == 1 and r["assets"] == 4 and r["cortado"] is False
     assert [e.split(":")[0] for e in r["errores"]] == ["@red", "@rota", "@sin.id"]
     assert r["errores"][1].startswith("@rota: LookupError")
     assert r["errores"][2].startswith("@sin.id: KeyError")
@@ -461,3 +464,49 @@ def test_guardar_bytes_prefijo_largo_y_exts(cx, ids, tmp_path, monkeypatch) -> N
     assert g["archivo"].endswith(".gif")
     with pytest.raises(ValueError, match="prefijo"):
         biblioteca.guardar_bytes(cx, a, "pensionmas", _png("z"), proveedor="x", prefijo="../")
+
+
+def test_ingerir_reels_y_videos_de_carrusel(cx, ids, ig_falso) -> None:
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    r = ig_seguidos.ingerir(cx, a)
+    videos = [v for v in _assets(cx, a) if v["tipo"] == "video"]
+    cuadros = [c for c in _assets(cx, a) if "cuadro_de_video" in (c["tags_json"] or "")]
+    assert len(videos) == 2 and len(cuadros) == 2
+    assert r["assets"] == 4                                  # 2 fotos + 2 videos (el cuadro no cuenta)
+    assert all(c["tipo"] == "imagen" for c in cuadros)
+    reel = next(v for v in videos if v["source_post_id"] == "9003")
+    poster = json.loads(reel["tags_json"])["poster"]
+    assert poster in {c["archivo"] for c in cuadros}
+    assert reel["archivo"].endswith(".mp4")
+    assert (reel["ancho"], reel["alto"]) == (40, 50)         # dimensiones del cuadro
+    assert reel["url_origen"] == "https://www.instagram.com/p/ReEl3/"
+    assert len(_fotos_propias(cx, a)) == 2                   # lo del Task 4 sigue valiendo
+    # idempotente: segunda corrida no agrega nada
+    assert ig_seguidos.ingerir(cx, a)["assets"] == 0
+    assert len(_assets(cx, a)) == 6
+
+
+def test_video_sin_cuadro_se_salta(cx, ids, ig_falso, monkeypatch) -> None:
+    def roto(video, destino):
+        raise subprocess.CalledProcessError(1, "ffmpeg")
+
+    monkeypatch.setattr(ig_seguidos, "primer_cuadro", roto)
+    a = ids["a"]
+    ig_seguidos.fijar_estado(cx, a, "cafe.tacuba", "activa")
+    r = ig_seguidos.ingerir(cx, a)
+    assert [v for v in _assets(cx, a) if v["tipo"] == "video"] == []
+    assert len(_assets(cx, a)) == 2 and r["assets"] == 2
+    assert len(_fotos_propias(cx, a)) == 2
+
+
+@pytest.mark.lento
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sin ffmpeg")
+def test_primer_cuadro_real(tmp_path) -> None:
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "color=c=red:s=64x96:d=1", "-pix_fmt", "yuv420p", str(video)], check=True)
+    png = ig_seguidos.primer_cuadro(video, tmp_path / "p.png")
+    with Image.open(png) as im:
+        assert im.size == (64, 96)
+        assert im.getpixel((10, 10))[0] > 200

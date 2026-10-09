@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -110,16 +111,21 @@ def importar_seguidos(cx, account_id: int, semilla: str,
 
 
 def _medios(item: dict[str, Any]) -> Iterator[tuple[str, str]]:
-    """(tipo, url) de cada medio del post. En este task solo fotos."""
+    """(tipo, url) de cada medio del post: fotos, reels y videos dentro de carruseles."""
     if item.get("media_type") == ingest_ig._MEDIA_CARRUSEL:
         medios = item.get("carousel_media") or []
     else:
         medios = [item]
     for m in medios:
-        if m.get("media_type") == ingest_ig._MEDIA_FOTO:
+        tipo = m.get("media_type")
+        if tipo == ingest_ig._MEDIA_FOTO:
             url = ingest_ig._best_url(m)
             if url:
                 yield "imagen", url
+        elif tipo == ingest_ig._MEDIA_VIDEO:
+            versiones = m.get("video_versions") or []
+            if versiones and versiones[0].get("url"):
+                yield "video", versiones[0]["url"]
 
 
 def _registrar(cx, account_id: int, slug: str, origen: _Origen, tmp: Path, *, tipo: str,
@@ -158,14 +164,40 @@ def _registrar(cx, account_id: int, slug: str, origen: _Origen, tmp: Path, *, ti
     return fila, nueva
 
 
+def primer_cuadro(video: Path, destino: Path) -> Path:
+    """Primer cuadro del video como PNG (el póster en la biblioteca y en el editor)."""
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(video),
+                    "-frames:v", "1", str(destino)],
+                   check=True, capture_output=True, timeout=60)
+    return destino
+
+
 def _bajar(cx, account_id: int, slug: str, session: Any, origen: _Origen,
            tipo: str, url: str) -> int:
-    """Descarga un medio a un tempdir y lo registra. 1 si quedó un asset nuevo."""
+    """Descarga un medio a un tempdir y lo registra. Devuelve los assets nuevos.
+
+    Un video deja dos filas: su primer cuadro (imagen, buscable como foto) y el
+    mp4, que apunta al cuadro en tags.poster. Sin cuadro no se guarda el video.
+    Solo el video cuenta como asset nuevo; el cuadro es su póster.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         crudo = Path(tmp) / "crudo"
         if not ingest_ig._download(session, url, crudo):
             return 0
-        _, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo=tipo)
+        if tipo == "imagen":
+            _, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="imagen")
+            return int(nueva)
+        try:
+            cuadro = primer_cuadro(crudo, Path(tmp) / "cuadro.png")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            return 0
+        poster, _ = _registrar(cx, account_id, slug, origen, cuadro, tipo="imagen",
+                               tags_extra={"cuadro_de_video": True})
+        if poster is None:
+            return 0
+        _, nueva = _registrar(cx, account_id, slug, origen, crudo, tipo="video",
+                              dims=(poster["ancho"], poster["alto"]),
+                              tags_extra={"poster": poster["archivo"]})
         return int(nueva)
 
 
