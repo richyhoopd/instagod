@@ -37,6 +37,7 @@ from src import (
 )
 from src import fuentes as fuentes_mod
 from src.assets import biblioteca as assets_biblioteca
+from src.assets import ig_seguidos
 from src.assets import recorte as assets_recorte
 from src.image_sources import BRANDS_DIR
 from src.plantillas import chat as plantillas_chat
@@ -810,6 +811,25 @@ def diseno_chat(cx, job) -> dict:
     return {**resultado, "version": numero, "respuesta": meta.get("respuesta"), "uso": uso}
 
 
+def ig_importar_seguidos(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {semilla, limite}. Following de la semilla -> candidatas de la marca."""
+    payload = json.loads(job["payload_json"] or "{}")
+    _marca_de(cx, job["account_id"])  # truena si la cuenta ya no existe
+    jobs.progresar(cx, job["id"], 5, f"Leyendo a quién sigue @{payload['semilla']}…")
+    return ig_seguidos.importar_seguidos(cx, job["account_id"], payload["semilla"],
+                                         payload.get("limite"))
+
+
+def ig_ingerir(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]:
+    """payload: {por_cuenta}. Últimos posts de las cuentas activas -> brand_assets."""
+    payload = json.loads(job["payload_json"] or "{}")
+    _marca_de(cx, job["account_id"])
+    por_cuenta = max(1, min(int(payload.get("por_cuenta") or 12), 50))
+    return ig_seguidos.ingerir(
+        cx, job["account_id"], por_cuenta=por_cuenta,
+        progreso=lambda pct, msg: jobs.progresar(cx, job["id"], pct, msg))
+
+
 HANDLERS = {
     "diseno.chat": diseno_chat,
     "slideshow.generar": generar_slideshow,
@@ -821,6 +841,8 @@ HANDLERS = {
     "sourcing.newsapi_fetch": sourcing_newsapi_fetch,
     "sourcing.reddit_fetch": sourcing_reddit_fetch,
     "sourcing.ig_scrape": sourcing_ig_scrape,
+    "ig.importar_seguidos": ig_importar_seguidos,
+    "ig.ingerir": ig_ingerir,
     "preset.preview": preset_preview,
     "template.preview": template_preview,
     "template.disenar": template_disenar,

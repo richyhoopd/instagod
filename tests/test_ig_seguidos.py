@@ -707,3 +707,58 @@ def test_corte_con_progreso_parcial_no_lanza(cx, ids, ig_falso, monkeypatch, tmp
     assert guardados > 0
     assert r == {"cuentas": 0, "assets": guardados, "errores": [], "cortado": True}
     assert all(c["quemada_hasta"] for c in _pool(tmp_path))
+
+
+# --- handlers de jobs (tarea 7) ---
+from src import jobs  # noqa: E402
+from src.jobs import handlers  # noqa: E402
+
+
+def _job(cx, tipo, payload, account_id) -> dict:
+    jid = jobs.crear(cx, tipo, account_id, payload)
+    return dict(db.get(cx, "jobs", jid))
+
+
+def test_handler_importar_seguidos(cx, ids, following_falso) -> None:
+    job = _job(cx, "ig.importar_seguidos", {"semilla": "@pensionmas", "limite": 30}, ids["a"])
+    r = handlers.HANDLERS["ig.importar_seguidos"](cx, job)
+    assert r == {"nuevas": 3, "ya": 0, "total": 4}
+    assert following_falso == [("pensionmas", 30)]
+    assert len(ig_seguidos.listar(cx, ids["a"])) == 3
+    assert "pensionmas" in (db.get(cx, "jobs", job["id"])["log"] or "")
+
+
+def test_handler_ingerir_reporta_progreso(cx, ids, ig_falso) -> None:
+    ig_seguidos.fijar_estado(cx, ids["a"], "cafe.tacuba", "activa")
+    job = _job(cx, "ig.ingerir", {"por_cuenta": 5}, ids["a"])
+    r = handlers.HANDLERS["ig.ingerir"](cx, job)
+    assert r["cuentas"] == 1 and r["assets"] == 4
+    assert "@cafe.tacuba" in (db.get(cx, "jobs", job["id"])["log"] or "")
+
+
+def test_handler_ingerir_llama_progresar_por_cuenta(cx, ids, ig_falso, monkeypatch) -> None:
+    for h in ("cafe.tacuba", "otra.cuenta", "tercera.cuenta"):
+        ig_seguidos.fijar_estado(cx, ids["a"], h, "activa")
+    llamadas = []
+    monkeypatch.setattr(jobs, "progresar", lambda c, jid, pct, msg: llamadas.append((jid, msg)))
+    monkeypatch.setattr(ig_seguidos, "_ingerir_cuenta", lambda *a, **k: None)
+    job = _job(cx, "ig.ingerir", {"por_cuenta": 5}, ids["a"])
+    handlers.HANDLERS["ig.ingerir"](cx, job)
+    assert [m for _, m in llamadas] == ["@cafe.tacuba", "@otra.cuenta", "@tercera.cuenta"]
+    assert {j for j, _ in llamadas} == {job["id"]}
+
+
+def test_handler_ingerir_por_cuenta_acotado(cx, ids, monkeypatch) -> None:
+    vistos = []
+    monkeypatch.setattr(ig_seguidos, "ingerir",
+                        lambda cx, aid, *, por_cuenta, progreso: vistos.append(por_cuenta) or {})
+    for pedido in (999, 0, None):
+        handlers.HANDLERS["ig.ingerir"](cx, _job(cx, "ig.ingerir", {"por_cuenta": pedido}, ids["a"]))
+    assert vistos == [50, 12, 12]
+
+
+def test_handlers_igs_cuenta_inexistente_truena(cx, ids) -> None:
+    job = _job(cx, "ig.ingerir", {"por_cuenta": 5}, ids["a"])
+    job["account_id"] = 99999
+    with pytest.raises(ValueError):
+        handlers.HANDLERS["ig.ingerir"](cx, job)
