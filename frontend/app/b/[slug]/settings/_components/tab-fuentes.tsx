@@ -3,6 +3,7 @@
 import { Separator } from "@/components/ui/separator";
 import { FuentesLista } from "./fuentes-lista";
 import { FotosPanel } from "./fotos-panel";
+import { IgSeguidosPanel } from "./ig-seguidos-panel";
 import { TemasLista } from "./temas-lista";
 
 export function TabFuentes({ slug, puedeEditar }: { slug: string; puedeEditar: boolean }) {
@@ -15,6 +16,8 @@ export function TabFuentes({ slug, puedeEditar }: { slug: string; puedeEditar: b
       <FuentesLista slug={slug} kind="info" titulo="Fuentes de información" puedeEditar={puedeEditar} />
       <Separator />
       <FotosPanel slug={slug} puedeEditar={puedeEditar} />
+      <Separator />
+      <IgSeguidosPanel slug={slug} puedeEditar={puedeEditar} />
       <Separator />
       <TemasLista slug={slug} puedeEditar={puedeEditar} />
     </div>
