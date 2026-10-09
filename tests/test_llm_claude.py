@@ -86,6 +86,15 @@ def test_sin_tool_use_lanza(anthropic_falso):
                                      herramienta=HERR)
 
 
+def test_max_tokens_con_tool_use_lanza_truncado(anthropic_falso):
+    _, respuesta = anthropic_falso
+    respuesta["r"] = _Resp([_Bloque(type="tool_use", name="disenar", input={"kind": "si"})],
+                           stop_reason="max_tokens")
+    with pytest.raises(llm_claude.LLMTruncado, match="max_tokens"):
+        llm_claude.pedir_herramienta(system="s", mensajes=[{"role": "user", "content": "x"}],
+                                     herramienta=HERR)
+
+
 def test_sin_api_key_lanza(monkeypatch):
     monkeypatch.setattr(config, "ANTHROPIC_API_KEY", None)
     with pytest.raises(llm_claude.LLMNoDisponible):

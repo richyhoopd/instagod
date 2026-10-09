@@ -21,6 +21,10 @@ class LLMSinHerramienta(RuntimeError):
     """El modelo respondió sin llamar a la herramienta pedida."""
 
 
+class LLMTruncado(RuntimeError):
+    """La respuesta se cortó por `max_tokens`: el input de la herramienta está incompleto."""
+
+
 _MEDIA = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
           ".webp": "image/webp"}
 
@@ -75,5 +79,7 @@ def pedir_herramienta(*, system: str, mensajes: list[dict], herramienta: dict,
                     "salida": int(getattr(u, "output_tokens", 0) or 0)})
     for bloque in resp.content:
         if getattr(bloque, "type", None) == "tool_use" and bloque.name == herramienta["name"]:
+            if resp.stop_reason == "max_tokens":
+                raise LLMTruncado(f"{herramienta['name']} cortada por max_tokens={max_tokens}")
             return dict(bloque.input)
     raise LLMSinHerramienta(f"sin llamada a {herramienta['name']} (stop_reason={resp.stop_reason})")
