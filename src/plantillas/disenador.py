@@ -1,4 +1,6 @@
-"""El diseñador con LLM: convierte una instrucción en capas.
+"""OBSOLETO desde editor v2 (lo reemplaza plantillas/chat.py). Se borra cuando v2 esté en prod.
+
+El diseñador con LLM: convierte una instrucción en capas.
 
 Antes el LLM escribía HTML libre y el motor lo renderizaba sin sandbox. Ahora
 devuelve `layout_json`, que se valida contra un esquema cerrado antes de tocar

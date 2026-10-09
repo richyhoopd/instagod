@@ -39,8 +39,10 @@ from src import fuentes as fuentes_mod
 from src.assets import biblioteca as assets_biblioteca
 from src.assets import recorte as assets_recorte
 from src.image_sources import BRANDS_DIR
+from src.plantillas import chat as plantillas_chat
 from src.plantillas import contrato as contrato_mod
 from src.plantillas import disenador, fuentes_tipograficas, preview
+from src.plantillas import escena as escena_mod
 from src.plantillas import render as plantillas_render
 
 # Espera entre subreddits de una misma fuente: Reddit responde 429 a la 2ª
@@ -771,7 +773,41 @@ def asset_recorte(cx: sqlite3.Connection, job: dict[str, Any]) -> dict[str, Any]
     return {"asset_id": asset["id"], "recorte_archivo": nombre, "src": f"assets/{nombre}"}
 
 
+def diseno_chat(cx, job) -> dict:
+    """Un mensaje del chat del editor v2. Guarda versión: el historial del chat
+    ES `template_versions` (mensaje_usuario + llm_meta). Si el modelo falla
+    (ChatError) no se guarda nada y la escena no se toca."""
+    payload = json.loads(job["payload_json"] or "{}")
+    tid = int(payload["template_id"])
+    mensaje = str(payload.get("mensaje") or "").strip()
+    fila = plantillas.obtener(cx, tid)
+    if fila is None or fila["account_id"] != job["account_id"]:
+        raise ValueError("plantilla de otra marca o inexistente")
+    m = marcas.cargar_por_id(cx, job["account_id"])
+    uso: list[dict] = []
+    jobs.progresar(cx, job["id"], 10, "Pensando el diseño")
+    modo = payload.get("modo") or "crear"
+    if modo == "editar":
+        actual = payload.get("escena") or escena_mod.normalizar(
+            json.loads(fila.get("layout_json") or "null"), fila["aspecto"])
+        contrato = json.loads(fila["contrato_json"])
+        lista, nueva, meta = plantillas_chat.editar(cx, m, actual, contrato, mensaje, uso=uso)
+        resultado: dict = {"ops": lista}
+    else:
+        formato = payload.get("formato") or escena_mod.FORMATO_DE_ASPECTO.get(
+            fila["aspecto"], "4x5")
+        nueva, contrato, meta = plantillas_chat.crear(cx, m, mensaje, formato=formato, uso=uso)
+        resultado = {"escena": nueva}
+    jobs.progresar(cx, job["id"], 90, "Guardando versión")
+    numero = plantillas.nueva_version(
+        cx, tid, "", contrato, mensaje_usuario=mensaje, layout=nueva,
+        llm_meta={"modelo": config.DISENO_MODELO, "uso": uso, "modo": modo,
+                  "kind": meta.get("kind"), "respuesta": meta.get("respuesta")})
+    return {**resultado, "version": numero, "respuesta": meta.get("respuesta"), "uso": uso}
+
+
 HANDLERS = {
+    "diseno.chat": diseno_chat,
     "slideshow.generar": generar_slideshow,
     "slideshow.regenerar": regenerar_slideshow,
     "slideshow.rerender": rerender_slideshow,

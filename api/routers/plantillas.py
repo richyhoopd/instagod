@@ -1,9 +1,10 @@
 """Endpoints de plantillas/diseños del portal."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -97,6 +98,13 @@ class VistaPrevia(BaseModel):
     layout: dict[str, Any]
     contrato: dict[str, Any] | None = None
     aspecto: str = Field(pattern="^(4:5|1:1|9:16)$")
+
+
+class MensajeChat(BaseModel):
+    mensaje: str = Field(min_length=1, max_length=2000)
+    modo: Literal["crear", "editar"] = "editar"
+    escena: dict | None = None
+    formato: Literal["4x5", "1x1", "9x16"] | None = None
 
 
 class PedirDiseno(BaseModel):
@@ -220,7 +228,9 @@ def vista_previa(slug: str, cuerpo: VistaPrevia, user: dict = Depends(usuario_ac
 @router.post("/templates/design", status_code=202)
 def pedir_diseno(slug: str, cuerpo: PedirDiseno, user: dict = Depends(usuario_actual),
                  cx=Depends(get_cx)) -> dict:
-    """Encola al asistente: le pide un diseño al modelo y devuelve las capas.
+    """OBSOLETO desde editor v2: lo reemplaza POST /templates/{tid}/chat. Se borra cuando v2 esté en prod.
+
+    Encola al asistente: le pide un diseño al modelo y devuelve las capas.
 
     El asistente propone, no guarda: el handler nunca escribe en
     `brand_templates` ni en `template_versions`, así que aquí no hay nada que
@@ -272,6 +282,34 @@ def listar_versiones(slug: str, tid: int, user: dict = Depends(usuario_actual),
     filas = plantillas.versiones(cx, tid)
     # Historial: la más reciente primero, como cualquier persona lo espera.
     return [_version_vista(f) for f in reversed(filas)]
+
+
+@router.post("/templates/{tid}/chat", status_code=202)
+def chat_diseno(slug: str, tid: int, cuerpo: MensajeChat, user: dict = Depends(usuario_actual),
+                cx=Depends(get_cx)) -> dict:
+    """Un mensaje del chat del editor v2 (crear o editar). Aislamiento antes de encolar."""
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    _plantilla_de_marca(cx, marca["id"], tid)
+    job_id = jobs.crear(cx, "diseno.chat", marca["id"],
+                        {"template_id": tid, **cuerpo.model_dump()}, creado_por=user["id"])
+    return {"job_id": job_id}
+
+
+@router.get("/templates/{tid}/chat")
+def historial_chat(slug: str, tid: int, user: dict = Depends(usuario_actual),
+                   cx=Depends(get_cx)) -> list[dict]:
+    """Historial del chat: las versiones que nacieron de un mensaje, en orden."""
+    marca, _ = marca_para(slug, cx, user, minimo="manager")
+    _plantilla_de_marca(cx, marca["id"], tid)
+    out = []
+    for f in plantillas.versiones(cx, tid):
+        meta = json.loads(f.get("llm_meta") or "{}")
+        if not f.get("mensaje_usuario") or "modo" not in meta:
+            continue
+        out.append({"version": f["version"], "mensaje": f["mensaje_usuario"],
+                    "respuesta": meta.get("respuesta"), "modo": meta["modo"],
+                    "kind": meta.get("kind"), "creado_en": f.get("creado_en")})
+    return out
 
 
 @router.post("/templates/{tid}/revert/{n}")
