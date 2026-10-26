@@ -11,9 +11,10 @@ la DB en la VM:
 2. `cargar()` (VM): inserta las filas. Idempotente por
    (account_id, plataforma, formato, scheduled_datetime, tema_semilla).
 
-Todo entra con status='borrador', aprobacion NULL, origen='import': el
-publisher no lo toca (filas_due exige programado+aprobado y solo instagram sin
-historias).
+Todo entra con status='borrador', aprobacion='pendiente', origen='import': en
+el portal queda en Pendientes (aprobable, reprogramable, eliminable) y el
+publisher no lo toca hasta aprobarla (filas_due exige programado+aprobado, solo
+instagram sin historias). Aprobar conserva la fecha del plan (approval.aprobar).
 """
 from __future__ import annotations
 
@@ -115,7 +116,7 @@ def cargar(cx, account_id: int, filas: list[dict[str, Any]]) -> tuple[int, int]:
             repetidas += 1
             continue
         db.insert(cx, "content_queue", account_id=account_id, status="borrador",
-                  origen="import", **f)
+                  aprobacion="pendiente", origen="import", **f)
         nuevas += 1
     cx.commit()
     return nuevas, repetidas

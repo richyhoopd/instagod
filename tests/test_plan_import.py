@@ -66,3 +66,29 @@ def test_cargar_es_idempotente_y_el_publisher_no_toca_nada(tmp_path) -> None:
     estados = {r["status"] for r in cx.execute("SELECT status FROM content_queue")}
     assert estados == {"borrador"}
     assert publisher.filas_due(cx, mid, "2099-01-01T00:00:00-06:00") == []
+
+
+def test_importadas_quedan_pendientes_y_aprobar_respeta_la_fecha_del_plan(tmp_path) -> None:
+    import pytz
+    from datetime import datetime
+
+    from src import approval, cola
+    plan = _plan(tmp_path)
+    filas = plan_import.manifiesto(plan, tz="America/Mexico_City",
+                                   subir_imagen=lambda r, pid: pid, subir_video=lambda r, pid: pid)
+    cx = db.connect(tmp_path / "t.db")
+    db.init_db(cx)
+    mid = db.insert(cx, "accounts", slug="m", ig_handle="@m", nombre="m", ciudad="X")
+    plan_import.cargar(cx, mid, filas)
+    filas_db = [dict(r) for r in cx.execute("SELECT * FROM content_queue")]
+    assert {cola.estado_de(f) for f in filas_db} == {"pendiente"}
+    post = next(f for f in filas_db if f["plataforma"] == "instagram" and f["formato"] == "post")
+    ahora = pytz.timezone("America/Mexico_City").localize(datetime(2026, 10, 25, 12))
+    slot = approval.aprobar(cx, post["id"], ahora=ahora)
+    fila = db.get(cx, "content_queue", post["id"])
+    assert slot.isoformat() == post["scheduled_datetime"] == fila["scheduled_datetime"]
+    assert fila["aprobacion"] == "aprobado" and fila["status"] == "programado"
+    # vencida → ya no hay fecha del plan que respetar: toma hueco normal
+    otra = next(f for f in filas_db if f["plataforma"] == "facebook" and f["formato"] == "post")
+    tarde = pytz.timezone("America/Mexico_City").localize(datetime(2026, 12, 1, 12))
+    assert approval.aprobar(cx, otra["id"], ahora=tarde) > tarde

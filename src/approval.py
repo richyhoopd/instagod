@@ -96,7 +96,16 @@ def aprobar(cx, queue_id: int, *, ahora: datetime | None = None,
     # N aprobaciones seguidas caen en N huecos DISTINTOS. timing.elegir_slot
     # (un solo horario semanal) haría chocar todo un batch en el mismo datetime.
     inmediato = fila.get("tipo") == "anuncio"
-    if inmediato:
+    # Plan importado (src/plan_import): la fecha ES el calendario. Aprobar no la
+    # mueve al siguiente hueco mientras siga en el futuro.
+    fecha_plan = fila.get("scheduled_datetime") if fila.get("origen") == "import" else None
+    fecha_plan = datetime.fromisoformat(fecha_plan) if fecha_plan else None
+    if fecha_plan and ahora.tzinfo is None:
+        fecha_plan = fecha_plan.replace(tzinfo=None)
+    if fecha_plan and fecha_plan > ahora:
+        inmediato = False
+        slot = fecha_plan
+    elif inmediato:
         slot = ahora
     elif sheet_id:
         slot = (_slot_meme or _siguiente_hueco)(ahora, sheet_id, slots)
