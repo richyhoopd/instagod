@@ -55,8 +55,8 @@ def _plataformas_de(slug: str) -> list[tuple]:
 
 
 def publish_row(row: dict, *, slug: str = "gdlscene",
-                 sheet_id: str | None = None, ig_creds: dict | None = None
-                 ) -> tuple[bool, list[str]]:
+                 sheet_id: str | None = None, ig_creds: dict | None = None,
+                 fb_creds: dict | None = None) -> tuple[bool, list[str]]:
     """Publica una fila en las redes habilitadas que aún no tengan post id.
 
     Escribe cada id al Sheet INMEDIATAMENTE (si el job muere a medias no hay
@@ -76,6 +76,10 @@ def publish_row(row: dict, *, slug: str = "gdlscene",
             continue  # ya publicada en esta red (reintento parcial)
         try:
             kwargs = {"creds": ig_creds} if (tag == "ig" and ig_creds) else {}
+            if tag == "fb":
+                # Sin fallback global: FB usa SOLO las creds de la marca.
+                kwargs = {"creds": fb_creds if fb_creds is not None
+                          else config.account_creds(slug)}
             post_id = (mod.publish_carousel(urls, caption, **kwargs) if urls
                        else mod.publish(image_url, caption, **kwargs))
             sheets.update_row(row_id, sheet_id=sheet_id, **{col: post_id})

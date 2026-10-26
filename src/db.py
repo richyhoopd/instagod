@@ -80,7 +80,7 @@ TABLES: dict[str, set[str]] = {
         # H1 (spec 2026-08-29): plantilla de DB, entidad y contrato de campos.
         "template_id", "template_version", "entity_id", "campos_json", "aspecto",
         # Plan multiplataforma (ver _MIGRATIONS).
-        "plataforma", "etapa", "formato",
+        "plataforma", "etapa", "formato", "destinos_json",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -237,6 +237,9 @@ _MIGRATIONS = {
         "plataforma": "TEXT",            # NULL | 'instagram' | 'facebook' | 'tiktok'
         "etapa": "TEXT",                 # NULL | 'TOFU' | 'MOFU' | 'BOFU'
         "formato": "TEXT",               # NULL | 'post' | 'reel' | 'historia'
+        # Resultado por destino del publisher: {"instagram"|"facebook":
+        # {"ok", "id", "url", "error", "en"}}. Un destino caído no pisa al otro.
+        "destinos_json": "TEXT",
         # Motor de frescura (Task X2): JSON list de events.id incluidos en el
         # carrusel, para marcarlos 'anunciado' al aprobar.
         "evento_ids": "TEXT",
@@ -387,6 +390,7 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         plataforma         TEXT,
         etapa              TEXT,
         formato            TEXT,
+        destinos_json      TEXT,
         CHECK (tipo   IN ('meme','anuncio','slideshow','video','post')),
         CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
@@ -399,7 +403,7 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
     "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
     "intentos", "plan_id", "video_json", "template_id", "template_version",
-    "entity_id", "campos_json", "aspecto", "plataforma", "etapa", "formato",
+    "entity_id", "campos_json", "aspecto", "plataforma", "etapa", "formato", "destinos_json",
 )
 
 

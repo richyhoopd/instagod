@@ -21,6 +21,8 @@ CLAVES: tuple[str, ...] = (
     "LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL",
     "PEXELS_API_KEY", "UNSPLASH_ACCESS_KEY", "NEWSAPI_KEY",
     "SHEET_ID",
+    # Página de Facebook de la marca (src/facebook.py).
+    "FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN",
     # Bearer opcional para feeds privados (src/feeds.py, contrato v1).
     "FEED_TOKEN",
 )

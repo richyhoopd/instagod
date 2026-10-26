@@ -92,3 +92,43 @@ def test_502_http_error_solo_status(api_cliente, monkeypatch) -> None:
     detalle = r.json()["detalle"]
     assert "El servicio respondió HTTP 400" in detalle
     assert "t-secreto-123" not in r.text
+
+
+def test_facebook_ok_con_tipo_scopes_y_expiracion(api_cliente, monkeypatch) -> None:
+    from api.routers import pruebas
+    monkeypatch.setattr(pruebas, "_fb_page", lambda pid, t: {"id": pid, "name": "Página P"})
+    monkeypatch.setattr(pruebas, "_fb_debug", lambda t: {
+        "type": "PAGE", "is_valid": True, "expires_at": 0, "profile_id": "PG1",
+        "scopes": ["pages_show_list", "pages_manage_posts", "pages_read_engagement"]})
+    cli = _setup(api_cliente, monkeypatch, FB_PAGE_ID="PG1", FB_PAGE_ACCESS_TOKEN="tok-fb")
+    r = cli.post("/brands/pensionmas/facebook/test")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["ok"] is True and j["name"] == "Página P" and j["tipo"] == "PAGE"
+    assert "pages_manage_posts" in j["scopes"] and j["expira"] is None and j["avisos"] == []
+
+
+def test_facebook_avisa_token_de_usuario_sin_permiso(api_cliente, monkeypatch) -> None:
+    from api.routers import pruebas
+    monkeypatch.setattr(pruebas, "_fb_page", lambda pid, t: {"id": pid, "name": "P"})
+    monkeypatch.setattr(pruebas, "_fb_debug", lambda t: {
+        "type": "USER", "is_valid": True, "expires_at": 1793041200, "scopes": ["public_profile"]})
+    cli = _setup(api_cliente, monkeypatch, FB_PAGE_ID="PG1", FB_PAGE_ACCESS_TOKEN="tok-fb")
+    j = cli.post("/brands/pensionmas/facebook/test").json()
+    assert j["ok"] is False and j["expira"] == 1793041200
+    assert any("USER" in a for a in j["avisos"])
+    assert any("pages_manage_posts" in a for a in j["avisos"])
+
+
+def test_facebook_faltante_y_502_sin_filtrar_token(api_cliente, monkeypatch) -> None:
+    from api.routers import pruebas
+
+    def _boom(pid, t):
+        raise RuntimeError(f"falló con {t}")
+    monkeypatch.setattr(pruebas, "_fb_page", _boom)
+    cli = _setup(api_cliente, monkeypatch, FB_PAGE_ID="PG1")
+    r = cli.post("/brands/pensionmas/facebook/test")
+    assert r.status_code == 422 and r.json()["campo"] == "FB_PAGE_ACCESS_TOKEN"
+    monkeypatch.setenv("FB_PAGE_ACCESS_TOKEN__PENSIONMAS", "tok-fb-secreto")
+    r = cli.post("/brands/pensionmas/facebook/test")
+    assert r.status_code == 502 and "tok-fb-secreto" not in r.text

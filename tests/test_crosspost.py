@@ -37,13 +37,13 @@ class _FakeMod:
         self.fail = fail
         self.calls = []
 
-    def publish(self, url, caption):
+    def publish(self, url, caption, **kw):
         self.calls.append(("single", url))
         if self.fail:
             raise RuntimeError("boom")
         return "post123"
 
-    def publish_carousel(self, urls, caption):
+    def publish_carousel(self, urls, caption, **kw):
         self.calls.append(("carousel", tuple(urls)))
         if self.fail:
             raise RuntimeError("boom")

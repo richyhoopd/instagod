@@ -1,9 +1,15 @@
-"""ENTRYPOINT publisher local — publica en Instagram desde `content_queue`.
+"""ENTRYPOINT publisher local — publica en Instagram y Facebook desde `content_queue`.
 
 Complementa a `publish.py` (Actions, marcas CON Sheet): este proceso corre en
 local/servidor propio y publica SOLO las marcas SIN SHEET_ID (la cola vive
 íntegra en DB, sin espejo al Sheet). Regla anti-doble-publicación: una marca
 la publica un único lado, nunca los dos.
+
+Destinos: cada fila es de UNA plataforma (`plataforma` NULL/instagram →
+Instagram; `facebook` → la Página de Facebook de la marca, solo si la marca
+tiene FB_PAGE_ID + FB_PAGE_ACCESS_TOKEN y PUBLISHER_FB no vale "0"). Cada
+destino corre aislado: si FB falla, IG sigue, y al revés. El resultado queda
+por destino en `destinos_json`.
 
 Uso:  python -m src.publisher [--once]
 """
@@ -21,6 +27,7 @@ import requests
 
 import config
 from src import approval, db
+from src import facebook as _facebook_mod
 from src import instagram as _instagram_mod
 from src import marcas as marcas_mod
 
@@ -34,22 +41,30 @@ MARCADOR_PUBLICANDO = "[publicando]"
 MAX_INTENTOS = 5
 
 
-def filas_due(cx, account_id: int, ahora_iso: str) -> list[dict]:
+def filas_due(cx, account_id: int, ahora_iso: str,
+              plataforma: str = "instagram") -> list[dict]:
     """Filas de `content_queue` de la marca listas para publicar: aprobadas,
     programadas, cuyo `scheduled_datetime` ya venció, sin el marcador de
     "publicando" en vuelo (ver MARCADOR_PUBLICANDO) y con menos de
-    MAX_INTENTOS fallidos. Solo Instagram y nunca historias: facebook/tiktok
-    y las historias del plan son calendario visual, se publican a mano."""
+    MAX_INTENTOS fallidos. Solo la `plataforma` pedida (NULL cuenta como
+    instagram) y nunca historias: tiktok y las historias del plan son
+    calendario visual, se publican a mano."""
     return db.rows(cx, """
         SELECT * FROM content_queue
          WHERE account_id = ? AND status = 'programado' AND aprobacion = 'aprobado'
            AND scheduled_datetime <= ?
            AND (error IS NULL OR error NOT LIKE ? || '%')
            AND intentos < ?
-           AND COALESCE(plataforma, 'instagram') = 'instagram'
+           AND COALESCE(plataforma, 'instagram') = ?
            AND COALESCE(formato, '') <> 'historia'
          ORDER BY scheduled_datetime
-    """, (account_id, ahora_iso, MARCADOR_PUBLICANDO, MAX_INTENTOS))
+    """, (account_id, ahora_iso, MARCADOR_PUBLICANDO, MAX_INTENTOS, plataforma))
+
+
+def fb_activo(creds_marca: dict) -> bool:
+    """FB es destino de la marca solo con credenciales propias y sin kill switch."""
+    return (os.getenv("PUBLISHER_FB", "1") != "0"
+            and _facebook_mod.tiene_creds(creds_marca))
 
 
 def _urls_o_none(imagen_url: str) -> list[str] | None:
@@ -82,6 +97,35 @@ def _error_seguro(exc: Exception, creds: dict | None) -> str:
     return msg[:200]
 
 
+def _guardar_destino(cx, fila: dict, destino: str, resultado: dict) -> str:
+    """Mezcla el resultado de un destino en `destinos_json` sin pisar los otros."""
+    actual = db.get(cx, "content_queue", fila["id"]) or {}
+    try:
+        destinos = json.loads(actual.get("destinos_json") or "{}")
+    except ValueError:
+        destinos = {}
+    destinos[destino] = {**resultado,
+                         "en": datetime.now(pytz.timezone(config.TIMEZONE)).isoformat()}
+    return json.dumps(destinos, ensure_ascii=False)
+
+
+def _reclamar(cx, fila: dict) -> bool:
+    # Claim atómico ANTES de llamar a la red (ver MARCADOR_PUBLICANDO arriba): el
+    # UPDATE solo aplica si la fila SIGUE cumpliendo las condiciones de
+    # filas_due en este instante. rowcount == 0 → otra instancia ya la tomó
+    # (o dejó de calificar) entre el filas_due de este ciclo y esta llamada;
+    # no es un modo soportado correr dos publishers a la vez, pero el claim
+    # evita que un accidente duplique la publicación.
+    cur = cx.execute(
+        "UPDATE content_queue SET error=? WHERE id=? AND status='programado' "
+        "AND aprobacion='aprobado' AND (error IS NULL OR error NOT LIKE ?||'%') "
+        "AND intentos < ?",
+        (MARCADOR_PUBLICANDO, fila["id"], MARCADOR_PUBLICANDO, MAX_INTENTOS),
+    )
+    cx.commit()
+    return cur.rowcount > 0
+
+
 def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> bool:
     """Publica una fila due en Instagram y actualiza su estado.
 
@@ -96,20 +140,7 @@ def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> boo
     ig = _ig or _instagram_mod
     urls = _urls_o_none(fila.get("imagen_url") or "")
     caption = fila.get("caption") or ""
-    # Claim atómico ANTES de llamar a IG (ver MARCADOR_PUBLICANDO arriba): el
-    # UPDATE solo aplica si la fila SIGUE cumpliendo las condiciones de
-    # filas_due en este instante. rowcount == 0 → otra instancia ya la tomó
-    # (o dejó de calificar) entre el filas_due de este ciclo y esta llamada;
-    # no es un modo soportado correr dos publishers a la vez, pero el claim
-    # evita que un accidente duplique la publicación.
-    cur = cx.execute(
-        "UPDATE content_queue SET error=? WHERE id=? AND status='programado' "
-        "AND aprobacion='aprobado' AND (error IS NULL OR error NOT LIKE ?||'%') "
-        "AND intentos < ?",
-        (MARCADOR_PUBLICANDO, fila["id"], MARCADOR_PUBLICANDO, MAX_INTENTOS),
-    )
-    cx.commit()
-    if cur.rowcount == 0:
+    if not _reclamar(cx, fila):
         return False
     try:
         if fila.get("tipo") == "video":
@@ -127,15 +158,60 @@ def publicar_fila(cx, fila: dict, creds: dict | None, *, _ig: Any = None) -> boo
         # Nunca dejamos el marcador en un fallo CONOCIDO (la llamada lanzó):
         # el reintento del próximo ciclo es seguro, se sobreescribe con el
         # error real.
-        db.update(cx, "content_queue", fila["id"], error=error, intentos=intentos)
-        _notificar(cx, fila["id"], f"⚠️ Error al publicar: {error}")
+        db.update(cx, "content_queue", fila["id"], error=error, intentos=intentos,
+                  destinos_json=_guardar_destino(cx, fila, "instagram",
+                                                 {"ok": False, "error": error}))
+        _notificar(cx, fila["id"], f"⚠️ Error al publicar en Instagram: {error}")
         return False
     else:
         ahora = datetime.now(pytz.timezone(config.TIMEZONE))
         db.update(cx, "content_queue", fila["id"], status="publicado", ig_media_id=media_id,
-                  publicado_en=ahora.isoformat(), error=None)
+                  publicado_en=ahora.isoformat(), error=None,
+                  destinos_json=_guardar_destino(cx, fila, "instagram",
+                                                 {"ok": True, "id": media_id}))
         _notificar(cx, fila["id"], "📤 Publicado en Instagram")
         return True
+
+
+def publicar_fila_fb(cx, fila: dict, creds_marca: dict, *, _fb: Any = None) -> bool:
+    """Publica una fila `plataforma='facebook'` en la Página de la marca.
+
+    `creds_marca`: `config.account_creds(slug)`; sin FB_PAGE_ID/TOKEN lanza
+    `SinCredencialesFB` dentro del try y queda como error de la fila (nunca
+    se usan credenciales de otra marca). Video (tipo video o formato reel) →
+    /videos; JSON-lista → carrusel; si no, foto. Mismo claim, reintentos y
+    redacción que `publicar_fila`.
+    """
+    fb = _fb or _facebook_mod
+    if not _reclamar(cx, fila):
+        return False
+    url = fila.get("imagen_url") or ""
+    urls = _urls_o_none(url)
+    caption = fila.get("caption") or ""
+    secretos = {k: creds_marca.get(k) for k in ("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN")}
+    try:
+        creds = fb.creds_de(creds_marca)
+        if fila.get("tipo") == "video" or fila.get("formato") == "reel":
+            res = fb.publicar_video(creds, url, caption)
+        elif urls is not None:
+            res = fb.publicar_carrusel(creds, urls, caption)
+        else:
+            res = fb.publicar_foto(creds, url, caption)
+    except Exception as exc:  # noqa: BLE001
+        error = _error_seguro(exc, secretos)
+        db.update(cx, "content_queue", fila["id"], error=error,
+                  intentos=(fila.get("intentos") or 0) + 1,
+                  destinos_json=_guardar_destino(cx, fila, "facebook",
+                                                 {"ok": False, "error": error}))
+        _notificar(cx, fila["id"], f"⚠️ Error al publicar en Facebook: {error}")
+        return False
+    ahora = datetime.now(pytz.timezone(config.TIMEZONE))
+    db.update(cx, "content_queue", fila["id"], status="publicado",
+              publicado_en=ahora.isoformat(), error=None,
+              destinos_json=_guardar_destino(cx, fila, "facebook",
+                                             {"ok": True, "id": res.id, "url": res.url}))
+    _notificar(cx, fila["id"], f"📤 Publicado en Facebook: {res.url}")
+    return True
 
 
 def _notificar(cx, queue_id: int, texto: str) -> None:
@@ -149,12 +225,15 @@ def _notificar(cx, queue_id: int, texto: str) -> None:
               file=sys.stderr)
 
 
-def ciclo(cx, *, ahora: datetime | None = None, _ig: Any = None) -> int:
+def ciclo(cx, *, ahora: datetime | None = None, _ig: Any = None,
+          _fb: Any = None) -> int:
     """Un ciclo de publicación sobre todas las marcas activas.
 
     Anti-doble-publicación: marca CON SHEET_ID → se salta entera (la publica
-    Actions vía Sheet). Marca sin credenciales IG → se salta con aviso, sin
-    tocar sus filas. Devuelve el número de filas publicadas en este ciclo.
+    Actions vía Sheet). Por destino: sin credenciales IG se saltan sus filas
+    de IG; sin credenciales FB (o PUBLISHER_FB=0) se saltan sus filas de FB,
+    sin tocarlas. Un destino que revienta no detiene al otro ni a las demás
+    marcas. Devuelve el número de filas publicadas en este ciclo.
     """
     ahora = ahora or datetime.now(pytz.timezone(config.TIMEZONE))
     ahora_iso = ahora.isoformat()
@@ -163,16 +242,41 @@ def ciclo(cx, *, ahora: datetime | None = None, _ig: Any = None) -> int:
         creds_marca = config.account_creds(marca.slug)
         if creds_marca.get("SHEET_ID"):
             continue  # la publica Actions (Sheet) — nunca los dos lados
-        if not creds_marca.get("IG_USER_ID") or not creds_marca.get("IG_ACCESS_TOKEN"):
-            print(f"[publisher] {marca.slug}: faltan credenciales IG, se salta",
-                  file=sys.stderr)
-            continue
-        ig_creds = (None if marca.slug == "gdlscene" else
-                    {"user_id": creds_marca["IG_USER_ID"], "token": creds_marca["IG_ACCESS_TOKEN"]})
+        publicadas += _ciclo_ig(cx, marca, creds_marca, ahora_iso, _ig)
+        publicadas += _ciclo_fb(cx, marca, creds_marca, ahora_iso, _fb)
+    return publicadas
+
+
+def _ciclo_ig(cx, marca, creds_marca: dict, ahora_iso: str, _ig: Any) -> int:
+    if not creds_marca.get("IG_USER_ID") or not creds_marca.get("IG_ACCESS_TOKEN"):
+        print(f"[publisher] {marca.slug}: faltan credenciales IG, se salta IG",
+              file=sys.stderr)
+        return 0
+    ig_creds = (None if marca.slug == "gdlscene" else
+                {"user_id": creds_marca["IG_USER_ID"], "token": creds_marca["IG_ACCESS_TOKEN"]})
+    n = 0
+    try:
         for fila in filas_due(cx, marca.id, ahora_iso):
             if publicar_fila(cx, fila, ig_creds, _ig=_ig):
-                publicadas += 1
-    return publicadas
+                n += 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"[publisher] {marca.slug}: IG falló: {_error_seguro(exc, creds_marca)}",
+              file=sys.stderr)
+    return n
+
+
+def _ciclo_fb(cx, marca, creds_marca: dict, ahora_iso: str, _fb: Any) -> int:
+    if not fb_activo(creds_marca):
+        return 0
+    n = 0
+    try:
+        for fila in filas_due(cx, marca.id, ahora_iso, plataforma="facebook"):
+            if publicar_fila_fb(cx, fila, creds_marca, _fb=_fb):
+                n += 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"[publisher] {marca.slug}: FB falló: {_error_seguro(exc, creds_marca)}",
+              file=sys.stderr)
+    return n
 
 
 def _dormir(segundos: float) -> None:

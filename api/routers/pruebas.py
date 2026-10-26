@@ -27,6 +27,23 @@ def _ig_me(token: str) -> dict:
     return r.json()
 
 
+def _fb_page(page_id: str, token: str) -> dict:
+    from src import facebook
+    r = requests.get(f"{facebook.GRAPH}/{facebook.API_VERSION}/{page_id}",
+                     params={"fields": "id,name", "access_token": token}, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def _fb_debug(token: str) -> dict:
+    """debug_token del propio token de página (input_token = access_token)."""
+    from src import facebook
+    r = requests.get(f"{facebook.GRAPH}/{facebook.API_VERSION}/debug_token",
+                     params={"input_token": token, "access_token": token}, timeout=15)
+    r.raise_for_status()
+    return r.json().get("data") or {}
+
+
 def _llm_ping(provider: str, key: str, model: str) -> str:
     if provider == "claude":
         import anthropic
@@ -99,6 +116,35 @@ def instagram_test(slug: str, user: dict = Depends(usuario_actual), cx=Depends(g
     except Exception as e:  # noqa: BLE001
         raise _fallo(e, [creds["IG_ACCESS_TOKEN"]]) from e
     return {"ok": True, "username": me.get("username"), "id": me.get("id")}
+
+
+@router.post("/facebook/test")
+def facebook_test(slug: str, user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> dict:
+    marca_para(slug, cx, user, minimo="manager")
+    creds = config.account_creds(slug)
+    for k in ("FB_PAGE_ID", "FB_PAGE_ACCESS_TOKEN"):
+        if not creds.get(k):
+            raise cred_faltante(k)
+    token = creds["FB_PAGE_ACCESS_TOKEN"]
+    try:
+        pagina = _fb_page(creds["FB_PAGE_ID"], token)
+        info = _fb_debug(token)
+    except Exception as e:  # noqa: BLE001
+        raise _fallo(e, [token]) from e
+    scopes = sorted(info.get("scopes") or [])
+    tipo = info.get("type")
+    expira = info.get("expires_at") or None  # 0 = no expira
+    avisos = []
+    if tipo != "PAGE":
+        avisos.append(f"El token es de tipo {tipo}, no PAGE: genera uno de página.")
+    if "pages_manage_posts" not in scopes:
+        avisos.append("Al token le falta pages_manage_posts: no podrá publicar.")
+    if info.get("is_valid") is False:
+        avisos.append("Facebook marca el token como inválido.")
+    if info.get("profile_id") and str(info["profile_id"]) != str(pagina.get("id")):
+        avisos.append("El token es de otra página distinta a FB_PAGE_ID.")
+    return {"ok": not avisos, "id": pagina.get("id"), "name": pagina.get("name"),
+            "tipo": tipo, "scopes": scopes, "expira": expira, "avisos": avisos}
 
 
 @router.post("/llm/test")
