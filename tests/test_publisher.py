@@ -79,6 +79,26 @@ def test_filas_due_solo_las_vencidas_programadas_y_aprobadas(tmp_path) -> None:
     assert no_aprobada not in ids
 
 
+def test_filas_due_nunca_toma_facebook_tiktok_ni_historias(tmp_path) -> None:
+    cx = _cx(tmp_path)
+    mid = _marca(cx, "pensionmas")
+    ahora = _ahora()
+    antes = ahora - timedelta(minutes=5)
+    sin_plataforma = _fila(cx, account_id=mid, imagen_url="u0", scheduled=antes)
+    ig = _fila(cx, account_id=mid, imagen_url="u1", scheduled=antes)
+    db.update(cx, "content_queue", ig, plataforma="instagram", formato="post")
+    otras = []
+    for plataforma, formato in (("facebook", "post"), ("tiktok", "reel"),
+                                ("instagram", "historia")):
+        q = _fila(cx, account_id=mid, imagen_url="u", scheduled=antes)
+        db.update(cx, "content_queue", q, plataforma=plataforma, formato=formato)
+        otras.append(q)
+
+    ids = [f["id"] for f in publisher.filas_due(cx, mid, ahora.isoformat())]
+    assert sin_plataforma in ids and ig in ids
+    assert not set(otras) & set(ids)
+
+
 # --------- ciclo ---------
 
 def test_ciclo_marca_sin_sheet_publica_single_y_carrusel(tmp_path, monkeypatch) -> None:

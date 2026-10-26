@@ -38,13 +38,16 @@ def filas_due(cx, account_id: int, ahora_iso: str) -> list[dict]:
     """Filas de `content_queue` de la marca listas para publicar: aprobadas,
     programadas, cuyo `scheduled_datetime` ya venció, sin el marcador de
     "publicando" en vuelo (ver MARCADOR_PUBLICANDO) y con menos de
-    MAX_INTENTOS fallidos."""
+    MAX_INTENTOS fallidos. Solo Instagram y nunca historias: facebook/tiktok
+    y las historias del plan son calendario visual, se publican a mano."""
     return db.rows(cx, """
         SELECT * FROM content_queue
          WHERE account_id = ? AND status = 'programado' AND aprobacion = 'aprobado'
            AND scheduled_datetime <= ?
            AND (error IS NULL OR error NOT LIKE ? || '%')
            AND intentos < ?
+           AND COALESCE(plataforma, 'instagram') = 'instagram'
+           AND COALESCE(formato, '') <> 'historia'
          ORDER BY scheduled_datetime
     """, (account_id, ahora_iso, MARCADOR_PUBLICANDO, MAX_INTENTOS))
 

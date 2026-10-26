@@ -14,7 +14,8 @@ router = APIRouter(prefix="/brands/{slug}", tags=["cola"])
 
 # Campos que expone el listado (no el detalle completo, que incluye slides_data).
 _CAMPOS_LISTA = ("id", "tipo", "estado", "caption", "imagen_url", "scheduled_datetime",
-                 "tema_semilla", "template", "error", "creado_por", "aprobado_por")
+                 "tema_semilla", "template", "error", "creado_por", "aprobado_por",
+                 "plataforma", "etapa", "formato")
 
 
 def _resumen(fila: dict) -> dict:
@@ -49,10 +50,11 @@ class EditarCampos(BaseModel):
 
 @router.get("/queue")
 def listar(slug: str, desde: str | None = None, hasta: str | None = None,
-          estado: str | None = None, user: dict = Depends(usuario_actual),
-          cx=Depends(get_cx)) -> list[dict]:
+          estado: str | None = None, plataforma: str | None = None,
+          user: dict = Depends(usuario_actual), cx=Depends(get_cx)) -> list[dict]:
     fila, _ = marca_para(slug, cx, user)
-    items = cola.listar(cx, fila["id"], desde=desde, hasta=hasta, estado=estado)
+    items = cola.listar(cx, fila["id"], desde=desde, hasta=hasta, estado=estado,
+                        plataforma=plataforma)
     return [_resumen(f) for f in items]
 
 

@@ -79,6 +79,8 @@ TABLES: dict[str, set[str]] = {
         "video_json",
         # H1 (spec 2026-08-29): plantilla de DB, entidad y contrato de campos.
         "template_id", "template_version", "entity_id", "campos_json", "aspecto",
+        # Plan multiplataforma (ver _MIGRATIONS).
+        "plataforma", "etapa", "formato",
     },
     "ig_posts": {
         "media_id", "band_id", "queue_id", "media_type", "permalink",
@@ -229,6 +231,12 @@ _MIGRATIONS = {
         "aprobacion": "TEXT",            # NULL | 'pendiente' | 'aprobado' | 'rechazado'
         "caption": "TEXT",               # caption de la propuesta (hasta aprobarse)
         "imagen_url": "TEXT",            # URL Cloudinary de la propuesta (o JSON-list si carrusel)
+        # Plan multiplataforma: a dónde va la pieza y en qué etapa del embudo.
+        # NULL = instagram (todo lo previo). El publisher solo toma instagram
+        # y nunca formato='historia' (IG stories no se publican por API aquí).
+        "plataforma": "TEXT",            # NULL | 'instagram' | 'facebook' | 'tiktok'
+        "etapa": "TEXT",                 # NULL | 'TOFU' | 'MOFU' | 'BOFU'
+        "formato": "TEXT",               # NULL | 'post' | 'reel' | 'historia'
         # Motor de frescura (Task X2): JSON list de events.id incluidos en el
         # carrusel, para marcarlos 'anunciado' al aprobar.
         "evento_ids": "TEXT",
@@ -376,6 +384,9 @@ _CONTENT_QUEUE_REBUILD_DDL = """
         entity_id          INTEGER,
         campos_json        TEXT,
         aspecto            TEXT,
+        plataforma         TEXT,
+        etapa              TEXT,
+        formato            TEXT,
         CHECK (tipo   IN ('meme','anuncio','slideshow','video','post')),
         CHECK (status IN ('borrador','listo','en_sheet','programado','publicado','descartado'))
     )
@@ -388,7 +399,7 @@ _CONTENT_QUEUE_REBUILD_COLS = (
     "rechazados", "slideshow_json", "publicado_en", "error", "creado_por",
     "aprobado_por", "ig_media_id", "origen", "tg_chat_id", "tg_message_id",
     "intentos", "plan_id", "video_json", "template_id", "template_version",
-    "entity_id", "campos_json", "aspecto",
+    "entity_id", "campos_json", "aspecto", "plataforma", "etapa", "formato",
 )
 
 
