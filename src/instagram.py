@@ -15,7 +15,11 @@ import config
 _TIMEOUT = 60
 
 
-def _base() -> str:
+def _base(token: str | None = None) -> str:
+    # Token de Facebook Login (EAA…, p. ej. system user) solo lo acepta
+    # graph.facebook.com; los de Instagram Login (IGAA…) van al host configurado.
+    if token and token.startswith("EAA"):
+        return f"https://graph.facebook.com/{config.IG_API_VERSION}"
     return f"{config.IG_GRAPH_BASE.rstrip('/')}/{config.IG_API_VERSION}"
 
 
@@ -28,7 +32,7 @@ def _c(creds: dict | None) -> tuple[str, str]:
 
 def _create_container(image_url: str, caption: str, creds: dict | None = None) -> str:
     user_id, token = _c(creds)
-    url = f"{_base()}/{user_id}/media"
+    url = f"{_base(token)}/{user_id}/media"
     resp = requests.post(
         url,
         data={"image_url": image_url, "caption": caption, "access_token": token},
@@ -41,7 +45,7 @@ def _create_container(image_url: str, caption: str, creds: dict | None = None) -
 def _create_carousel_item(image_url: str, creds: dict | None = None) -> str:
     """Container hijo de un carrusel (sin caption, con is_carousel_item)."""
     user_id, token = _c(creds)
-    url = f"{_base()}/{user_id}/media"
+    url = f"{_base(token)}/{user_id}/media"
     resp = requests.post(
         url,
         data={"image_url": image_url, "is_carousel_item": "true",
@@ -54,7 +58,7 @@ def _create_carousel_item(image_url: str, creds: dict | None = None) -> str:
 
 def _create_carousel_container(children: list[str], caption: str, creds: dict | None = None) -> str:
     user_id, token = _c(creds)
-    url = f"{_base()}/{user_id}/media"
+    url = f"{_base(token)}/{user_id}/media"
     resp = requests.post(
         url,
         data={"media_type": "CAROUSEL", "children": ",".join(children),
@@ -71,7 +75,7 @@ def _create_reel_container(video_url: str, caption: str,
     """Container de Reel. `media_type=REELS` es el único camino para video:
     IG retiró el flujo VIDEO del feed, todo video entra como Reel."""
     user_id, token = _c(creds)
-    url = f"{_base()}/{user_id}/media"
+    url = f"{_base(token)}/{user_id}/media"
     resp = requests.post(
         url,
         data={"media_type": "REELS", "video_url": video_url,
@@ -88,7 +92,7 @@ def _wait_until_ready(creation_id: str, *, attempts: int = 10, delay: float = 3.
                        creds: dict | None = None) -> None:
     """Espera a que el container esté FINISHED antes de publicar."""
     _, token = _c(creds)
-    url = f"{_base()}/{creation_id}"
+    url = f"{_base(token)}/{creation_id}"
     for _ in range(attempts):
         resp = requests.get(
             url,
@@ -107,7 +111,7 @@ def _wait_until_ready(creation_id: str, *, attempts: int = 10, delay: float = 3.
 
 def _publish(creation_id: str, creds: dict | None = None) -> str:
     user_id, token = _c(creds)
-    url = f"{_base()}/{user_id}/media_publish"
+    url = f"{_base(token)}/{user_id}/media_publish"
     resp = requests.post(
         url,
         data={"creation_id": creation_id, "access_token": token},
