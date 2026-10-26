@@ -21,7 +21,7 @@ import { useMe } from "@/hooks/use-me";
 import { useBrands } from "@/hooks/use-brands";
 import { ApiError, post } from "@/lib/api";
 
-const RUTAS_PUBLICAS = ["/login", "/auth"];
+const RUTAS_PUBLICAS = ["/login", "/auth", "/terms", "/privacy"];
 
 export function AppHeader() {
   const pathname = usePathname();
