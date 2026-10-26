@@ -32,7 +32,8 @@ def test_editor_lista_y_ve_detalle(api_cliente) -> None:
     assert len(items) == 1 and items[0]["id"] == qid and items[0]["estado"] == "pendiente"
     assert set(items[0]) == {"id", "tipo", "estado", "caption", "imagen_url",
                              "scheduled_datetime", "tema_semilla", "template",
-                             "error", "creado_por", "aprobado_por"}
+                             "error", "creado_por", "aprobado_por",
+                             "plataforma", "etapa", "formato"}
     r = cli.get(f"/brands/pensionmas/queue/{qid}")
     assert r.status_code == 200 and r.json()["id"] == qid and r.json()["estado"] == "pendiente"
 
@@ -303,3 +304,20 @@ def test_editar_slides_qid_ajeno_404(api_cliente) -> None:
     H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
     r = cli.put(f"/brands/pensionmas/queue/{qid_otra}/slides", json={"slides": []})
     assert r.status_code == 404
+
+
+def test_lista_filtra_por_plataforma_null_cuenta_como_instagram(api_cliente) -> None:
+    cli, cx, H = api_cliente
+    pid = _marca(cx)
+    viejo = _item(cx, pid)
+    ig = _item(cx, pid, plataforma="instagram", etapa="TOFU", formato="post")
+    fb = _item(cx, pid, plataforma="facebook", etapa="BOFU", formato="historia")
+    tt = _item(cx, pid, plataforma="tiktok", etapa="MOFU", formato="reel")
+    H.login(H.usuario("e@x.com", marcas=[(pid, "editor")]))
+    ids = lambda q: {i["id"] for i in cli.get(f"/brands/pensionmas/queue{q}").json()}
+    assert ids("") == {viejo, ig, fb, tt}
+    assert ids("?plataforma=instagram") == {viejo, ig}
+    assert ids("?plataforma=facebook") == {fb}
+    assert ids("?plataforma=tiktok") == {tt}
+    fila = next(i for i in cli.get("/brands/pensionmas/queue?plataforma=facebook").json())
+    assert (fila["plataforma"], fila["etapa"], fila["formato"]) == ("facebook", "BOFU", "historia")

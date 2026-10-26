@@ -81,12 +81,13 @@ def estado_de(fila: dict[str, Any]) -> str:
 
 
 def listar(cx, account_id: int, *, desde: str | None = None, hasta: str | None = None,
-           estado: str | None = None) -> list[dict[str, Any]]:
+           estado: str | None = None, plataforma: str | None = None) -> list[dict[str, Any]]:
     """Filas de `content_queue` de la marca, con estado derivado (campo "estado").
 
     `desde`/`hasta` (ISO) filtran por `scheduled_datetime`, o por `created_at`
     si la fila todavía no tiene horario asignado. `estado` filtra por el
-    estado derivado (post-cómputo, no la columna `status` cruda). Nunca
+    estado derivado (post-cómputo, no la columna `status` cruda). `plataforma`
+    filtra por la columna (NULL cuenta como instagram). Nunca
     devuelve filas de otra cuenta.
     """
     filas = db.rows(
@@ -101,6 +102,8 @@ def listar(cx, account_id: int, *, desde: str | None = None, hasta: str | None =
         if desde and momento < desde:
             continue
         if hasta and momento > hasta:
+            continue
+        if plataforma and (fila.get("plataforma") or "instagram") != plataforma:
             continue
         fila["estado"] = estado_de(fila)
         if estado and fila["estado"] != estado:
